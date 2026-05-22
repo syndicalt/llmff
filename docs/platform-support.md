@@ -45,7 +45,7 @@ Every packaged binary smoke gate exercises the same CLI surface:
 
 - `llmff --version`
 - `llmff stages list`
-- `llmff inspect examples/json-repair.yaml --mock llmff:good`
+- `llmff inspect examples/json-repair.yaml`
 - one deterministic mock-backed `llmff run`
 
 The current gates cover raw archives, Debian packages, macOS package payloads,
@@ -56,7 +56,14 @@ signing and notarization wiring.
 Before creating or pushing a release tag, run the metadata preflight:
 
 ```bash
-scripts/release-preflight.sh v0.1.1
+scripts/release-preflight.sh v0.1.2
+```
+
+After release CI finishes, verify the published GitHub Release assets from a
+host that can run at least one packaged artifact:
+
+```bash
+scripts/check-release-assets.sh v0.1.2
 ```
 
 ## Source-Build Fallback
@@ -64,7 +71,7 @@ scripts/release-preflight.sh v0.1.1
 Users with a Rust toolchain can install from a tagged release:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v0.1.1 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v0.1.2 llmff
 ```
 
 That path remains supported even after native installers are published.

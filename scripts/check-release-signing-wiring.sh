@@ -50,6 +50,6 @@ require_text '.github/workflows/release-artifacts.yml' 'APPLE_INSTALLER_CERT_P12
 require_text 'docs/platform-support.md' 'scripts/check-release-signing-gates.sh --platform windows'
 require_text 'docs/platform-support.md' 'scripts/check-release-signing-gates.sh --platform macos'
 require_text 'docs/release-readiness.md' 'signing and notarization release gates'
-require_text 'docs/roadmap.md' 'Signing gate implementation slice'
+require_text 'docs/roadmap.md' 'Tag-only signing credential gates'
 require_text 'scripts/release-preflight.sh' 'bash scripts/check-windows-signing-wiring.sh'
 require_text 'scripts/release-preflight.sh' 'bash scripts/check-macos-signing-wiring.sh'

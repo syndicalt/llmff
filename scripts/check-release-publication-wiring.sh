@@ -16,4 +16,9 @@ require_text() {
 require_text "$workflow" 'gh release view "$GITHUB_REF_NAME"'
 require_text "$workflow" 'gh release create "$GITHUB_REF_NAME"'
 require_text "$workflow" 'gh release upload "$GITHUB_REF_NAME"'
-require_text "$readiness" "creates the GitHub Release when the tag does not already have one"
+require_text "scripts/check-release-assets.sh" 'gh release view "$tag"'
+require_text "scripts/check-release-assets.sh" 'gh release download "$tag"'
+require_text "scripts/check-release-assets.sh" 'scripts/smoke-archive.sh'
+require_text "$readiness" "creates the GitHub Release when"
+require_text "$readiness" "the tag does not already have one"
+require_text "$readiness" "scripts/check-release-assets.sh v0.1.2"

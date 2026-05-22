@@ -53,8 +53,14 @@ require_text "$doc" 'scripts/smoke-macos-pkg.sh'
 require_text "$doc" 'scripts/release-preflight.sh'
 require_text "$doc" 'scripts/check-release-signing-gates.sh --platform windows'
 require_text "$doc" 'scripts/check-release-signing-gates.sh --platform macos'
+require_text "$doc" 'llmff inspect examples/json-repair.yaml'
 
 require_text 'README.md' 'docs/platform-support.md'
-require_text 'README.md' 'scripts/release-preflight.sh v0.1.1'
+require_text 'README.md' 'scripts/release-preflight.sh v0.1.2'
 require_text 'docs/release-readiness.md' 'docs/platform-support.md'
-require_text 'docs/release-readiness.md' 'scripts/release-preflight.sh v0.1.1'
+require_text 'docs/release-readiness.md' 'scripts/release-preflight.sh v0.1.2'
+
+if grep -Eq 'Packaged installers .*on the roadmap|Future Capability Tracks|--mock llmff:good|Add published-asset verification' README.md docs/roadmap.md docs/platform-support.md; then
+  printf 'error: release docs still describe completed package or capability tracks as future work\n' >&2
+  exit 1
+fi

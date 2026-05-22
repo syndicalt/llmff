@@ -13,7 +13,7 @@ cargo install --git https://github.com/syndicalt/llmff llmff
 Install a tagged release:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v0.1.1 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v0.1.2 llmff
 ```
 
 For a local checkout:
@@ -41,26 +41,32 @@ scripts/smoke-install.sh --path .
 Smoke test a generated release archive without installing:
 
 ```bash
-scripts/smoke-archive.sh --archive dist/llmff-0.1.1-x86_64-unknown-linux-gnu.tar.gz
+scripts/smoke-archive.sh --archive dist/llmff-0.1.2-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 Run the release metadata preflight before creating or pushing a release tag:
 
 ```bash
-scripts/release-preflight.sh v0.1.1
+scripts/release-preflight.sh v0.1.2
+```
+
+Verify a published release's assets, checksums, and host-compatible packages:
+
+```bash
+scripts/check-release-assets.sh v0.1.2
 ```
 
 Generate and validate Windows MSI packaging metadata:
 
 ```bash
-scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.1 --target x86_64-pc-windows-msvc --out-dir dist --emit-wxs-only
+scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.2 --target x86_64-pc-windows-msvc --out-dir dist --emit-wxs-only
 ```
 
 Build a Windows MSI on a Windows host:
 
 ```bash
 dotnet tool restore
-scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.1 --target x86_64-pc-windows-msvc --out-dir dist
+scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.2 --target x86_64-pc-windows-msvc --out-dir dist
 ```
 
 Smoke test a staged Windows MSI payload without installing:
@@ -72,26 +78,24 @@ scripts/smoke-windows-msi.sh --payload-root dist/windows-msi-smoke-root
 Generate and validate macOS installer payload metadata:
 
 ```bash
-scripts/package-macos-pkg.sh --binary target/release/llmff --version 0.1.1 --target aarch64-apple-darwin --out-dir dist --emit-payload-only
+scripts/package-macos-pkg.sh --binary target/release/llmff --version 0.1.2 --target aarch64-apple-darwin --out-dir dist --emit-payload-only
 ```
 
 Smoke test a generated macOS installer payload without installing:
 
 ```bash
-scripts/smoke-macos-pkg.sh --payload-root dist/llmff-0.1.1-aarch64-apple-darwin.pkgroot
+scripts/smoke-macos-pkg.sh --payload-root dist/llmff-0.1.2-aarch64-apple-darwin.pkgroot
 ```
 
 Smoke test a generated Debian package without root:
 
 ```bash
-scripts/smoke-deb.sh --deb dist/llmff_0.1.1_amd64.deb
+scripts/smoke-deb.sh --deb dist/llmff_0.1.2_amd64.deb
 ```
 
-Packaged installers for Windows, macOS, Ubuntu, Debian, and Arch Linux are on the roadmap; current releases install through Cargo from GitHub.
+Release tags build compressed binary archives, Ubuntu/Debian `.deb` packages, Arch `PKGBUILD` metadata, signed Windows executable archives, signed Windows MSI packages, and signed/notarized macOS `.pkg` packages in CI. Tag-triggered installer jobs enforce Authenticode and Apple signing/notarization credential gates before Windows or macOS installer publication; manual dispatch remains available for unsigned artifact testing. See [`docs/platform-support.md`](docs/platform-support.md) for the current target matrix.
 
-Release tags also build compressed binary archives in CI as the first packaged-artifact slice. Ubuntu/Debian `.deb` packaging, Arch `PKGBUILD` metadata, signed Windows executable archives, signed Windows MSI packaging, and signed/notarized macOS `.pkg` packaging are wired into release artifact jobs. Tag-triggered installer jobs enforce Authenticode and Apple signing/notarization credential gates before Windows or macOS installer publication; manual dispatch remains available for unsigned artifact testing. See [`docs/platform-support.md`](docs/platform-support.md) for the current target matrix.
-
-Tagged release builds publish archives, checksums, `.deb` packages, and Arch metadata as GitHub Release assets. Manual workflow runs keep the same files as Actions artifacts.
+Tagged release builds publish archives, checksums, `.deb` packages, Arch metadata, Windows MSI packages, and macOS `.pkg` packages as GitHub Release assets. Manual workflow runs keep the same files as Actions artifacts.
 
 ## Current Scope
 
