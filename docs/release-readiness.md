@@ -22,8 +22,8 @@ At this point it is reasonable to say: `llmff` is installable from GitHub for ea
 
 Do not describe `llmff` as broadly released until every item in this section is checked.
 
-Release `v0.1.0` was verified with:
+Release `v0.1.1` was verified with:
 
 ```bash
-scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.0
+scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.1
 ```
