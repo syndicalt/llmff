@@ -82,6 +82,7 @@ mod tests {
             model: None,
             temperature: None,
             schema: None,
+            schema_path: None,
             when: None,
         };
 
@@ -109,6 +110,7 @@ mod tests {
             model: None,
             temperature: None,
             schema: Some(r#"{"type":"object","required":["answer"]}"#.to_string()),
+            schema_path: None,
             when: None,
         };
 
