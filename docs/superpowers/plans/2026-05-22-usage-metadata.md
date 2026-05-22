@@ -194,7 +194,7 @@ git commit -m "feat: parse backend usage metadata"
 - Modify: `crates/llmff-core/src/trace.rs`
 - Modify: `crates/llmff-core/src/engine.rs`
 
-- [ ] **Step 1: Write failing trace test**
+- [x] **Step 1: Write failing trace test**
 
 Add this helper backend inside `engine.rs` tests:
 
@@ -288,7 +288,7 @@ outputs:
 }
 ```
 
-- [ ] **Step 2: Run trace test to verify RED**
+- [x] **Step 2: Run trace test to verify RED**
 
 Run:
 
@@ -298,7 +298,7 @@ cargo test -p llmff-core trace_events_include_model_usage_metadata
 
 Expected: FAIL because trace events do not include usage fields.
 
-- [ ] **Step 3: Add trace fields and engine usage tracking**
+- [x] **Step 3: Add trace fields and engine usage tracking**
 
 In `TraceEvent`, add optional fields:
 
@@ -326,7 +326,7 @@ Make non-model stages return `StageOutcome::without_usage(status)` and model sta
 
 When writing `TraceEvent`, set the usage fields from metadata.
 
-- [ ] **Step 4: Run trace test to verify GREEN and commit**
+- [x] **Step 4: Run trace test to verify GREEN and commit**
 
 Run:
 

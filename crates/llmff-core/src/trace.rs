@@ -30,6 +30,12 @@ pub struct TraceEvent {
     pub tool_target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_tokens: Option<u64>,
 }
 
 pub struct TraceWriter {
