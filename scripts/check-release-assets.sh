@@ -113,7 +113,7 @@ expected_assets=(
   "llmff_${version}_amd64.deb"
   "llmff_${version}_amd64.deb.sha256"
   "PKGBUILD"
-  ".SRCINFO"
+  "llmff-${version}-arch.SRCINFO"
 )
 
 asset_list="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')"

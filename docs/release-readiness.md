@@ -58,7 +58,9 @@ Current packaged artifact targets and installer assumptions are documented in
 
 After release CI completes for `v0.1.2`, verify the published GitHub Release
 contains the expected archive, checksum, Debian, Arch metadata, MSI, and macOS
-package assets before advertising native installers:
+package assets. Release publication is handled by a dependent publish job after
+the full artifact matrix succeeds, so failed signing gates do not publish a
+partial native-installer release:
 
 ```bash
 scripts/check-release-assets.sh v0.1.2
