@@ -2,9 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::UNIX_EPOCH;
 
 use jsonschema::JSONSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::error::LlmffError;
 use crate::manifest::StageSpec;
@@ -53,12 +55,13 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             name: "retrieve",
             kind: "retrieval",
             required_fields: &["from", "documents"],
-            optional_fields: &["top_k", "strategy", "command"],
+            optional_fields: &["top_k", "strategy", "command", "index"],
             capabilities: &[
                 "command-retrieval",
                 "local-documents",
                 "lexical-scoring",
                 "local-embedding-scoring",
+                "persistent-vector-index",
             ],
         },
         StageMetadata {
@@ -318,6 +321,11 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
     if strategy == RetrieveStrategy::Command {
         return command_retrieve(spec, cwd, query);
     }
+    let indexed_documents = if strategy == RetrieveStrategy::Embedding {
+        load_retrieve_documents(spec, cwd)?
+    } else {
+        RetrieveDocuments::unindexed(read_retrieve_documents(spec, cwd)?)
+    };
     let query_terms = tokenize(&query);
     let query_embedding = match strategy {
         RetrieveStrategy::Lexical => BTreeMap::new(),
@@ -326,19 +334,13 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
     };
     let mut matches = Vec::new();
 
-    for document in &spec.documents {
-        let text = std::fs::read_to_string(resolve_path(cwd, document)).map_err(|error| {
-            LlmffError::StageExecution {
-                stage_id: spec.id.clone(),
-                message: format!("failed to read retrieve document `{document}`: {error}"),
-            }
-        })?;
-        let score = score_text(strategy, &query_terms, &query_embedding, &text);
+    for document in &indexed_documents.documents {
+        let score = score_document(strategy, &query_terms, &query_embedding, document);
         if score.rank > 0.0 {
             matches.push(RetrieveMatch {
-                path: document.clone(),
+                path: document.path.clone(),
                 score,
-                text,
+                text: document.text.clone(),
             });
         }
     }
@@ -361,7 +363,7 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
         matches.truncate(top_k);
     }
 
-    Ok(StageStatus::Success(Value::Json(serde_json::json!({
+    let mut output = serde_json::json!({
         "query": query,
         "strategy": strategy.as_str(),
         "matches": matches
@@ -374,7 +376,16 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
                 })
             })
             .collect::<Vec<_>>(),
-    }))))
+    });
+    if let Some(index) = indexed_documents.index {
+        output["index"] = serde_json::json!({
+            "path": index.path,
+            "reused_documents": index.reused_documents,
+            "indexed_documents": index.indexed_documents,
+        });
+    }
+
+    Ok(StageStatus::Success(Value::Json(output)))
 }
 
 fn rerank(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageStatus, LlmffError> {
@@ -531,6 +542,240 @@ fn command_retrieve(
     )
 }
 
+fn load_retrieve_documents(spec: &StageSpec, cwd: &Path) -> Result<RetrieveDocuments, LlmffError> {
+    let Some(index_path) = spec.index.as_deref() else {
+        return Ok(RetrieveDocuments::unindexed(read_retrieve_documents(
+            spec, cwd,
+        )?));
+    };
+    let resolved_index_path = resolve_path(cwd, index_path);
+    let existing_index = read_retrieve_index(spec, &resolved_index_path)?;
+    let mut existing_entries = existing_index
+        .records
+        .into_iter()
+        .map(|entry| (entry.path.clone(), entry))
+        .collect::<BTreeMap<_, _>>();
+    let mut records = Vec::new();
+    let mut documents = Vec::new();
+    let mut reused_documents = 0usize;
+    let mut indexed_documents = 0usize;
+
+    for document in &spec.documents {
+        let metadata = retrieve_document_metadata(spec, cwd, document)?;
+        let existing = existing_entries.remove(document);
+        let record = if let Some(record) = existing {
+            if record.metadata == metadata {
+                reused_documents += 1;
+                record
+            } else {
+                indexed_documents += 1;
+                build_retrieve_index_record(spec, cwd, document, metadata)?
+            }
+        } else {
+            indexed_documents += 1;
+            build_retrieve_index_record(spec, cwd, document, metadata)?
+        };
+        documents.push(IndexedRetrieveDocument {
+            path: record.path.clone(),
+            text: record.text.clone(),
+            embedding: record.embedding.clone(),
+        });
+        records.push(record);
+    }
+
+    write_retrieve_index(
+        spec,
+        &resolved_index_path,
+        &RetrieveIndexRecord {
+            version: RETRIEVE_INDEX_VERSION,
+            strategy: RetrieveStrategy::Embedding.as_str().to_string(),
+            records,
+        },
+    )?;
+
+    Ok(RetrieveDocuments {
+        documents,
+        index: Some(RetrieveIndexUsage {
+            path: index_path.to_string(),
+            reused_documents,
+            indexed_documents,
+        }),
+    })
+}
+
+fn read_retrieve_documents(
+    spec: &StageSpec,
+    cwd: &Path,
+) -> Result<Vec<IndexedRetrieveDocument>, LlmffError> {
+    spec.documents
+        .iter()
+        .map(|document| {
+            let text = read_retrieve_document_text(spec, cwd, document)?;
+            Ok(IndexedRetrieveDocument {
+                path: document.clone(),
+                embedding: hashed_embedding(&text),
+                text,
+            })
+        })
+        .collect()
+}
+
+fn read_retrieve_index(
+    spec: &StageSpec,
+    index_path: &Path,
+) -> Result<RetrieveIndexRecord, LlmffError> {
+    if !index_path.exists() {
+        return Ok(RetrieveIndexRecord {
+            version: RETRIEVE_INDEX_VERSION,
+            strategy: RetrieveStrategy::Embedding.as_str().to_string(),
+            records: Vec::new(),
+        });
+    }
+
+    let source =
+        std::fs::read_to_string(index_path).map_err(|error| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!(
+                "failed to read retrieve index `{}`: {error}",
+                index_path.display()
+            ),
+        })?;
+    let index: RetrieveIndexRecord =
+        serde_json::from_str(&source).map_err(|error| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("invalid retrieve index `{}`: {error}", index_path.display()),
+        })?;
+    if index.version != RETRIEVE_INDEX_VERSION {
+        return Err(LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!(
+                "unsupported retrieve index `{}` version {}",
+                index_path.display(),
+                index.version
+            ),
+        });
+    }
+    if index.strategy != RetrieveStrategy::Embedding.as_str() {
+        return Err(LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!(
+                "retrieve index `{}` strategy must be embedding",
+                index_path.display()
+            ),
+        });
+    }
+
+    Ok(index)
+}
+
+fn build_retrieve_index_record(
+    spec: &StageSpec,
+    cwd: &Path,
+    document: &str,
+    metadata: RetrieveDocumentMetadata,
+) -> Result<RetrieveIndexEntry, LlmffError> {
+    let text = read_retrieve_document_text(spec, cwd, document)?;
+    Ok(RetrieveIndexEntry {
+        path: document.to_string(),
+        metadata,
+        embedding: hashed_embedding(&text),
+        text,
+    })
+}
+
+fn retrieve_document_metadata(
+    spec: &StageSpec,
+    cwd: &Path,
+    document: &str,
+) -> Result<RetrieveDocumentMetadata, LlmffError> {
+    let path = resolve_path(cwd, document);
+    let metadata = std::fs::metadata(&path).map_err(|error| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message: format!("failed to stat retrieve document `{document}`: {error}"),
+    })?;
+    let modified = metadata
+        .modified()
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("failed to read retrieve document `{document}` mtime: {error}"),
+        })?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("invalid retrieve document `{document}` mtime: {error}"),
+        })?;
+
+    Ok(RetrieveDocumentMetadata {
+        len: metadata.len(),
+        modified_unix_nanos: modified.as_nanos(),
+    })
+}
+
+fn read_retrieve_document_text(
+    spec: &StageSpec,
+    cwd: &Path,
+    document: &str,
+) -> Result<String, LlmffError> {
+    std::fs::read_to_string(resolve_path(cwd, document)).map_err(|error| {
+        LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("failed to read retrieve document `{document}`: {error}"),
+        }
+    })
+}
+
+fn write_retrieve_index(
+    spec: &StageSpec,
+    index_path: &Path,
+    index: &RetrieveIndexRecord,
+) -> Result<(), LlmffError> {
+    let parent = index_path
+        .parent()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!(
+                "retrieve index `{}` has no parent directory",
+                index_path.display()
+            ),
+        })?;
+    if !parent.as_os_str().is_empty() {
+        std::fs::create_dir_all(parent).map_err(|error| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!(
+                "failed to create retrieve index directory `{}`: {error}",
+                parent.display()
+            ),
+        })?;
+    }
+    let encoded = serde_json::to_vec_pretty(index).map_err(LlmffError::Json)?;
+    let tmp_path = index_path.with_extension(format!(
+        "tmp-{}",
+        retrieve_index_write_digest(index_path, &encoded)
+    ));
+    std::fs::write(&tmp_path, encoded).map_err(|error| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message: format!(
+            "failed to write retrieve index `{}`: {error}",
+            tmp_path.display()
+        ),
+    })?;
+    std::fs::rename(&tmp_path, index_path).map_err(|error| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message: format!(
+            "failed to move retrieve index `{}` into `{}`: {error}",
+            tmp_path.display(),
+            index_path.display()
+        ),
+    })
+}
+
+fn retrieve_index_write_digest(index_path: &Path, encoded: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(index_path.as_os_str().as_encoded_bytes());
+    hasher.update(encoded);
+    format!("{:x}", hasher.finalize())
+}
+
 fn execute_json_command(
     spec: &StageSpec,
     cwd: &Path,
@@ -642,6 +887,55 @@ impl RetrieveStrategy {
     }
 }
 
+const RETRIEVE_INDEX_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+struct RetrieveIndexRecord {
+    version: u32,
+    strategy: String,
+    records: Vec<RetrieveIndexEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+struct RetrieveIndexEntry {
+    path: String,
+    metadata: RetrieveDocumentMetadata,
+    text: String,
+    embedding: BTreeMap<String, f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+struct RetrieveDocumentMetadata {
+    len: u64,
+    modified_unix_nanos: u128,
+}
+
+struct RetrieveDocuments {
+    documents: Vec<IndexedRetrieveDocument>,
+    index: Option<RetrieveIndexUsage>,
+}
+
+impl RetrieveDocuments {
+    fn unindexed(documents: Vec<IndexedRetrieveDocument>) -> Self {
+        Self {
+            documents,
+            index: None,
+        }
+    }
+}
+
+struct RetrieveIndexUsage {
+    path: String,
+    reused_documents: usize,
+    indexed_documents: usize,
+}
+
+struct IndexedRetrieveDocument {
+    path: String,
+    text: String,
+    embedding: BTreeMap<String, f64>,
+}
+
 fn score_text(
     strategy: RetrieveStrategy,
     query_terms: &BTreeSet<String>,
@@ -651,6 +945,21 @@ fn score_text(
     match strategy {
         RetrieveStrategy::Lexical => lexical_score(query_terms, &tokenize(text)),
         RetrieveStrategy::Embedding => cosine_similarity(query_embedding, &hashed_embedding(text)),
+        RetrieveStrategy::Command => unreachable!("command strategy is executed externally"),
+    }
+}
+
+fn score_document(
+    strategy: RetrieveStrategy,
+    query_terms: &BTreeSet<String>,
+    query_embedding: &BTreeMap<String, f64>,
+    document: &IndexedRetrieveDocument,
+) -> RetrieveScore {
+    match strategy {
+        RetrieveStrategy::Lexical => {
+            score_text(strategy, query_terms, query_embedding, &document.text)
+        }
+        RetrieveStrategy::Embedding => cosine_similarity(query_embedding, &document.embedding),
         RetrieveStrategy::Command => unreachable!("command strategy is executed externally"),
     }
 }
@@ -886,6 +1195,7 @@ mod tests {
             top_k: None,
             strategy: None,
             key: None,
+            index: None,
         };
 
         let output = execute_deterministic_stage(
@@ -935,6 +1245,7 @@ mod tests {
             top_k: None,
             strategy: None,
             key: None,
+            index: None,
         };
 
         let output = execute_deterministic_stage(
@@ -988,6 +1299,7 @@ mod tests {
             top_k: None,
             strategy: None,
             key: None,
+            index: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1038,6 +1350,7 @@ mod tests {
             top_k: None,
             strategy: None,
             key: None,
+            index: None,
         };
 
         let error = execute_deterministic_stage(
@@ -1097,6 +1410,7 @@ mod tests {
             top_k: Some(1),
             strategy: None,
             key: None,
+            index: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1165,6 +1479,7 @@ mod tests {
             top_k: Some(1),
             strategy: Some("embedding".to_string()),
             key: None,
+            index: None,
         };
 
         let output =
@@ -1178,6 +1493,95 @@ mod tests {
         assert_eq!(json["matches"].as_array().unwrap().len(), 1);
         assert_eq!(json["matches"][0]["path"], "docs/trust.txt");
         assert!(json["matches"][0]["score"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn retrieve_stage_persists_and_reuses_embedding_index() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("docs")).unwrap();
+        std::fs::write(
+            dir.path().join("docs/trust.txt"),
+            "Trust systems keep state.",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("docs/python.txt"),
+            "Python notebooks handle tables.",
+        )
+        .unwrap();
+        let index_path = dir.path().join(".llmff/retrieve/context.index.json");
+        let spec = StageSpec {
+            id: "retrieve_context".to_string(),
+            op: "retrieve".to_string(),
+            input: None,
+            from: Some("load_prompt".to_string()),
+            path: None,
+            model: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            seed: None,
+            response_format: None,
+            stop: Vec::new(),
+            sampler: None,
+            schema: None,
+            schema_path: None,
+            when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
+            command: None,
+            transport: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
+            documents: vec!["docs/python.txt".to_string(), "docs/trust.txt".to_string()],
+            top_k: Some(1),
+            strategy: Some("embedding".to_string()),
+            key: None,
+            index: Some(".llmff/retrieve/context.index.json".to_string()),
+        };
+
+        let first =
+            execute_deterministic_stage(&spec, Some(Value::Text("rust".to_string())), dir.path())
+                .expect("first indexed retrieve should run");
+        let StageStatus::Success(Value::Json(first_json)) = first else {
+            panic!("retrieve should return JSON");
+        };
+        assert_eq!(
+            first_json["index"]["path"],
+            ".llmff/retrieve/context.index.json"
+        );
+        assert_eq!(first_json["index"]["reused_documents"], 0);
+        assert_eq!(first_json["index"]["indexed_documents"], 2);
+        assert!(index_path.exists());
+
+        let second =
+            execute_deterministic_stage(&spec, Some(Value::Text("rust".to_string())), dir.path())
+                .expect("second indexed retrieve should run");
+        let StageStatus::Success(Value::Json(second_json)) = second else {
+            panic!("retrieve should return JSON");
+        };
+        assert_eq!(second_json["index"]["reused_documents"], 2);
+        assert_eq!(second_json["index"]["indexed_documents"], 0);
+        assert_eq!(second_json["matches"][0]["path"], "docs/trust.txt");
+
+        std::fs::write(
+            dir.path().join("docs/python.txt"),
+            "Python tables can carry rust trust state.",
+        )
+        .unwrap();
+        let third =
+            execute_deterministic_stage(&spec, Some(Value::Text("rust".to_string())), dir.path())
+                .expect("changed document should be re-indexed");
+        let StageStatus::Success(Value::Json(third_json)) = third else {
+            panic!("retrieve should return JSON");
+        };
+        assert_eq!(third_json["index"]["reused_documents"], 1);
+        assert_eq!(third_json["index"]["indexed_documents"], 1);
     }
 
     #[test]
@@ -1214,6 +1618,7 @@ mod tests {
             top_k: Some(1),
             strategy: Some("embedding".to_string()),
             key: None,
+            index: None,
         };
         let input = Value::Json(serde_json::json!({
             "query": "rust",
@@ -1282,6 +1687,7 @@ mod tests {
             top_k: None,
             strategy: None,
             key: None,
+            index: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1342,6 +1748,7 @@ mod tests {
             top_k: None,
             strategy: None,
             key: None,
+            index: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1402,6 +1809,7 @@ mod tests {
             top_k: None,
             strategy: None,
             key: None,
+            index: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1457,6 +1865,7 @@ mod tests {
             top_k: None,
             strategy: None,
             key: None,
+            index: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1514,6 +1923,7 @@ mod tests {
             top_k: None,
             strategy: None,
             key: None,
+            index: None,
         };
 
         let error = execute_deterministic_stage(

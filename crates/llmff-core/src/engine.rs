@@ -545,6 +545,12 @@ impl Engine {
                         "retrieve command strategy requires command",
                     ));
                 }
+                if stage.index.is_some() && stage.strategy.as_deref() != Some("embedding") {
+                    return Err(stage_validation_error(
+                        stage,
+                        "retrieve index requires embedding strategy",
+                    ));
+                }
                 if let Some(0) = stage.top_k {
                     return Err(stage_validation_error(
                         stage,
@@ -2455,6 +2461,38 @@ graph:
         assert!(error
             .to_string()
             .contains("retrieve strategy must be lexical, embedding, or command"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_retrieve_index_for_command_strategy() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: retrieve_context
+    op: retrieve
+    from: load_prompt
+    documents: [docs/rust.txt]
+    strategy: command
+    command: ["/bin/cat"]
+    index: .llmff/retrieve/context.index.json
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("command retrieve index should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("retrieve index requires embedding strategy"));
     }
 
     #[test]

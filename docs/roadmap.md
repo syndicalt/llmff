@@ -134,7 +134,7 @@ Rerank implementation slice:
 - `rerank` accepts retrieve-shaped JSON and rescores candidates with `strategy: lexical` or `strategy: embedding`.
 - The first reranker is deterministic and local, preserves candidate metadata, replaces scores, and applies optional `top_k` after sorting.
 - `rerank` supports `strategy: command` in manifests, sending retrieve-shaped JSON and optional `top_k` to stdin/stdout command providers for learned reranker models.
-- Persistent vector indexes remain future work.
+- `retrieve` supports persistent local embedding indexes with `index: <path>`, reusing unchanged document vectors across runs and re-indexing changed documents.
 
 Plugin discovery implementation slice:
 

@@ -1061,6 +1061,43 @@ fn inline_graph_run_executes_embedding_retrieve_strategy() {
 }
 
 #[test]
+fn inline_graph_run_reuses_persistent_embedding_retrieve_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let docs = dir.path().join("docs");
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("matches.json");
+    let index = dir.path().join(".llmff/retrieve/context.index.json");
+    std::fs::create_dir(&docs).unwrap();
+    std::fs::write(&prompt, "rust").unwrap();
+    std::fs::write(docs.join("trust.txt"), "Trust systems keep state.").unwrap();
+    std::fs::write(docs.join("python.txt"), "Python notebooks handle tables.").unwrap();
+
+    for _ in 0..2 {
+        let mut cmd = Command::cargo_bin("llmff").unwrap();
+        cmd.current_dir(dir.path())
+            .args([
+                "run",
+                "-i",
+                prompt.to_str().unwrap(),
+                "-g",
+                "load | retrieve(documents=docs/python.txt;docs/trust.txt,top_k=1,strategy=embedding,index=.llmff/retrieve/context.index.json) | write(matches.json)",
+            ])
+            .assert()
+            .success();
+    }
+
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap())
+        .expect("retrieve output should be JSON");
+
+    assert!(index.exists());
+    assert_eq!(json["strategy"], "embedding");
+    assert_eq!(json["index"]["path"], ".llmff/retrieve/context.index.json");
+    assert_eq!(json["index"]["reused_documents"], 2);
+    assert_eq!(json["index"]["indexed_documents"], 0);
+    assert_eq!(json["matches"][0]["path"], "docs/trust.txt");
+}
+
+#[test]
 fn run_executes_rerank_stage() {
     let dir = tempfile::tempdir().unwrap();
     let candidates = dir.path().join("matches.json");
