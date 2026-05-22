@@ -273,6 +273,52 @@ graph:
 }
 
 #[test]
+fn inspect_rejects_field_route_from_text_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let template = dir.path().join("fast.tmpl");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, r#"{"kind":"simple"}"#).unwrap();
+    std::fs::write(&template, "fast").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: fast_answer
+    op: template
+    from: load_prompt
+    path: {}
+  - id: choose
+    op: route
+    from: load_prompt
+    field: kind
+    cases:
+      simple: fast_answer
+"#,
+            prompt.display(),
+            template.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["inspect", manifest.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "field route requires JSON source `load_prompt`, got text",
+        ));
+}
+
+#[test]
 fn trace_command_summarizes_trace_jsonl() {
     let dir = tempfile::tempdir().unwrap();
     let trace = dir.path().join("trace.jsonl");

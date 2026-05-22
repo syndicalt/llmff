@@ -59,6 +59,7 @@ impl Engine {
         for stage in graph.stages() {
             self.validate_stage(stage)?;
         }
+        validate_stage_types(&graph)?;
 
         Ok(graph)
     }
@@ -575,6 +576,80 @@ fn stage_validation_error(stage: &StageSpec, message: impl Into<String>) -> Llmf
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StageValueKind {
+    Any,
+    Text,
+    Json,
+}
+
+impl StageValueKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Any => "any",
+            Self::Text => "text",
+            Self::Json => "json",
+        }
+    }
+}
+
+fn validate_stage_types(graph: &Graph) -> Result<(), LlmffError> {
+    let mut kinds = BTreeMap::new();
+
+    for stage in graph.stages() {
+        if let Some(field) = &stage.field {
+            if stage.op == "route" {
+                validate_field_route_source_kind(stage, field, &kinds)?;
+            }
+        }
+
+        let kind = infer_stage_value_kind(stage, &kinds);
+        kinds.insert(stage.id.clone(), kind);
+    }
+
+    Ok(())
+}
+
+fn validate_field_route_source_kind(
+    stage: &StageSpec,
+    _field: &str,
+    kinds: &BTreeMap<String, StageValueKind>,
+) -> Result<(), LlmffError> {
+    let Some(source_id) = stage.from.as_ref() else {
+        return Ok(());
+    };
+    let kind = kinds.get(source_id).copied().unwrap_or(StageValueKind::Any);
+    if kind == StageValueKind::Text {
+        return Err(stage_validation_error(
+            stage,
+            format!(
+                "field route requires JSON source `{source_id}`, got {}",
+                kind.label()
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+fn infer_stage_value_kind(
+    stage: &StageSpec,
+    kinds: &BTreeMap<String, StageValueKind>,
+) -> StageValueKind {
+    match stage.op.as_str() {
+        "validate_json" => StageValueKind::Json,
+        "write" => stage
+            .from
+            .as_ref()
+            .and_then(|parent| kinds.get(parent))
+            .copied()
+            .unwrap_or(StageValueKind::Any),
+        "route" => StageValueKind::Any,
+        "load" | "system" | "template" | "infer" | "repair" | "tool" => StageValueKind::Text,
+        _ => StageValueKind::Any,
+    }
+}
+
 #[derive(Default)]
 struct TraceMetadata {
     model: Option<String>,
@@ -992,6 +1067,76 @@ graph:
         assert!(error
             .to_string()
             .contains("no backend configured for `openai:gpt-test`"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_field_route_from_text_source() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: fast_answer
+    op: template
+    from: load_prompt
+    path: fast.tmpl
+  - id: choose
+    op: route
+    from: load_prompt
+    field: kind
+    cases:
+      simple: fast_answer
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("field route from text source should be rejected");
+
+        assert!(error.to_string().contains(
+            "stage `choose` failed: field route requires JSON source `load_prompt`, got text"
+        ));
+    }
+
+    #[test]
+    fn validate_manifest_accepts_field_route_from_json_source() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: validate
+    op: validate_json
+    from: load_prompt
+    schema: '{"type":"object","required":["kind"]}'
+  - id: fast_answer
+    op: template
+    from: load_prompt
+    path: fast.tmpl
+  - id: choose
+    op: route
+    from: validate
+    field: kind
+    cases:
+      simple: fast_answer
+"#,
+        )
+        .unwrap();
+
+        Engine::new()
+            .validate_manifest(manifest)
+            .expect("field route from validate_json should validate");
     }
 
     #[tokio::test]
