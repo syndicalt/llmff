@@ -148,9 +148,13 @@ fn summarize_trace_event(event: &serde_json::Value) -> Option<String> {
         )),
         "stage_finished" => {
             let mut parts = vec![
-                string_field(event, "stage_id").unwrap_or("unknown").to_string(),
+                string_field(event, "stage_id")
+                    .unwrap_or("unknown")
+                    .to_string(),
                 string_field(event, "op").unwrap_or("unknown").to_string(),
-                string_field(event, "status").unwrap_or("unknown").to_string(),
+                string_field(event, "status")
+                    .unwrap_or("unknown")
+                    .to_string(),
                 format!("{}ms", integer_field(event, "duration_ms").unwrap_or(0)),
             ];
 
