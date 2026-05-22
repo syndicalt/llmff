@@ -117,6 +117,113 @@ fn backends_list_json_prints_backend_capabilities() {
 }
 
 #[test]
+fn backends_list_json_includes_cli_registered_backend_metadata() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+
+    let output = cmd
+        .args([
+            "backends",
+            "list",
+            "--format",
+            "json",
+            "--backend",
+            "openai_alt=https://api.example.test/v1",
+            "--ollama",
+            "local=http://localhost:11434",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let backends: serde_json::Value =
+        serde_json::from_slice(&output).expect("backend list should be valid JSON");
+
+    let openai_alt = backends
+        .as_array()
+        .expect("backend list should be an array")
+        .iter()
+        .find(|backend| backend["name"] == "openai_alt")
+        .expect("CLI OpenAI-compatible backend should be listed");
+    assert_eq!(openai_alt["kind"], "openai-compatible");
+    assert_eq!(
+        openai_alt["registration_flag"],
+        "--backend openai_alt=<base-url>"
+    );
+    assert_eq!(openai_alt["requires_api_key"], true);
+    assert!(openai_alt["model_aliases"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("openai_alt:<model>")));
+
+    let local = backends
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|backend| backend["name"] == "local")
+        .expect("CLI Ollama backend should be listed");
+    assert_eq!(local["kind"], "ollama");
+    assert_eq!(local["registration_flag"], "--ollama local=<base-url>");
+    assert_eq!(local["requires_api_key"], false);
+}
+
+#[test]
+fn backends_list_json_includes_plugin_backend_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join("plugins");
+    let plugin = plugin_dir.join("model-plugin");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: model-plugin
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: local-echo
+    entrypoint: /bin/false
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    let output = cmd
+        .args([
+            "backends",
+            "list",
+            "--format",
+            "json",
+            "--plugin-dir",
+            plugin_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let backends: serde_json::Value =
+        serde_json::from_slice(&output).expect("backend list should be valid JSON");
+
+    let plugin_backend = backends
+        .as_array()
+        .expect("backend list should be an array")
+        .iter()
+        .find(|backend| backend["name"] == "local-echo")
+        .expect("plugin backend should be listed");
+    assert_eq!(plugin_backend["kind"], "plugin-command");
+    assert_eq!(plugin_backend["registration_flag"], "--plugin-dir");
+    assert_eq!(plugin_backend["requires_api_key"], false);
+    assert!(plugin_backend["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("chat-messages")));
+    assert!(plugin_backend["model_aliases"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("local-echo:<model>")));
+}
+
+#[test]
 fn plugins_list_json_prints_discovered_plugin_manifests() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir(directory.path().join("json-tools")).unwrap();

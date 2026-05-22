@@ -93,6 +93,7 @@ First implementation slice:
 
 - `llmff-core` owns a typed list of built-in backend families, registration flags, mock model aliases, and capability flags.
 - `llmff backends list --format json` exposes that metadata for scripts and wrappers while preserving the existing text output for humans.
+- `llmff backends list --format json --backend ... --ollama ... --plugin-dir ...` includes runtime-registered OpenAI-compatible, Ollama, and plugin command backends with provider capability metadata.
 
 Second implementation slice:
 
@@ -146,5 +147,4 @@ Plugin discovery implementation slice:
 - `llmff run --plugin-dir <path>` can execute plugin-provided `sampler` capabilities as stdin/stdout sampling override commands for `infer` and `repair` stages.
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
-- Richer backend adapters and provider capability metadata.
 - More complete model/runtime abstraction once the pipeline runner is stable.

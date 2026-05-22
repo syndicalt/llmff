@@ -98,6 +98,12 @@ enum BackendsCommand {
     List {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
+        #[arg(long = "backend")]
+        backend: Vec<String>,
+        #[arg(long = "ollama")]
+        ollama: Vec<String>,
+        #[arg(long = "plugin-dir")]
+        plugin_dir: Vec<PathBuf>,
     },
 }
 
@@ -165,8 +171,14 @@ pub async fn run(cli: Cli) -> Result<()> {
             println!("ok");
         }
         Command::Backends {
-            command: BackendsCommand::List { format },
-        } => print_backend_families(format)?,
+            command:
+                BackendsCommand::List {
+                    format,
+                    backend,
+                    ollama,
+                    plugin_dir,
+                },
+        } => print_backend_families(format, backend, ollama, plugin_dir)?,
         Command::Stages {
             command: StagesCommand::List { format },
         } => print_stage_metadata(format)?,
@@ -197,28 +209,116 @@ fn print_stage_metadata(format: OutputFormat) -> Result<()> {
     Ok(())
 }
 
-fn print_backend_families(format: OutputFormat) -> Result<()> {
+fn print_backend_families(
+    format: OutputFormat,
+    backend: Vec<String>,
+    ollama: Vec<String>,
+    plugin_dir: Vec<PathBuf>,
+) -> Result<()> {
+    let backends = backend_family_views(backend, ollama, plugin_dir)?;
     match format {
         OutputFormat::Text => {
-            for backend in builtin_backend_families() {
-                if backend.model_aliases.is_empty() {
-                    println!("{}", backend.name);
+            for backend in backends {
+                let model_aliases = backend
+                    .get("model_aliases")
+                    .and_then(serde_json::Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                if model_aliases.is_empty() {
+                    if let Some(name) = backend.get("name").and_then(serde_json::Value::as_str) {
+                        println!("{name}");
+                    }
                 } else {
-                    for alias in backend.model_aliases {
-                        println!("{alias}");
+                    for alias in model_aliases {
+                        if let Some(alias) = alias.as_str() {
+                            println!("{alias}");
+                        }
                     }
                 }
             }
         }
         OutputFormat::Json => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(builtin_backend_families())?
-            );
+            println!("{}", serde_json::to_string_pretty(&backends)?);
         }
     }
 
     Ok(())
+}
+
+fn backend_family_views(
+    backend: Vec<String>,
+    ollama: Vec<String>,
+    plugin_dir: Vec<PathBuf>,
+) -> Result<Vec<serde_json::Value>> {
+    let mut families = builtin_backend_families()
+        .iter()
+        .map(|backend| {
+            serde_json::json!({
+                "name": backend.name,
+                "kind": backend.kind,
+                "registration_flag": backend.registration_flag,
+                "requires_api_key": backend.requires_api_key,
+                "model_aliases": backend.model_aliases,
+                "capabilities": backend.capabilities,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for backend in parse_alias_value_list(backend)? {
+        families.push(serde_json::json!({
+            "name": backend.alias,
+            "kind": "openai-compatible",
+            "registration_flag": format!("--backend {}=<base-url>", backend.alias),
+            "requires_api_key": true,
+            "model_aliases": [format!("{}:<model>", backend.alias)],
+            "capabilities": [
+                "chat-messages",
+                "response-format-json",
+                "sampling",
+                "seed-control",
+                "stop-sequences",
+                "streaming-inference",
+                "usage-metadata",
+            ],
+        }));
+    }
+
+    for backend in parse_alias_value_list(ollama)? {
+        families.push(serde_json::json!({
+            "name": backend.alias,
+            "kind": "ollama",
+            "registration_flag": format!("--ollama {}=<base-url>", backend.alias),
+            "requires_api_key": false,
+            "model_aliases": [format!("{}:<model>", backend.alias)],
+            "capabilities": [
+                "chat-messages",
+                "response-format-json",
+                "sampling",
+                "seed-control",
+                "stop-sequences",
+                "usage-metadata",
+            ],
+        }));
+    }
+
+    for plugin_dir in plugin_dir {
+        for backend in discover_plugin_backends(&plugin_dir)? {
+            families.push(serde_json::json!({
+                "name": backend.name,
+                "kind": "plugin-command",
+                "registration_flag": "--plugin-dir",
+                "requires_api_key": false,
+                "model_aliases": [format!("{}:<model>", backend.name)],
+                "capabilities": [
+                    "chat-messages",
+                    "command-backend",
+                    "usage-metadata",
+                ],
+            }));
+        }
+    }
+
+    Ok(families)
 }
 
 fn print_plugin_manifests(plugin_dir: &Path, format: OutputFormat) -> Result<()> {
