@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use jsonschema::JSONSchema;
@@ -13,9 +14,75 @@ pub fn execute_deterministic_stage(
 ) -> Result<StageStatus, LlmffError> {
     match spec.op.as_str() {
         "system" => system(spec, input, cwd),
+        "template" => template(spec, input, cwd),
         "validate_json" => validate_json(spec, input, cwd),
         other => Err(LlmffError::UnknownStage(other.to_string())),
     }
+}
+
+fn template(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageStatus, LlmffError> {
+    let template_path = spec
+        .path
+        .as_ref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: "template requires path".to_string(),
+        })?;
+    let source = std::fs::read_to_string(resolve_path(cwd, template_path)).map_err(|error| {
+        LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("failed to read template path `{template_path}`: {error}"),
+        }
+    })?;
+    let variables = template_variables(input.unwrap_or_else(|| Value::Text(String::new())));
+    let rendered =
+        render_template(&source, &variables).map_err(|variable| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("missing template variable `{variable}`"),
+        })?;
+
+    Ok(StageStatus::Success(Value::Text(rendered)))
+}
+
+fn template_variables(input: Value) -> BTreeMap<String, String> {
+    match input {
+        Value::Text(text) => BTreeMap::from([("input".to_string(), text)]),
+        Value::Json(serde_json::Value::Object(object)) => object
+            .into_iter()
+            .map(|(key, value)| {
+                let rendered = match value {
+                    serde_json::Value::String(text) => text,
+                    other => other.to_string(),
+                };
+                (key, rendered)
+            })
+            .collect(),
+        Value::Json(other) => BTreeMap::from([("input".to_string(), other.to_string())]),
+    }
+}
+
+fn render_template(source: &str, variables: &BTreeMap<String, String>) -> Result<String, String> {
+    let mut rendered = String::with_capacity(source.len());
+    let mut rest = source;
+
+    while let Some(start) = rest.find("{{") {
+        let (before, after_start) = rest.split_at(start);
+        rendered.push_str(before);
+        let after_start = &after_start[2..];
+        let Some(end) = after_start.find("}}") else {
+            rendered.push_str("{{");
+            rendered.push_str(after_start);
+            return Ok(rendered);
+        };
+        let (name, after_end) = after_start.split_at(end);
+        let name = name.trim();
+        let value = variables.get(name).ok_or_else(|| name.to_string())?;
+        rendered.push_str(value);
+        rest = &after_end[2..];
+    }
+
+    rendered.push_str(rest);
+    Ok(rendered)
 }
 
 fn system(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageStatus, LlmffError> {
@@ -261,5 +328,103 @@ mod tests {
                 "Use terse JSON.\n\nReturn an object.".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn template_stage_substitutes_text_parent_as_input() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.tmpl"), "Request: {{input}}").unwrap();
+        let spec = StageSpec {
+            id: "render".to_string(),
+            op: "template".to_string(),
+            input: None,
+            from: Some("load_prompt".to_string()),
+            path: Some("prompt.tmpl".to_string()),
+            model: None,
+            temperature: None,
+            schema: None,
+            schema_path: None,
+            when: None,
+        };
+
+        let output = execute_deterministic_stage(
+            &spec,
+            Some(Value::Text("Return JSON.".to_string())),
+            dir.path(),
+        )
+        .expect("template stage should run");
+
+        assert_eq!(
+            output,
+            StageStatus::Success(Value::Text("Request: Return JSON.".to_string()))
+        );
+    }
+
+    #[test]
+    fn template_stage_substitutes_json_object_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("prompt.tmpl"),
+            "Name: {{name}}, Count: {{count}}, Enabled: {{enabled}}",
+        )
+        .unwrap();
+        let spec = StageSpec {
+            id: "render".to_string(),
+            op: "template".to_string(),
+            input: None,
+            from: Some("load_prompt".to_string()),
+            path: Some("prompt.tmpl".to_string()),
+            model: None,
+            temperature: None,
+            schema: None,
+            schema_path: None,
+            when: None,
+        };
+
+        let output = execute_deterministic_stage(
+            &spec,
+            Some(Value::Json(serde_json::json!({
+                "name": "Ada",
+                "count": 3,
+                "enabled": true
+            }))),
+            dir.path(),
+        )
+        .expect("template stage should run");
+
+        assert_eq!(
+            output,
+            StageStatus::Success(Value::Text(
+                "Name: Ada, Count: 3, Enabled: true".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn template_stage_reports_missing_variable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.tmpl"), "Request: {{missing}}").unwrap();
+        let spec = StageSpec {
+            id: "render".to_string(),
+            op: "template".to_string(),
+            input: None,
+            from: Some("load_prompt".to_string()),
+            path: Some("prompt.tmpl".to_string()),
+            model: None,
+            temperature: None,
+            schema: None,
+            schema_path: None,
+            when: None,
+        };
+
+        let error = execute_deterministic_stage(
+            &spec,
+            Some(Value::Text("Return JSON.".to_string())),
+            dir.path(),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("missing template variable `missing`"));
     }
 }
