@@ -115,7 +115,7 @@ pub struct OpenAiCompatibleBackend {
 impl OpenAiCompatibleBackend {
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
         Self {
-            base_url: base_url.into().trim_end_matches('/').to_string(),
+            base_url: normalize_openai_base_url(&base_url.into()),
             api_key: api_key.into(),
             client: reqwest::Client::new(),
         }
@@ -125,7 +125,7 @@ impl OpenAiCompatibleBackend {
 #[async_trait]
 impl Backend for OpenAiCompatibleBackend {
     async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        let url = format!("{}/chat/completions", self.base_url);
         let mut body = json!({
             "model": request.model,
             "messages": request.messages,
@@ -174,6 +174,15 @@ impl Backend for OpenAiCompatibleBackend {
             text,
             usage: completion.usage.map(Into::into),
         })
+    }
+}
+
+fn normalize_openai_base_url(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/v1")
     }
 }
 
@@ -335,6 +344,22 @@ mod tests {
         assert!(openai.capabilities.contains(&"usage-metadata"));
     }
 
+    #[test]
+    fn normalizes_openai_base_url_to_api_root() {
+        assert_eq!(
+            normalize_openai_base_url("https://api.openai.com"),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(
+            normalize_openai_base_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(
+            normalize_openai_base_url("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1"
+        );
+    }
+
     #[tokio::test]
     async fn mock_backend_returns_configured_response() {
         let backend = MockBackend::new("mock:json", r#"{"answer":"ok"}"#);
@@ -417,6 +442,44 @@ mod tests {
         assert_eq!(body["messages"][1]["content"], "Say hello");
         assert!((body["top_p"].as_f64().unwrap() - 0.9).abs() < 0.000_001);
         assert_eq!(body["max_tokens"], 256);
+    }
+
+    #[tokio::test]
+    async fn openai_compatible_backend_accepts_versioned_base_url() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [
+                    {
+                        "message": {
+                            "content": "hello from versioned base"
+                        }
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let backend = OpenAiCompatibleBackend::new(format!("{}/v1", server.uri()), "");
+        let response = backend
+            .infer(InferRequest {
+                model: "test-model".to_string(),
+                messages: vec![Message {
+                    role: "user".to_string(),
+                    content: "Say hello".to_string(),
+                }],
+                temperature: None,
+                top_p: None,
+                max_tokens: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.text, "hello from versioned base");
     }
 
     #[tokio::test]
