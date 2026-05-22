@@ -148,6 +148,13 @@ llmff run -i question.txt \
   -g 'load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=1,strategy=embedding) | write(matches.json)'
 ```
 
+Rerank retrieved matches without calling a remote service:
+
+```bash
+llmff run -i question.txt \
+  -g 'load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=3) | rerank(strategy=embedding,top_k=1) | write(matches.json)'
+```
+
 Cache an inline pipeline value across runs:
 
 ```bash
@@ -204,7 +211,7 @@ llmff backends list --format json
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
-Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Inline `retrieve` accepts `strategy=lexical` or `strategy=embedding`. Inline `tool` supports `command`, `method`, `url`, and `header:<name>` parameters. Manifests remain the format for branching graphs and version-controlled recipes.
+Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Inline `retrieve` and `rerank` accept `strategy=lexical` or `strategy=embedding`. Inline `tool` supports `command`, `method`, `url`, and `header:<name>` parameters. Manifests remain the format for branching graphs and version-controlled recipes.
 
 Call a command tool from an inline graph:
 
@@ -282,6 +289,8 @@ graph:
 ```
 
 `retrieve` renders its parent value as query text and returns JSON with `query`, `strategy`, and `matches`. The default `strategy: lexical` tokenizes the query and each document, scores documents by matching unique query terms, then sorts by score and path. `strategy: embedding` uses deterministic local character n-gram vectors and cosine similarity so near-overlap text can rank even when whole tokens differ. Document paths are relative to the manifest unless absolute. `top_k` is optional and must be greater than zero when present.
+
+`rerank` accepts retrieve-shaped JSON with `query` and `matches`, rescoring each match's `text` with `strategy: lexical` or `strategy: embedding`. It preserves match fields, replaces `score`, writes the selected `strategy`, and applies optional `top_k` after sorting.
 
 Cache stages persist and reuse successful parent values across runs:
 

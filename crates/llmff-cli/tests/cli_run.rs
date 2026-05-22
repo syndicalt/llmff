@@ -685,6 +685,74 @@ fn inline_graph_run_executes_embedding_retrieve_strategy() {
 }
 
 #[test]
+fn run_executes_rerank_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let candidates = dir.path().join("matches.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    let output = dir.path().join("reranked.json");
+    std::fs::write(
+        &candidates,
+        r#"
+{
+  "query": "rust",
+  "strategy": "lexical",
+  "matches": [
+    {
+      "path": "docs/python.txt",
+      "score": 1,
+      "text": "Python notebooks handle tables."
+    },
+    {
+      "path": "docs/trust.txt",
+      "score": 0,
+      "text": "Trust systems keep state."
+    }
+  ]
+}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+inputs:
+  candidates:
+    path: matches.json
+    format: json
+graph:
+  - id: load_candidates
+    op: load
+    input: candidates
+  - id: rerank_context
+    op: rerank
+    from: load_candidates
+    strategy: embedding
+    top_k: 1
+  - id: write_matches
+    op: write
+    from: rerank_context
+    path: reranked.json
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap())
+        .expect("rerank output should be JSON");
+
+    assert_eq!(json["strategy"], "embedding");
+    assert_eq!(json["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(json["matches"][0]["path"], "docs/trust.txt");
+    assert!(json["matches"][0]["score"].as_f64().unwrap() > 0.0);
+}
+
+#[test]
 fn inline_graph_run_executes_cache_stage() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");

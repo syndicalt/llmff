@@ -59,6 +59,17 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             ],
         },
         StageMetadata {
+            name: "rerank",
+            kind: "retrieval",
+            required_fields: &["from"],
+            optional_fields: &["top_k", "strategy"],
+            capabilities: &[
+                "retrieval-reranking",
+                "lexical-scoring",
+                "local-embedding-scoring",
+            ],
+        },
+        StageMetadata {
             name: "infer",
             kind: "model",
             required_fields: &["from", "model"],
@@ -119,6 +130,7 @@ pub fn execute_deterministic_stage(
         "system" => system(spec, input, cwd),
         "template" => template(spec, input, cwd),
         "retrieve" => retrieve(spec, input, cwd),
+        "rerank" => rerank(spec, input),
         "validate_json" => validate_json(spec, input, cwd),
         other => Err(LlmffError::UnknownStage(other.to_string())),
     }
@@ -267,7 +279,7 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
             stage_id: spec.id.clone(),
             message: "retrieve requires input".to_string(),
         })?;
-    let strategy = RetrieveStrategy::from_stage(spec)?;
+    let strategy = RetrieveStrategy::from_stage(spec, "retrieve", RetrieveStrategy::Lexical)?;
     let query_terms = tokenize(&query);
     let query_embedding = match strategy {
         RetrieveStrategy::Lexical => BTreeMap::new(),
@@ -282,13 +294,7 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
                 message: format!("failed to read retrieve document `{document}`: {error}"),
             }
         })?;
-        let document_terms = tokenize(&text);
-        let score = match strategy {
-            RetrieveStrategy::Lexical => lexical_score(&query_terms, &document_terms),
-            RetrieveStrategy::Embedding => {
-                cosine_similarity(&query_embedding, &hashed_embedding(&text))
-            }
-        };
+        let score = score_text(strategy, &query_terms, &query_embedding, &text);
         if score.rank > 0.0 {
             matches.push(RetrieveMatch {
                 path: document.clone(),
@@ -332,6 +338,113 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
     }))))
 }
 
+fn rerank(spec: &StageSpec, input: Option<Value>) -> Result<StageStatus, LlmffError> {
+    let input = input.ok_or_else(|| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message: "rerank requires input".to_string(),
+    })?;
+    let mut root = match input {
+        Value::Json(serde_json::Value::Object(root)) => root,
+        _ => {
+            return Err(LlmffError::StageExecution {
+                stage_id: spec.id.clone(),
+                message: "rerank requires JSON object input".to_string(),
+            })
+        }
+    };
+    let query = root
+        .get("query")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: "rerank requires string query".to_string(),
+        })?
+        .to_string();
+    let matches = root
+        .remove("matches")
+        .and_then(|value| value.as_array().cloned())
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: "rerank requires matches array".to_string(),
+        })?;
+    let strategy = RetrieveStrategy::from_stage(spec, "rerank", RetrieveStrategy::Embedding)?;
+    let query_terms = tokenize(&query);
+    let query_embedding = match strategy {
+        RetrieveStrategy::Lexical => BTreeMap::new(),
+        RetrieveStrategy::Embedding => hashed_embedding(&query),
+    };
+    let mut reranked = Vec::new();
+
+    for candidate in matches {
+        let serde_json::Value::Object(mut candidate) = candidate else {
+            return Err(LlmffError::StageExecution {
+                stage_id: spec.id.clone(),
+                message: "rerank matches must be objects".to_string(),
+            });
+        };
+        let path = candidate
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: spec.id.clone(),
+                message: "rerank match requires string path".to_string(),
+            })?
+            .to_string();
+        let text = candidate
+            .get("text")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: spec.id.clone(),
+                message: "rerank match requires string text".to_string(),
+            })?
+            .to_string();
+        let score = score_text(strategy, &query_terms, &query_embedding, &text);
+        candidate.insert("score".to_string(), score.value.clone());
+        reranked.push(RerankMatch {
+            path,
+            score,
+            value: serde_json::Value::Object(candidate),
+        });
+    }
+
+    reranked.sort_by(|left, right| {
+        right
+            .score
+            .rank
+            .partial_cmp(&left.score.rank)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                right
+                    .score
+                    .lexical_tiebreak
+                    .cmp(&left.score.lexical_tiebreak)
+            })
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    if let Some(top_k) = spec.top_k {
+        reranked.truncate(top_k);
+    }
+
+    root.insert("query".to_string(), serde_json::Value::String(query));
+    root.insert(
+        "strategy".to_string(),
+        serde_json::Value::String(strategy.as_str().to_string()),
+    );
+    root.insert(
+        "matches".to_string(),
+        serde_json::Value::Array(
+            reranked
+                .into_iter()
+                .map(|candidate| candidate.value)
+                .collect(),
+        ),
+    );
+
+    Ok(StageStatus::Success(Value::Json(
+        serde_json::Value::Object(root),
+    )))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RetrieveStrategy {
     Lexical,
@@ -339,14 +452,18 @@ enum RetrieveStrategy {
 }
 
 impl RetrieveStrategy {
-    fn from_stage(spec: &StageSpec) -> Result<Self, LlmffError> {
-        match spec.strategy.as_deref().unwrap_or("lexical") {
+    fn from_stage(
+        spec: &StageSpec,
+        operation: &str,
+        default: RetrieveStrategy,
+    ) -> Result<Self, LlmffError> {
+        match spec.strategy.as_deref().unwrap_or(default.as_str()) {
             "lexical" => Ok(Self::Lexical),
             "embedding" => Ok(Self::Embedding),
             strategy => Err(LlmffError::StageExecution {
                 stage_id: spec.id.clone(),
                 message: format!(
-                    "retrieve strategy must be lexical or embedding, got `{strategy}`"
+                    "{operation} strategy must be lexical or embedding, got `{strategy}`"
                 ),
             }),
         }
@@ -357,6 +474,18 @@ impl RetrieveStrategy {
             Self::Lexical => "lexical",
             Self::Embedding => "embedding",
         }
+    }
+}
+
+fn score_text(
+    strategy: RetrieveStrategy,
+    query_terms: &BTreeSet<String>,
+    query_embedding: &BTreeMap<String, f64>,
+    text: &str,
+) -> RetrieveScore {
+    match strategy {
+        RetrieveStrategy::Lexical => lexical_score(query_terms, &tokenize(text)),
+        RetrieveStrategy::Embedding => cosine_similarity(query_embedding, &hashed_embedding(text)),
     }
 }
 
@@ -448,6 +577,12 @@ struct RetrieveMatch {
     path: String,
     score: RetrieveScore,
     text: String,
+}
+
+struct RerankMatch {
+    path: String,
+    score: RetrieveScore,
+    value: serde_json::Value,
 }
 
 fn render_value_as_text(value: Value) -> String {
@@ -837,6 +972,67 @@ mod tests {
         assert_eq!(json["strategy"], "embedding");
         assert_eq!(json["matches"].as_array().unwrap().len(), 1);
         assert_eq!(json["matches"][0]["path"], "docs/trust.txt");
+        assert!(json["matches"][0]["score"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn rerank_stage_reorders_matches_with_embedding_strategy() {
+        let spec = StageSpec {
+            id: "rerank_context".to_string(),
+            op: "rerank".to_string(),
+            input: None,
+            from: Some("retrieve_context".to_string()),
+            path: None,
+            model: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            schema: None,
+            schema_path: None,
+            when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
+            documents: Vec::new(),
+            top_k: Some(1),
+            strategy: Some("embedding".to_string()),
+            key: None,
+        };
+        let input = Value::Json(serde_json::json!({
+            "query": "rust",
+            "strategy": "lexical",
+            "matches": [
+                {
+                    "path": "docs/python.txt",
+                    "score": 1,
+                    "text": "Python notebooks handle tables."
+                },
+                {
+                    "path": "docs/trust.txt",
+                    "score": 0,
+                    "text": "Trust systems keep state."
+                }
+            ]
+        }));
+
+        let output = execute_deterministic_stage(&spec, Some(input), Path::new("."))
+            .expect("rerank stage should run");
+
+        let StageStatus::Success(Value::Json(json)) = output else {
+            panic!("rerank should return JSON");
+        };
+        assert_eq!(json["query"], "rust");
+        assert_eq!(json["strategy"], "embedding");
+        assert_eq!(json["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(json["matches"][0]["path"], "docs/trust.txt");
+        assert_eq!(json["matches"][0]["text"], "Trust systems keep state.");
         assert!(json["matches"][0]["score"].as_f64().unwrap() > 0.0);
     }
 

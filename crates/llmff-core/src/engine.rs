@@ -434,6 +434,17 @@ impl Engine {
                 validate_retrieve_strategy(stage)?;
                 Ok(())
             }
+            "rerank" => {
+                require_stage_field(stage, stage.from.as_deref(), "rerank requires from")?;
+                if let Some(0) = stage.top_k {
+                    return Err(stage_validation_error(
+                        stage,
+                        "rerank top_k must be greater than 0",
+                    ));
+                }
+                validate_rerank_strategy(stage)?;
+                Ok(())
+            }
             "cache" => {
                 require_stage_field(stage, stage.from.as_deref(), "cache requires from")?;
                 Ok(())
@@ -487,7 +498,7 @@ impl Engine {
                 .execute_load(manifest, stage, cwd)
                 .map(StageOutcome::without_usage),
             "infer" => self.execute_infer(stage, statuses).await,
-            "validate_json" | "system" | "template" | "retrieve" => {
+            "validate_json" | "system" | "template" | "retrieve" | "rerank" => {
                 let input = stage
                     .from
                     .as_ref()
@@ -967,11 +978,19 @@ fn validate_sampling_parameters(stage: &StageSpec) -> Result<(), LlmffError> {
 }
 
 fn validate_retrieve_strategy(stage: &StageSpec) -> Result<(), LlmffError> {
+    validate_retrieval_strategy(stage, "retrieve")
+}
+
+fn validate_rerank_strategy(stage: &StageSpec) -> Result<(), LlmffError> {
+    validate_retrieval_strategy(stage, "rerank")
+}
+
+fn validate_retrieval_strategy(stage: &StageSpec, operation: &str) -> Result<(), LlmffError> {
     match stage.strategy.as_deref().unwrap_or("lexical") {
         "lexical" | "embedding" => Ok(()),
         strategy => Err(stage_validation_error(
             stage,
-            format!("retrieve strategy must be lexical or embedding, got `{strategy}`"),
+            format!("{operation} strategy must be lexical or embedding, got `{strategy}`"),
         )),
     }
 }
@@ -1191,7 +1210,7 @@ fn infer_stage_value_kind(
                 InputFormat::Json => StageValueKind::Json,
             })
             .unwrap_or(StageValueKind::Text),
-        "validate_json" | "retrieve" => StageValueKind::Json,
+        "validate_json" | "retrieve" | "rerank" => StageValueKind::Json,
         "write" | "cache" => stage
             .from
             .as_ref()
@@ -1832,6 +1851,36 @@ graph:
         assert!(error
             .to_string()
             .contains("retrieve strategy must be lexical or embedding"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_unknown_rerank_strategy() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  candidates:
+    path: matches.json
+    format: json
+graph:
+  - id: load_candidates
+    op: load
+    input: candidates
+  - id: rerank_context
+    op: rerank
+    from: load_candidates
+    strategy: remote
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("unknown rerank strategy should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("rerank strategy must be lexical or embedding"));
     }
 
     #[tokio::test]
