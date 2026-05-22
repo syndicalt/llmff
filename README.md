@@ -35,6 +35,8 @@ Run the install smoke gate from a checkout:
 scripts/smoke-install.sh --path .
 ```
 
+Packaged installers for Windows, macOS, Ubuntu, Debian, and Arch Linux are on the roadmap; current releases install through Cargo from GitHub.
+
 ## Current Scope
 
 - `llmff run <manifest>` executes a pipeline manifest.

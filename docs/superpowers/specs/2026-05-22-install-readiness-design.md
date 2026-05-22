@@ -73,10 +73,21 @@ Add a small checklist in `docs/release-readiness.md`:
 
 After this slice, the project can be described as "installable from GitHub for early testing" if the smoke gate passes. It should not yet be described as broadly released until a tag/release gate is completed.
 
+## Future Packaging Roadmap
+
+Packaged installers are a future release-track capability, not part of this early GitHub install slice. The roadmap should include:
+
+- Windows installer and signed `llmff.exe` archive.
+- macOS installers or archives for Apple Silicon and Intel Macs, with signing and notarization before broad recommendation.
+- Linux `.deb` packages for Ubuntu and Debian.
+- Arch Linux package support, either through an official package recipe or an AUR-ready `PKGBUILD`.
+- Plain compressed binary archives for each supported platform.
+- CI-built artifacts, checksums, and platform smoke tests for every packaged release.
+
 ## Non-Goals
 
 - No crates.io publish.
-- No binary release artifacts.
+- No binary release artifacts in this early install-readiness slice.
 - No Homebrew, apt, npm, or container packaging.
 - No version bump or tag in this slice.
 - No CI workflow addition unless the smoke script is ready to be wired later.
