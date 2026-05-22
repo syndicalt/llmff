@@ -35,6 +35,12 @@ Run the install smoke gate from a checkout:
 scripts/smoke-install.sh --path .
 ```
 
+Smoke test a generated release archive without installing:
+
+```bash
+scripts/smoke-archive.sh --archive dist/llmff-0.1.1-x86_64-unknown-linux-gnu.tar.gz
+```
+
 Smoke test a generated Debian package without root:
 
 ```bash
