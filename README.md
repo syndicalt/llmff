@@ -60,6 +60,31 @@ graph:
 
 `template` replaces `{{input}}` when the parent value is text. When the parent value is a JSON object, object fields are available by name, such as `{{name}}`.
 
+Route stages choose between already-computed stage outputs:
+
+```yaml
+graph:
+  - id: choose_final
+    op: route
+    from: validate
+    on_success: validate
+    on_invalid: repair
+```
+
+For JSON object outputs, route can select by scalar field value:
+
+```yaml
+graph:
+  - id: choose_model_output
+    op: route
+    from: classify
+    field: kind
+    cases:
+      simple: fast_answer
+      hard: strong_answer
+    default: fast_answer
+```
+
 ## Backend Notes
 
 The CLI keeps backend registration explicit. This keeps commands portable and FFmpeg-like: the command line describes the run, while environment variables are only used when you choose to read a secret by name.

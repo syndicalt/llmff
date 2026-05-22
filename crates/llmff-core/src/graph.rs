@@ -36,6 +36,8 @@ impl Graph {
                     )));
                 }
             }
+
+            validate_route_targets(stage, &stage_ids)?;
         }
 
         for output in manifest.outputs.values() {
@@ -54,6 +56,39 @@ impl Graph {
 
     pub fn stages(&self) -> &[StageSpec] {
         &self.stages
+    }
+}
+
+fn validate_route_targets(
+    stage: &StageSpec,
+    stage_ids: &BTreeSet<String>,
+) -> Result<(), LlmffError> {
+    for target in [
+        stage.on_success.as_deref(),
+        stage.on_invalid.as_deref(),
+        stage.on_skipped.as_deref(),
+        stage.default.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        validate_route_target(target, stage_ids)?;
+    }
+
+    for target in stage.cases.values() {
+        validate_route_target(target, stage_ids)?;
+    }
+
+    Ok(())
+}
+
+fn validate_route_target(target: &str, stage_ids: &BTreeSet<String>) -> Result<(), LlmffError> {
+    if stage_ids.contains(target) {
+        Ok(())
+    } else {
+        Err(LlmffError::GraphValidation(format!(
+            "unknown route target `{target}`"
+        )))
     }
 }
 
@@ -112,5 +147,61 @@ outputs:
         let error = Graph::from_manifest(manifest).unwrap_err().to_string();
 
         assert!(error.contains("unknown stage reference `missing`"));
+    }
+
+    #[test]
+    fn validates_route_targets() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: success_value
+    op: load
+  - id: invalid_value
+    op: load
+  - id: choose
+    op: route
+    from: success_value
+    on_success: success_value
+    on_invalid: invalid_value
+    cases:
+      simple: success_value
+    default: invalid_value
+outputs:
+  final:
+    from: choose
+    path: ./answer.txt
+"#,
+        )
+        .unwrap();
+
+        let graph = Graph::from_manifest(manifest).expect("graph should validate");
+
+        assert_eq!(graph.stages().len(), 3);
+    }
+
+    #[test]
+    fn rejects_unknown_route_target() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: choose
+    op: route
+    from: source
+    on_success: missing
+outputs:
+  final:
+    from: choose
+    path: ./answer.txt
+"#,
+        )
+        .unwrap();
+
+        let error = Graph::from_manifest(manifest).unwrap_err().to_string();
+
+        assert!(error.contains("unknown route target `missing`"));
     }
 }

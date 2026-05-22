@@ -196,6 +196,12 @@ mod tests {
             schema: None,
             schema_path: None,
             when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
         };
 
         let output = execute_deterministic_stage(
@@ -224,6 +230,12 @@ mod tests {
             schema: Some(r#"{"type":"object","required":["answer"]}"#.to_string()),
             schema_path: None,
             when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
         };
 
         let output = execute_deterministic_stage(
@@ -256,6 +268,12 @@ mod tests {
             schema: None,
             schema_path: Some("answer.schema.json".to_string()),
             when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
         };
 
         let output = execute_deterministic_stage(
@@ -285,6 +303,12 @@ mod tests {
             schema: None,
             schema_path: Some("missing.schema.json".to_string()),
             when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
         };
 
         let error = execute_deterministic_stage(
@@ -313,6 +337,12 @@ mod tests {
             schema: None,
             schema_path: None,
             when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
         };
 
         let output = execute_deterministic_stage(
@@ -345,6 +375,12 @@ mod tests {
             schema: None,
             schema_path: None,
             when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
         };
 
         let output = execute_deterministic_stage(
@@ -379,6 +415,12 @@ mod tests {
             schema: None,
             schema_path: None,
             when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
         };
 
         let output = execute_deterministic_stage(
@@ -415,6 +457,12 @@ mod tests {
             schema: None,
             schema_path: None,
             when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
         };
 
         let error = execute_deterministic_stage(
