@@ -106,6 +106,10 @@ fn backends_list_json_prints_backend_capabilities() {
         .as_array()
         .unwrap()
         .contains(&serde_json::json!("usage-metadata")));
+    assert!(openai["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("streaming-inference")));
 }
 
 #[test]

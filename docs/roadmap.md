@@ -7,7 +7,7 @@ This roadmap tracks major product capabilities that move `llmff` toward an FFmpe
 - Command-line-first pipeline runner.
 - YAML manifests and compact inline graphs.
 - Deterministic stages for loading, templating, system prompts, local lexical and embedding-style retrieval, local reranking, caching, routing, validation, repair, tools, and writes.
-- Mock, OpenAI-compatible, and Ollama backend adapters with portable sampling, seed, JSON response-format, and stop-sequence controls.
+- Mock, OpenAI-compatible, and Ollama backend adapters with portable sampling, seed, JSON response-format, and stop-sequence controls. OpenAI-compatible backends also expose the first token-streaming contract.
 - Dry-run inspection, JSONL traces, streamed lifecycle events, trace summaries, and a GitHub install smoke gate.
 
 ## Packaged Installers
@@ -118,7 +118,8 @@ Streaming implementation slice:
 
 - `llmff run --events <path>` writes run and stage lifecycle events as JSONL while the pipeline executes.
 - `llmff run --events -` streams those events to stdout for supervisors, dashboards, and shell pipelines.
-- This is the first streaming surface; token-level model streaming and streaming stage payloads remain future work.
+- OpenAI-compatible backends expose a stream API that requests server-sent chat completion chunks with `stream: true`, parses content deltas, and preserves streamed usage metadata when providers emit it.
+- Lifecycle events and backend token streams are now separate primitives; CLI model-token streaming and streaming stage payloads remain future work.
 
 Embedding retrieval implementation slice:
 
@@ -133,7 +134,7 @@ Rerank implementation slice:
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
 - Richer backend adapters and provider capability metadata.
-- Streaming inference and streaming stage outputs.
+- CLI streaming inference and streaming stage outputs.
 - Remote embedding-backed retrieval and learned reranking.
 - Plugin loading for stages, samplers, backends, and tool transports.
 - More complete model/runtime abstraction once the pipeline runner is stable.
