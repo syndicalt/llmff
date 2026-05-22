@@ -92,3 +92,24 @@ Inspect a one-line pipeline without model calls:
 ```bash
 llmff inspect -g 'load | infer(model=mock:good) | write(-)'
 ```
+
+## Retrieval Fixtures
+
+Files:
+
+- `retrieval/python.txt`
+- `retrieval/rust.txt`
+
+Run local retrieval without a model backend:
+
+```bash
+llmff run -i examples/question.txt \
+  -g 'load | retrieve(documents=examples/retrieval/python.txt;examples/retrieval/rust.txt,top_k=1) | write(-)'
+```
+
+Run retrieval plus local reranking:
+
+```bash
+llmff run -i examples/question.txt \
+  -g 'load | retrieve(documents=examples/retrieval/python.txt;examples/retrieval/rust.txt,top_k=2) | rerank(strategy=embedding,top_k=1) | write(-)'
+```
