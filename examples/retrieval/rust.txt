@@ -1,0 +1,2 @@
+Rust is a systems programming language focused on memory safety, predictable
+performance, explicit error handling, and fearless concurrency.

@@ -156,29 +156,29 @@ llmff run -i examples/question.txt \
 Run inline retrieval over local documents:
 
 ```bash
-llmff run -i question.txt \
-  -g 'load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=1) | write(matches.json)'
+llmff run -i examples/question.txt \
+  -g 'load | retrieve(documents=examples/retrieval/python.txt;examples/retrieval/rust.txt,top_k=1) | write(matches.json)'
 ```
 
 Use deterministic local embedding-style retrieval when lexical token overlap is
 too strict:
 
 ```bash
-llmff run -i question.txt \
-  -g 'load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=1,strategy=embedding) | write(matches.json)'
+llmff run -i examples/question.txt \
+  -g 'load | retrieve(documents=examples/retrieval/python.txt;examples/retrieval/rust.txt,top_k=1,strategy=embedding) | write(matches.json)'
 ```
 
 Rerank retrieved matches without calling a remote service:
 
 ```bash
-llmff run -i question.txt \
-  -g 'load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=3) | rerank(strategy=embedding,top_k=1) | write(matches.json)'
+llmff run -i examples/question.txt \
+  -g 'load | retrieve(documents=examples/retrieval/python.txt;examples/retrieval/rust.txt,top_k=2) | rerank(strategy=embedding,top_k=1) | write(matches.json)'
 ```
 
 Cache an inline pipeline value across runs:
 
 ```bash
-llmff run -i question.txt \
+llmff run -i examples/question.txt \
   -g 'load | cache(path=.llmff/cache,key=prompt-v1) | write(cached-question.txt)'
 ```
 
@@ -186,8 +186,8 @@ Name inline stages and reference them explicitly:
 
 ```bash
 LLMFF_MOCK_GOOD_RESPONSE='ok' \
-llmff run -i question.txt \
-  -g 'load#prompt | template#render(prompt.tmpl) | infer#draft(from=render,model=mock:good) | write#save(from=draft,path=answer.txt)'
+llmff run -i examples/question.txt \
+  -g 'load#prompt | template#render(examples/prompt.tmpl) | infer#draft(from=render,model=mock:good) | write#save(from=draft,path=answer.txt)'
 ```
 
 Inline `load` reads stdin when `-i/--input` is omitted:
@@ -294,14 +294,14 @@ Inline graphs support `op`, `op(value)`, and `op(key=value)` stage syntax for `r
 Call a command tool from an inline graph:
 
 ```bash
-llmff run -i question.txt \
+llmff run -i examples/question.txt \
   -g 'load | tool(command=/bin/cat) | write(tool-output.txt)'
 ```
 
 Call an HTTP tool from an inline graph:
 
 ```bash
-llmff run -i question.txt \
+llmff run -i examples/question.txt \
   -g 'load | tool(method=POST,url=http://127.0.0.1:8080/process,header:content-type=text/plain) | write(tool-output.txt)'
 ```
 
@@ -361,8 +361,8 @@ graph:
     op: retrieve
     from: load_prompt
     documents:
-      - docs/python.txt
-      - docs/rust.txt
+      - examples/retrieval/python.txt
+      - examples/retrieval/rust.txt
     top_k: 1
 ```
 
