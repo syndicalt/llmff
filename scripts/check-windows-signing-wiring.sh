@@ -58,5 +58,5 @@ require_text '.github/workflows/release-artifacts.yml' 'WINDOWS_CODESIGN_TIMESTA
 require_text 'scripts/release-preflight.sh' 'bash scripts/check-windows-signing-wiring.sh'
 require_text 'docs/platform-support.md' 'signed `.msi`'
 require_text 'docs/platform-support.md' 'signed `llmff.exe` archive'
-require_text 'docs/roadmap.md' 'Windows Authenticode signing implementation slice'
-require_text 'docs/roadmap.md' 'Windows executable archive signing implementation slice'
+require_text 'docs/roadmap.md' 'Signed Windows `llmff.exe` archives'
+require_text 'docs/roadmap.md' 'signed Windows MSI packages'

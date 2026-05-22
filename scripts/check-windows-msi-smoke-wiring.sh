@@ -43,5 +43,5 @@ require_text() {
 require_file 'scripts/smoke-windows-msi.sh'
 require_text '.github/workflows/release-artifacts.yml' 'scripts/smoke-windows-msi.sh --msi'
 require_text 'docs/platform-support.md' 'scripts/smoke-windows-msi.sh'
-require_text 'docs/roadmap.md' 'Windows MSI smoke implementation slice'
+require_text 'docs/roadmap.md' 'Windows MSI smoke tests'
 require_text 'README.md' 'scripts/smoke-windows-msi.sh --payload-root'

@@ -55,6 +55,5 @@ require_text '.github/workflows/release-artifacts.yml' 'APPLE_INSTALLER_CERT_PAS
 
 require_text 'scripts/release-preflight.sh' 'bash scripts/check-macos-signing-wiring.sh'
 require_text 'docs/platform-support.md' 'signed and notarized `.pkg`'
-require_text 'docs/roadmap.md' 'macOS package signing and notarization implementation slice'
+require_text 'docs/roadmap.md' 'Signed, notarized, and stapled macOS `.pkg` installers'
 require_text 'docs/release-readiness.md' 'macOS release tags sign, notarize, staple, and smoke-test'
-

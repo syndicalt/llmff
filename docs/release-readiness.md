@@ -25,14 +25,25 @@ At this point it is reasonable to say: `llmff` is installable from GitHub for ea
 
 Do not describe `llmff` as broadly released until every item in this section is checked.
 
-Release `v0.1.1` was verified with:
+Release `v0.1.1` was verified as a GitHub-installable source release with:
 
 ```bash
 scripts/release-preflight.sh v0.1.1
 scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.1
 ```
 
-For release tags after this packaging slice, CI creates the GitHub Release when the tag does not already have one, then uploads binary archives, checksums, Ubuntu/Debian packages, and Arch packaging metadata to the matching GitHub Release assets. Manual dispatch keeps those outputs as Actions artifacts only.
+The next package-publication release should be cut as `v0.1.2` after this
+check passes locally:
+
+```bash
+scripts/release-preflight.sh v0.1.2
+```
+
+For release tags after this packaging slice, CI creates the GitHub Release when
+the tag does not already have one, then uploads binary archives, checksums,
+Ubuntu/Debian packages, Arch packaging metadata, Windows MSI packages, and
+macOS `.pkg` packages to the matching GitHub Release assets. Manual dispatch
+keeps those outputs as Actions artifacts only.
 
 Release-tag CI also runs signing and notarization release gates before native
 macOS or Windows installer publication. Windows release tags sign and verify
@@ -44,3 +55,11 @@ artifact testing.
 
 Current packaged artifact targets and installer assumptions are documented in
 [`docs/platform-support.md`](platform-support.md).
+
+After release CI completes for `v0.1.2`, verify the published GitHub Release
+contains the expected archive, checksum, Debian, Arch metadata, MSI, and macOS
+package assets before advertising native installers:
+
+```bash
+scripts/check-release-assets.sh v0.1.2
+```
