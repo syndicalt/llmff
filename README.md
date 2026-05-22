@@ -50,6 +50,12 @@ Run the release metadata preflight before creating or pushing a release tag:
 scripts/release-preflight.sh v0.1.2
 ```
 
+Verify repository signing and notarization secrets before pushing a release tag:
+
+```bash
+scripts/release-preflight.sh --check-github-secrets v0.1.2
+```
+
 Verify a published release's assets, checksums, and host-compatible packages:
 
 ```bash

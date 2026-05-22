@@ -66,6 +66,8 @@ artifact publication, Windows signing, and macOS notarization wiring landed.
 Required before broad native-installer announcement:
 
 - Run `scripts/release-preflight.sh v0.1.2` on the tag candidate.
+- Run `scripts/release-preflight.sh --check-github-secrets v0.1.2` before
+  pushing the release tag.
 - Push the `v0.1.2` tag and verify GitHub Actions creates the release.
 - Confirm release assets include Linux/macOS/Windows archives, checksums,
   Debian package, Arch metadata, Windows MSI, and macOS `.pkg` files.

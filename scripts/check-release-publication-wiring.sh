@@ -7,7 +7,7 @@ readiness="docs/release-readiness.md"
 require_text() {
   local file="$1"
   local text="$2"
-  if ! grep -Fq "$text" "$file"; then
+  if ! grep -Fq -- "$text" "$file"; then
     printf 'error: %s must contain: %s\n' "$file" "$text" >&2
     exit 1
   fi

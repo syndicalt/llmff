@@ -33,13 +33,18 @@ require_text() {
   local file="$1"
   local needle="$2"
   require_file "$file"
-  if ! grep -Fq "$needle" "$file"; then
+  if ! grep -Fq -- "$needle" "$file"; then
     printf 'error: %s must contain: %s\n' "$file" "$needle" >&2
     exit 1
   fi
 }
 
 require_file 'scripts/check-release-signing-gates.sh'
+require_file 'scripts/check-github-release-secrets.sh'
+require_text 'scripts/check-github-release-secrets.sh' 'WINDOWS_CODESIGN_CERT_P12_BASE64'
+require_text 'scripts/check-github-release-secrets.sh' 'APPLE_DEVELOPER_ID_INSTALLER'
+require_text 'scripts/check-github-release-secrets.sh' 'APPLE_APP_SPECIFIC_PASSWORD'
+require_text 'scripts/release-preflight.sh' '--check-github-secrets'
 require_text '.github/workflows/release-artifacts.yml' 'Validate Windows signing gate'
 require_text '.github/workflows/release-artifacts.yml' 'Validate macOS signing and notarization gate'
 require_text '.github/workflows/release-artifacts.yml' 'scripts/check-release-signing-gates.sh --platform windows'
