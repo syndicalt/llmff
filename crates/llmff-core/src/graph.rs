@@ -38,6 +38,7 @@ impl Graph {
             }
 
             validate_route_targets(stage, &stage_ids)?;
+            validate_tool_stage(stage)?;
         }
 
         for output in manifest.outputs.values() {
@@ -89,6 +90,28 @@ fn validate_route_target(target: &str, stage_ids: &BTreeSet<String>) -> Result<(
         Err(LlmffError::GraphValidation(format!(
             "unknown route target `{target}`"
         )))
+    }
+}
+
+fn validate_tool_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.op != "tool" {
+        return Ok(());
+    }
+
+    match (&stage.command, &stage.url) {
+        (None, None) => Err(LlmffError::GraphValidation(
+            "tool requires command or url".to_string(),
+        )),
+        (Some(_), Some(_)) => Err(LlmffError::GraphValidation(
+            "tool cannot define both command and url".to_string(),
+        )),
+        (Some(command), None) if command.is_empty() => Err(LlmffError::GraphValidation(
+            "tool command cannot be empty".to_string(),
+        )),
+        (None, Some(_)) if stage.method.is_none() => Err(LlmffError::GraphValidation(
+            "http tool requires method".to_string(),
+        )),
+        _ => Ok(()),
     }
 }
 
@@ -203,5 +226,106 @@ outputs:
         let error = Graph::from_manifest(manifest).unwrap_err().to_string();
 
         assert!(error.contains("unknown route target `missing`"));
+    }
+
+    #[test]
+    fn rejects_tool_without_transport() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: call_tool
+    op: tool
+    from: source
+outputs:
+  final:
+    from: call_tool
+    path: ./answer.txt
+"#,
+        )
+        .unwrap();
+
+        let error = Graph::from_manifest(manifest).unwrap_err().to_string();
+
+        assert!(error.contains("tool requires command or url"));
+    }
+
+    #[test]
+    fn rejects_tool_with_command_and_url() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: call_tool
+    op: tool
+    from: source
+    command: ["/bin/cat"]
+    method: POST
+    url: http://127.0.0.1:8080/process
+outputs:
+  final:
+    from: call_tool
+    path: ./answer.txt
+"#,
+        )
+        .unwrap();
+
+        let error = Graph::from_manifest(manifest).unwrap_err().to_string();
+
+        assert!(error.contains("tool cannot define both command and url"));
+    }
+
+    #[test]
+    fn rejects_tool_with_empty_command() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: call_tool
+    op: tool
+    from: source
+    command: []
+outputs:
+  final:
+    from: call_tool
+    path: ./answer.txt
+"#,
+        )
+        .unwrap();
+
+        let error = Graph::from_manifest(manifest).unwrap_err().to_string();
+
+        assert!(error.contains("tool command cannot be empty"));
+    }
+
+    #[test]
+    fn rejects_tool_url_without_method() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: call_tool
+    op: tool
+    from: source
+    url: http://127.0.0.1:8080/process
+outputs:
+  final:
+    from: call_tool
+    path: ./answer.txt
+"#,
+        )
+        .unwrap();
+
+        let error = Graph::from_manifest(manifest).unwrap_err().to_string();
+
+        assert!(error.contains("http tool requires method"));
     }
 }

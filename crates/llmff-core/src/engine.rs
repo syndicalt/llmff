@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 
 use crate::backend::{Backend, InferRequest};
@@ -173,6 +174,7 @@ impl Engine {
             }
             "repair" => self.execute_repair(stage, statuses).await,
             "route" => self.execute_route(stage, statuses),
+            "tool" => self.execute_tool(stage, statuses, cwd).await,
             other => Err(LlmffError::UnknownStage(other.to_string())),
         }
     }
@@ -303,6 +305,25 @@ impl Engine {
             })
     }
 
+    async fn execute_tool(
+        &self,
+        stage: &StageSpec,
+        statuses: &BTreeMap<String, StageStatus>,
+        cwd: &Path,
+    ) -> Result<StageStatus, LlmffError> {
+        if let Some(command) = &stage.command {
+            return execute_command_tool(stage, statuses, cwd, command);
+        }
+        if stage.url.is_some() {
+            return execute_http_tool(stage, statuses).await;
+        }
+
+        Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "tool requires command or url".to_string(),
+        })
+    }
+
     fn backend_for_model<'a>(&'a self, model: &'a str) -> Result<ResolvedBackend<'a>, LlmffError> {
         if let Some(backend) = self.backends.get(model) {
             return Ok(ResolvedBackend {
@@ -324,6 +345,146 @@ impl Engine {
             "no backend configured for `{model}`"
         )))
     }
+}
+
+fn execute_command_tool(
+    stage: &StageSpec,
+    statuses: &BTreeMap<String, StageStatus>,
+    cwd: &Path,
+    command: &[String],
+) -> Result<StageStatus, LlmffError> {
+    let input = parent_text(stage, statuses)?;
+    let program = command.first().ok_or_else(|| LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: "tool command cannot be empty".to_string(),
+    })?;
+    let mut child = Command::new(resolve_command_path(cwd, program))
+        .args(&command[1..])
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("failed to start tool command `{program}`: {error}"),
+        })?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "failed to open tool command stdin".to_string(),
+        })?;
+    stdin
+        .write_all(input.as_bytes())
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("failed to write tool command stdin: {error}"),
+        })?;
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("failed to wait for tool command `{program}`: {error}"),
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!(
+                "tool command exited with status {}: {}",
+                output.status,
+                stderr.trim()
+            ),
+        });
+    }
+
+    let stdout = String::from_utf8(output.stdout).map_err(|error| LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: format!("tool command stdout was not valid UTF-8: {error}"),
+    })?;
+    Ok(StageStatus::Success(Value::Text(stdout)))
+}
+
+fn resolve_command_path(cwd: &Path, program: &str) -> PathBuf {
+    let path = Path::new(program);
+    if path.is_relative() && path.components().count() > 1 {
+        cwd.join(path)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+async fn execute_http_tool(
+    stage: &StageSpec,
+    statuses: &BTreeMap<String, StageStatus>,
+) -> Result<StageStatus, LlmffError> {
+    let input = parent_text(stage, statuses)?;
+    let method = stage
+        .method
+        .as_deref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "http tool requires method".to_string(),
+        })?
+        .parse::<reqwest::Method>()
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("invalid http tool method: {error}"),
+        })?;
+    let url = stage
+        .url
+        .as_deref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "http tool requires url".to_string(),
+        })?;
+
+    let client = reqwest::Client::new();
+    let mut request = client.request(method.clone(), url);
+    for (name, value) in &stage.headers {
+        request = request.header(name, value);
+    }
+    if method_allows_body(&method) {
+        request = request.body(input);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("http tool request failed: {error}"),
+        })?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("failed to read http tool response: {error}"),
+        })?;
+
+    if !status.is_success() {
+        return Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("http tool returned status {status}: {body}"),
+        });
+    }
+
+    Ok(StageStatus::Success(Value::Text(body)))
+}
+
+fn method_allows_body(method: &reqwest::Method) -> bool {
+    matches!(
+        *method,
+        reqwest::Method::POST | reqwest::Method::PUT | reqwest::Method::PATCH
+    )
 }
 
 fn select_status_route<'a>(stage: &'a StageSpec, source: &StageStatus) -> Option<&'a str> {
@@ -498,6 +659,8 @@ mod tests {
 
     use crate::backend::MockBackend;
     use crate::manifest::Manifest;
+    use wiremock::matchers::{body_string, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn runs_json_repair_pipeline_end_to_end() {
@@ -910,5 +1073,135 @@ outputs:
             .unwrap();
 
         assert_eq!(std::fs::read_to_string(output_path).unwrap(), "fallback");
+    }
+
+    #[tokio::test]
+    async fn tool_stage_command_receives_parent_on_stdin_and_returns_stdout() {
+        let dir = tempfile::tempdir().unwrap();
+        let input_path = dir.path().join("input.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&input_path, "hello tool").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  source:
+    path: {}
+graph:
+  - id: load_source
+    op: load
+    input: source
+  - id: call_tool
+    op: tool
+    from: load_source
+    command: ["/bin/cat"]
+outputs:
+  final:
+    from: call_tool
+    path: {}
+"#,
+            input_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "hello tool");
+    }
+
+    #[tokio::test]
+    async fn tool_stage_command_reports_nonzero_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let input_path = dir.path().join("input.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&input_path, "hello tool").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  source:
+    path: {}
+graph:
+  - id: load_source
+    op: load
+    input: source
+  - id: call_tool
+    op: tool
+    from: load_source
+    command: ["/bin/false"]
+outputs:
+  final:
+    from: call_tool
+    path: {}
+"#,
+            input_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let error = Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("tool command exited with status"));
+    }
+
+    #[tokio::test]
+    async fn tool_stage_posts_parent_body_to_http_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let input_path = dir.path().join("input.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&input_path, "ping").unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/process"))
+            .and(header("content-type", "text/plain"))
+            .and(body_string("ping"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("pong"))
+            .mount(&server)
+            .await;
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  source:
+    path: {}
+graph:
+  - id: load_source
+    op: load
+    input: source
+  - id: call_tool
+    op: tool
+    from: load_source
+    method: POST
+    url: {}/process
+    headers:
+      content-type: text/plain
+outputs:
+  final:
+    from: call_tool
+    path: {}
+"#,
+            input_path.display(),
+            server.uri(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "pong");
     }
 }

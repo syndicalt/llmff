@@ -51,6 +51,11 @@ pub struct StageSpec {
     #[serde(default)]
     pub cases: BTreeMap<String, String>,
     pub default: Option<String>,
+    pub command: Option<Vec<String>>,
+    pub method: Option<String>,
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
 }
 
 #[cfg(test)]
@@ -139,5 +144,32 @@ graph:
         assert_eq!(stage.cases["simple"], "fast_answer");
         assert_eq!(stage.cases["hard"], "strong_answer");
         assert_eq!(stage.default.as_deref(), Some("fallback_answer"));
+    }
+
+    #[test]
+    fn parses_tool_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: call_tool
+    op: tool
+    from: render_prompt
+    command: ["/bin/cat"]
+    method: POST
+    url: http://127.0.0.1:8080/process
+    headers:
+      content-type: application/json
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(
+            stage.command.as_deref(),
+            Some(&["/bin/cat".to_string()][..])
+        );
+        assert_eq!(stage.method.as_deref(), Some("POST"));
+        assert_eq!(stage.url.as_deref(), Some("http://127.0.0.1:8080/process"));
+        assert_eq!(stage.headers["content-type"], "application/json");
     }
 }
