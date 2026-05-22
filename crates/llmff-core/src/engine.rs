@@ -56,11 +56,11 @@ impl Engine {
 
     pub fn validate_manifest(&self, manifest: Manifest) -> Result<Graph, LlmffError> {
         validate_input_formats(&manifest)?;
-        let graph = Graph::from_manifest(manifest)?;
+        let graph = Graph::from_manifest(manifest.clone())?;
         for stage in graph.stages() {
             self.validate_stage(stage)?;
         }
-        validate_stage_types(&graph)?;
+        validate_stage_types(&graph, &manifest)?;
 
         Ok(graph)
     }
@@ -702,7 +702,7 @@ impl StageValueKind {
     }
 }
 
-fn validate_stage_types(graph: &Graph) -> Result<(), LlmffError> {
+fn validate_stage_types(graph: &Graph, manifest: &Manifest) -> Result<(), LlmffError> {
     let mut kinds = BTreeMap::new();
 
     for stage in graph.stages() {
@@ -712,7 +712,7 @@ fn validate_stage_types(graph: &Graph) -> Result<(), LlmffError> {
             }
         }
 
-        let kind = infer_stage_value_kind(stage, &kinds);
+        let kind = infer_stage_value_kind(stage, manifest, &kinds);
         kinds.insert(stage.id.clone(), kind);
     }
 
@@ -743,9 +743,20 @@ fn validate_field_route_source_kind(
 
 fn infer_stage_value_kind(
     stage: &StageSpec,
+    manifest: &Manifest,
     kinds: &BTreeMap<String, StageValueKind>,
 ) -> StageValueKind {
     match stage.op.as_str() {
+        "load" => stage
+            .input
+            .as_ref()
+            .and_then(|input_id| manifest.inputs.get(input_id))
+            .and_then(|input| input_format(input.format.as_deref()))
+            .map(|format| match format {
+                InputFormat::Text => StageValueKind::Text,
+                InputFormat::Json => StageValueKind::Json,
+            })
+            .unwrap_or(StageValueKind::Text),
         "validate_json" => StageValueKind::Json,
         "write" => stage
             .from
@@ -754,7 +765,7 @@ fn infer_stage_value_kind(
             .copied()
             .unwrap_or(StageValueKind::Any),
         "route" => StageValueKind::Any,
-        "load" | "system" | "template" | "infer" | "repair" | "tool" => StageValueKind::Text,
+        "system" | "template" | "infer" | "repair" | "tool" => StageValueKind::Text,
         _ => StageValueKind::Any,
     }
 }
@@ -1444,7 +1455,10 @@ outputs:
         ))
         .unwrap();
 
-        let report = Engine::new().run_manifest(manifest, dir.path()).await.unwrap();
+        let report = Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap();
 
         assert_eq!(report.final_status, RunStatus::Succeeded);
         assert_eq!(std::fs::read_to_string(output_path).unwrap(), "ok");

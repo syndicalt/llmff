@@ -160,7 +160,61 @@ outputs:
     cmd.args(["run", manifest.to_str().unwrap()])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("input `payload` is not valid JSON"));
+        .stderr(predicate::str::contains(
+            "input `payload` is not valid JSON",
+        ));
+}
+
+#[test]
+fn run_routes_json_input_by_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let payload = dir.path().join("payload.json");
+    let template = dir.path().join("simple.tmpl");
+    let output = dir.path().join("selected.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&payload, r#"{"kind":"simple","answer":"ok"}"#).unwrap();
+    std::fs::write(&template, "{{answer}}").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: simple_answer
+    op: template
+    from: load_payload
+    path: {}
+  - id: choose
+    op: route
+    from: load_payload
+    field: kind
+    cases:
+      simple: simple_answer
+outputs:
+  final:
+    from: choose
+    path: {}
+"#,
+            payload.display(),
+            template.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "ok");
 }
 
 #[test]
@@ -354,6 +408,51 @@ graph:
         .stderr(predicate::str::contains(
             "field route requires JSON source `load_prompt`, got text",
         ));
+}
+
+#[test]
+fn inspect_accepts_field_route_from_json_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let payload = dir.path().join("payload.json");
+    let template = dir.path().join("simple.tmpl");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&payload, r#"{"kind":"simple","answer":"ok"}"#).unwrap();
+    std::fs::write(&template, "{{answer}}").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: simple_answer
+    op: template
+    from: load_payload
+    path: {}
+  - id: choose
+    op: route
+    from: load_payload
+    field: kind
+    cases:
+      simple: simple_answer
+"#,
+            payload.display(),
+            template.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["inspect", manifest.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ok"));
 }
 
 #[test]

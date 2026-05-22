@@ -87,6 +87,17 @@ graph:
     schema_path: ./answer.schema.json
 ```
 
+Inputs default to text. Set `format: json` to parse an input into a structured JSON value:
+
+```yaml
+inputs:
+  payload:
+    path: ./payload.json
+    format: json
+```
+
+JSON inputs can be templated by object field and used by field-based routes. Invalid JSON fails the load stage with a stage execution error.
+
 `template` replaces `{{input}}` when the parent value is text. When the parent value is a JSON object, object fields are available by name, such as `{{name}}`.
 
 Route stages choose between already-computed stage outputs:

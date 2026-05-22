@@ -403,7 +403,7 @@ git commit -m "feat: load json inputs"
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-05-22-json-input-loading.md`
 
-- [ ] **Step 1: Write failing inspect test for JSON field route**
+- [x] **Step 1: Write failing inspect test for JSON field route**
 
 Add this CLI test to `crates/llmff-cli/tests/cli_run.rs`:
 
@@ -454,7 +454,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run inspect test to verify RED**
+- [x] **Step 2: Run inspect test to verify RED**
 
 Run:
 
@@ -464,7 +464,7 @@ cargo test -p llmff --test cli_run inspect_accepts_field_route_from_json_input
 
 Expected: FAIL because static type validation still treats all load stages as text.
 
-- [ ] **Step 3: Implement load kind inference from manifest**
+- [x] **Step 3: Implement load kind inference from manifest**
 
 Change `Engine::validate_manifest` to call:
 
@@ -498,7 +498,7 @@ For `load`, infer from the referenced input:
     .unwrap_or(StageValueKind::Text),
 ```
 
-- [ ] **Step 4: Run inspect test to verify GREEN**
+- [x] **Step 4: Run inspect test to verify GREEN**
 
 Run:
 
@@ -508,7 +508,7 @@ cargo test -p llmff --test cli_run inspect_accepts_field_route_from_json_input
 
 Expected: PASS.
 
-- [ ] **Step 5: Document input formats**
+- [x] **Step 5: Document input formats**
 
 Update `README.md` near file-backed resources:
 
@@ -525,7 +525,7 @@ inputs:
 JSON inputs can be templated by object field and used by field-based routes. Invalid JSON fails the load stage with a stage execution error.
 ```
 
-- [ ] **Step 6: Run final verification**
+- [x] **Step 6: Run final verification**
 
 Run:
 
@@ -537,7 +537,7 @@ cargo run -p llmff -- inspect examples/json-repair.yaml
 
 Expected: all commands exit 0; inspect prints `ok`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add README.md crates/llmff-core/src/engine.rs crates/llmff-cli/tests/cli_run.rs docs/superpowers/plans/2026-05-22-json-input-loading.md
