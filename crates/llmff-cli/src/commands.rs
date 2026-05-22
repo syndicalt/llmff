@@ -128,6 +128,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             println!("load");
             println!("system");
             println!("template");
+            println!("retrieve");
             println!("infer");
             println!("validate_json");
             println!("repair");

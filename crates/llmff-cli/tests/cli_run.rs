@@ -20,6 +20,7 @@ fn stages_list_prints_builtin_stages() {
         .assert()
         .success()
         .stdout(predicate::str::contains("infer"))
+        .stdout(predicate::str::contains("retrieve"))
         .stdout(predicate::str::contains("validate_json"));
 }
 
@@ -137,6 +138,68 @@ outputs:
         std::fs::read_to_string(output).unwrap(),
         r#"{"answer":"ok"}"#
     );
+}
+
+#[test]
+fn run_executes_retrieve_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let docs = dir.path().join("docs");
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("matches.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::create_dir(&docs).unwrap();
+    std::fs::write(&prompt, "rust graph").unwrap();
+    std::fs::write(
+        docs.join("rust.txt"),
+        "Rust builds reliable graph pipelines.",
+    )
+    .unwrap();
+    std::fs::write(
+        docs.join("python.txt"),
+        "Python scripts are useful for quick notebooks.",
+    )
+    .unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: retrieve_context
+    op: retrieve
+    from: load_prompt
+    documents:
+      - docs/python.txt
+      - docs/rust.txt
+    top_k: 1
+outputs:
+  final:
+    from: retrieve_context
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap())
+        .expect("retrieve output should be JSON");
+    assert_eq!(json["query"], "rust graph");
+    assert_eq!(json["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(json["matches"][0]["path"], "docs/rust.txt");
+    assert_eq!(json["matches"][0]["score"], 2);
 }
 
 #[test]

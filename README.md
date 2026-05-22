@@ -1,6 +1,6 @@
 # llmff
 
-`llmff` is an FFmpeg-shaped command-line and library tool for LLM inference pipelines. The MVP focuses on a typed pipeline graph, reproducible YAML manifests, backend adapters, JSON validation and repair, and JSONL traces.
+`llmff` is an FFmpeg-shaped command-line and library tool for LLM inference pipelines. The MVP focuses on a typed pipeline graph, reproducible YAML manifests, backend adapters, local retrieval, JSON validation and repair, and JSONL traces.
 
 ## Current Scope
 
@@ -108,6 +108,21 @@ JSON inputs can be templated by object field and used by field-based routes. Inv
 `template` replaces `{{input}}` when the parent value is text. When the parent value is a JSON object, object fields are available by name, such as `{{name}}`.
 
 `system` with a `path` preserves chat roles for model calls: the file contents become a `system` message and the parent value becomes a `user` message. Text-only stages render messages conservatively as `role: content` lines when they need a string.
+
+Retrieve stages select local UTF-8 documents with deterministic lexical scoring:
+
+```yaml
+graph:
+  - id: retrieve_context
+    op: retrieve
+    from: load_prompt
+    documents:
+      - docs/python.txt
+      - docs/rust.txt
+    top_k: 1
+```
+
+`retrieve` renders its parent value as query text, tokenizes the query and each document, scores documents by matching unique query terms, sorts by score and path, and returns JSON with `query` and `matches`. Document paths are relative to the manifest unless absolute. `top_k` is optional and must be greater than zero when present.
 
 Route stages choose between already-computed stage outputs:
 
@@ -281,5 +296,5 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 ## Limitations
 
 - Schema values are inline JSON strings in the current manifest format.
-- Retrieval, embedding, reranking, multimodal values, cache stages, and plugin loading are not implemented yet.
+- Embedding, reranking, multimodal values, cache stages, and plugin loading are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

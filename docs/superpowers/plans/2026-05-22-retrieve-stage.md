@@ -70,25 +70,25 @@ Commit `feat: add file-backed retrieve stage`.
 
 ## Task 3: CLI and Documentation
 
-- [ ] **Step 1: Write failing CLI test**
+- [x] **Step 1: Write failing CLI test**
 
-Add a CLI test that runs a manifest with `retrieve` and writes the JSON output.
+Add CLI tests proving `stages list` includes `retrieve` and a manifest with `retrieve` writes JSON output.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
-Run `cargo test -p llmff --test cli_run run_executes_retrieve_stage`.
+Run `cargo test -p llmff --test cli_run stages_list_prints_builtin_stages`.
 
-Expected: FAIL until the stage is fully wired into CLI-visible execution.
+Expected: FAIL until `retrieve` is exposed in CLI-visible stage listing.
 
-- [ ] **Step 3: Implement CLI/docs**
+- [x] **Step 3: Implement CLI/docs**
 
 Add `retrieve` to `stages list`; document the stage in README and remove retrieval from the limitations bullet.
 
-- [ ] **Step 4: Run GREEN and final verification**
+- [x] **Step 4: Run GREEN and final verification**
 
 Run focused CLI test, `cargo fmt --all --check`, `cargo test --workspace`, and `cargo run -p llmff -- inspect examples/json-repair.yaml`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit `docs: document retrieve stage`.
 
