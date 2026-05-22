@@ -90,6 +90,56 @@ outputs:
 }
 
 #[test]
+fn run_accepts_parallel_scheduler_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft_a
+    op: infer
+    from: load_prompt
+    model: mock:good
+  - id: draft_b
+    op: infer
+    from: load_prompt
+    model: mock:good
+outputs:
+  final:
+    from: draft_a
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", "--parallel", manifest.to_str().unwrap()])
+        .env("LLMFF_MOCK_GOOD_RESPONSE", r#"{"answer":"ok"}"#)
+        .assert()
+        .success();
+
+    assert_eq!(
+        std::fs::read_to_string(output).unwrap(),
+        r#"{"answer":"ok"}"#
+    );
+}
+
+#[test]
 fn run_supports_stdin_and_stdout_paths() {
     let dir = tempfile::tempdir().unwrap();
     let manifest = dir.path().join("pipeline.yaml");

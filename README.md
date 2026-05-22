@@ -24,6 +24,13 @@ LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
 cargo run -p llmff -- run examples/json-repair.yaml --trace /tmp/llmff-trace.jsonl
 ```
 
+Run independent ready stages concurrently:
+
+```bash
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
+cargo run -p llmff -- run --parallel pipeline.yaml
+```
+
 Run a compact inline graph:
 
 ```bash
@@ -65,7 +72,7 @@ Use stdin/stdout by setting manifest input or output paths to `-`.
 
 Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax. Manifests remain the format for branching graphs and version-controlled recipes.
 
-Manifest stages may be written in any order. `llmff` validates references across the full graph and executes stages in dependency order.
+Manifest stages may be written in any order. `llmff` validates references across the full graph and executes stages in dependency order. By default stages execute sequentially for deterministic local behavior; `run --parallel` executes independent ready stages concurrently.
 
 Manifest stages can reference file-backed resources relative to the manifest:
 
@@ -273,7 +280,6 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 
 ## Limitations
 
-- Pipeline execution is sequential after dependency ordering; parallel scheduling is not implemented yet.
 - Schema values are inline JSON strings in the current manifest format.
 - Retrieval, embedding, reranking, multimodal values, cache stages, and plugin loading are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

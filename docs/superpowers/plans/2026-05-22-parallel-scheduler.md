@@ -48,25 +48,25 @@ Commit `feat: add opt-in parallel scheduler`.
 
 ## Task 2: CLI Flag and Documentation
 
-- [ ] **Step 1: Write failing CLI test**
+- [x] **Step 1: Write failing CLI test**
 
 Add a CLI integration test showing `llmff run --parallel <manifest>` succeeds with mock backends.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run `cargo test -p llmff --test cli_run run_accepts_parallel_scheduler_flag`.
 
 Expected: FAIL because `--parallel` is not accepted yet.
 
-- [ ] **Step 3: Implement CLI flag**
+- [x] **Step 3: Implement CLI flag**
 
 Add `parallel: bool` to the `Run` command and set `RunOptions.scheduler` accordingly.
 
-- [ ] **Step 4: Run GREEN, document, and verify**
+- [x] **Step 4: Run GREEN, document, and verify**
 
 Run focused CLI test, `cargo fmt --all --check`, `cargo test --workspace`, and `cargo run -p llmff -- inspect examples/json-repair.yaml`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit `docs: document parallel scheduler`.
 
