@@ -40,6 +40,12 @@ Archive smoke implementation slice:
 - `scripts/smoke-archive.sh` extracts `.tar.gz` and `.zip` release archives without installing and verifies the packaged `llmff` binary with `--version`, `stages list`, `inspect`, and a deterministic mock-backed `run`.
 - `.github/workflows/release-artifacts.yml` runs the archive smoke gate for Linux, macOS Apple Silicon, macOS Intel, and Windows release archives.
 
+Windows MSI implementation slice:
+
+- `packaging/windows/llmff.wxs` defines a WiX installer that installs `llmff.exe` under Program Files.
+- `scripts/package-windows-msi.sh` builds an unsigned x86_64 Windows MSI with WiX and writes an adjacent SHA-256 checksum.
+- `.github/workflows/release-artifacts.yml` builds and checksums the Windows MSI from the Windows release-artifact job.
+
 Second implementation slice:
 
 - `scripts/package-deb.sh` creates an Ubuntu/Debian `.deb` package and adjacent SHA-256 checksum from an already-built Linux `llmff` binary.

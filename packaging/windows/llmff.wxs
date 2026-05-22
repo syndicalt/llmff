@@ -1,0 +1,26 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="llmff"
+    Manufacturer="syndicalt"
+    Version="$(var.Version)"
+    UpgradeCode="E7E6F4EF-8283-4C4E-A9DD-B0E8CB927E1D"
+    Scope="perMachine">
+    <SummaryInformation Description="llmff installer" Manufacturer="syndicalt" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of llmff is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="llmff" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="llmff" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+    </Feature>
+
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+      <Component Id="LlmffExecutable">
+        <File Id="LlmffExe" Source="$(var.Binary)" Name="llmff.exe" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Package>
+</Wix>
