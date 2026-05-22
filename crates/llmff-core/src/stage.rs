@@ -232,6 +232,8 @@ mod tests {
             method: None,
             url: None,
             headers: Default::default(),
+            documents: Vec::new(),
+            top_k: None,
         };
 
         let output = execute_deterministic_stage(
@@ -272,6 +274,8 @@ mod tests {
             method: None,
             url: None,
             headers: Default::default(),
+            documents: Vec::new(),
+            top_k: None,
         };
 
         let output = execute_deterministic_stage(
@@ -316,6 +320,8 @@ mod tests {
             method: None,
             url: None,
             headers: Default::default(),
+            documents: Vec::new(),
+            top_k: None,
         };
 
         let output = execute_deterministic_stage(
@@ -357,6 +363,8 @@ mod tests {
             method: None,
             url: None,
             headers: Default::default(),
+            documents: Vec::new(),
+            top_k: None,
         };
 
         let error = execute_deterministic_stage(
@@ -397,6 +405,8 @@ mod tests {
             method: None,
             url: None,
             headers: Default::default(),
+            documents: Vec::new(),
+            top_k: None,
         };
 
         let output = execute_deterministic_stage(
@@ -448,6 +458,8 @@ mod tests {
             method: None,
             url: None,
             headers: Default::default(),
+            documents: Vec::new(),
+            top_k: None,
         };
 
         let output = execute_deterministic_stage(
@@ -499,6 +511,8 @@ mod tests {
             method: None,
             url: None,
             headers: Default::default(),
+            documents: Vec::new(),
+            top_k: None,
         };
 
         let output = execute_deterministic_stage(
@@ -545,6 +559,8 @@ mod tests {
             method: None,
             url: None,
             headers: Default::default(),
+            documents: Vec::new(),
+            top_k: None,
         };
 
         let output = execute_deterministic_stage(
@@ -593,6 +609,8 @@ mod tests {
             method: None,
             url: None,
             headers: Default::default(),
+            documents: Vec::new(),
+            top_k: None,
         };
 
         let error = execute_deterministic_stage(

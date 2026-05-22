@@ -59,6 +59,9 @@ pub struct StageSpec {
     pub url: Option<String>,
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub documents: Vec<String>,
+    pub top_k: Option<usize>,
 }
 
 #[cfg(test)]
@@ -215,5 +218,26 @@ graph:
         assert_eq!(stage.method.as_deref(), Some("POST"));
         assert_eq!(stage.url.as_deref(), Some("http://127.0.0.1:8080/process"));
         assert_eq!(stage.headers["content-type"], "application/json");
+    }
+
+    #[test]
+    fn parses_retrieve_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: retrieve_context
+    op: retrieve
+    from: load_prompt
+    documents:
+      - docs/rust.txt
+      - docs/python.txt
+    top_k: 1
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(stage.documents, vec!["docs/rust.txt", "docs/python.txt"]);
+        assert_eq!(stage.top_k, Some(1));
     }
 }
