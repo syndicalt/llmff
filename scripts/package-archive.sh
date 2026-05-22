@@ -80,6 +80,14 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 mkdir -p "$out_dir"
 out_dir="$(cd "$out_dir" && pwd -P)"
 
+native_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
 package="llmff-${version}-${target}"
 stage="$(mktemp -d)"
 cleanup() {
@@ -126,7 +134,7 @@ if [ "$archive_ext" = "zip" ]; then
     (
       cd "$stage"
       powershell.exe -NoProfile -Command \
-        "Compress-Archive -Path '$package' -DestinationPath '$archive' -Force" >/dev/null
+        "Compress-Archive -LiteralPath '$(native_path "$stage/$package")' -DestinationPath '$(native_path "$archive")' -Force" >/dev/null
     )
   elif command -v 7z >/dev/null 2>&1; then
     (
