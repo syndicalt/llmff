@@ -1,0 +1,70 @@
+name: release artifacts
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    name: archive ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: target/release/llmff
+          - os: macos-14
+            target: aarch64-apple-darwin
+            binary: target/release/llmff
+          - os: macos-13
+            target: x86_64-apple-darwin
+            binary: target/release/llmff
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: target/release/llmff.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --locked --release -p llmff
+
+      - name: Smoke binary
+        shell: bash
+        run: |
+          "${{ matrix.binary }}" --version
+          "${{ matrix.binary }}" stages list | grep '^infer$'
+          "${{ matrix.binary }}" inspect examples/json-repair.yaml
+
+      - name: Package archive
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(cargo pkgid -p llmff | sed 's/.*@//')"
+          fi
+          scripts/package-archive.sh \
+            --binary "${{ matrix.binary }}" \
+            --version "$version" \
+            --target "${{ matrix.target }}" \
+            --out-dir dist
+
+      - name: Upload archive artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llmff-${{ matrix.target }}
+          path: |
+            dist/*
+          if-no-files-found: error

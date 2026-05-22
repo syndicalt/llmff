@@ -37,6 +37,8 @@ scripts/smoke-install.sh --path .
 
 Packaged installers for Windows, macOS, Ubuntu, Debian, and Arch Linux are on the roadmap; current releases install through Cargo from GitHub.
 
+Release tags also build compressed binary archives in CI as the first packaged-artifact slice. OS-native installers such as `.deb` packages, macOS signed/notarized installers, Windows installers, and Arch packaging are still future roadmap items.
+
 ## Current Scope
 
 - `llmff run <manifest>` executes a pipeline manifest.
