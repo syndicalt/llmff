@@ -27,7 +27,12 @@ graph:
     from: validate
     when: invalid
     model: mock:good
+  - id: choose_final
+    op: route
+    from: validate
+    on_success: validate
+    on_invalid: repair
 outputs:
   final:
-    from: repair
+    from: choose_final
     path: ./answer.json
