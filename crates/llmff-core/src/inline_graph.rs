@@ -20,6 +20,7 @@ impl Manifest {
                     "prompt".to_string(),
                     InputSpec {
                         path: Some(input_path.clone().unwrap_or_else(|| "-".to_string())),
+                        format: None,
                     },
                 );
             } else {

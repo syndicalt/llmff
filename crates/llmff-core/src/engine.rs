@@ -55,11 +55,12 @@ impl Engine {
     }
 
     pub fn validate_manifest(&self, manifest: Manifest) -> Result<Graph, LlmffError> {
-        let graph = Graph::from_manifest(manifest)?;
+        validate_input_formats(&manifest)?;
+        let graph = Graph::from_manifest(manifest.clone())?;
         for stage in graph.stages() {
             self.validate_stage(stage)?;
         }
-        validate_stage_types(&graph)?;
+        validate_stage_types(&graph, &manifest)?;
 
         Ok(graph)
     }
@@ -328,7 +329,7 @@ impl Engine {
             })?;
         let text = read_input(cwd, path)?;
 
-        Ok(StageStatus::Success(Value::Text(text)))
+        decode_input(stage, input_name, input.format.as_deref(), text)
     }
 
     async fn execute_infer(
@@ -582,6 +583,57 @@ fn stage_validation_error(stage: &StageSpec, message: impl Into<String>) -> Llmf
     }
 }
 
+fn validate_input_formats(manifest: &Manifest) -> Result<(), LlmffError> {
+    for (id, input) in &manifest.inputs {
+        if input_format(input.format.as_deref()).is_none() {
+            let format = input.format.as_deref().unwrap_or_default();
+            return Err(LlmffError::GraphValidation(format!(
+                "input `{id}` has unsupported format `{format}`"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputFormat {
+    Text,
+    Json,
+}
+
+fn input_format(format: Option<&str>) -> Option<InputFormat> {
+    match format.unwrap_or("text") {
+        "text" => Some(InputFormat::Text),
+        "json" => Some(InputFormat::Json),
+        _ => None,
+    }
+}
+
+fn decode_input(
+    stage: &StageSpec,
+    input_name: &str,
+    format: Option<&str>,
+    source: String,
+) -> Result<StageStatus, LlmffError> {
+    match input_format(format).ok_or_else(|| LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: format!(
+            "input `{input_name}` has unsupported format `{}`",
+            format.unwrap_or_default()
+        ),
+    })? {
+        InputFormat::Text => Ok(StageStatus::Success(Value::Text(source))),
+        InputFormat::Json => serde_json::from_str(&source)
+            .map(Value::Json)
+            .map(StageStatus::Success)
+            .map_err(|error| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: format!("input `{input_name}` is not valid JSON: {error}"),
+            }),
+    }
+}
+
 fn validate_when_condition(stage: &StageSpec) -> Result<(), LlmffError> {
     let Some(condition) = stage.when.as_deref() else {
         return Ok(());
@@ -650,7 +702,7 @@ impl StageValueKind {
     }
 }
 
-fn validate_stage_types(graph: &Graph) -> Result<(), LlmffError> {
+fn validate_stage_types(graph: &Graph, manifest: &Manifest) -> Result<(), LlmffError> {
     let mut kinds = BTreeMap::new();
 
     for stage in graph.stages() {
@@ -660,7 +712,7 @@ fn validate_stage_types(graph: &Graph) -> Result<(), LlmffError> {
             }
         }
 
-        let kind = infer_stage_value_kind(stage, &kinds);
+        let kind = infer_stage_value_kind(stage, manifest, &kinds);
         kinds.insert(stage.id.clone(), kind);
     }
 
@@ -691,9 +743,20 @@ fn validate_field_route_source_kind(
 
 fn infer_stage_value_kind(
     stage: &StageSpec,
+    manifest: &Manifest,
     kinds: &BTreeMap<String, StageValueKind>,
 ) -> StageValueKind {
     match stage.op.as_str() {
+        "load" => stage
+            .input
+            .as_ref()
+            .and_then(|input_id| manifest.inputs.get(input_id))
+            .and_then(|input| input_format(input.format.as_deref()))
+            .map(|format| match format {
+                InputFormat::Text => StageValueKind::Text,
+                InputFormat::Json => StageValueKind::Json,
+            })
+            .unwrap_or(StageValueKind::Text),
         "validate_json" => StageValueKind::Json,
         "write" => stage
             .from
@@ -702,7 +765,7 @@ fn infer_stage_value_kind(
             .copied()
             .unwrap_or(StageValueKind::Any),
         "route" => StageValueKind::Any,
-        "load" | "system" | "template" | "infer" | "repair" | "tool" => StageValueKind::Text,
+        "system" | "template" | "infer" | "repair" | "tool" => StageValueKind::Text,
         _ => StageValueKind::Any,
     }
 }
@@ -1158,6 +1221,32 @@ graph:
     }
 
     #[test]
+    fn validate_manifest_rejects_unknown_input_format() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: payload.json
+    format: yaml
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("unknown input format should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("input `payload` has unsupported format `yaml`"));
+    }
+
+    #[test]
     fn validate_manifest_rejects_field_route_from_text_source() {
         let manifest = Manifest::from_yaml_str(
             r#"
@@ -1329,6 +1418,50 @@ outputs:
             std::fs::read_to_string(output_path).unwrap(),
             r#"{"answer":"ok"}"#
         );
+    }
+
+    #[tokio::test]
+    async fn load_stage_reads_json_input_format() {
+        let dir = tempdir().unwrap();
+        let payload_path = dir.path().join("payload.json");
+        let template_path = dir.path().join("simple.tmpl");
+        let output_path = dir.path().join("selected.txt");
+        std::fs::write(&payload_path, r#"{"kind":"simple","answer":"ok"}"#).unwrap();
+        std::fs::write(&template_path, "{{answer}}").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: simple_answer
+    op: template
+    from: load_payload
+    path: {}
+outputs:
+  final:
+    from: simple_answer
+    path: {}
+"#,
+            payload_path.display(),
+            template_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let report = Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap();
+
+        assert_eq!(report.final_status, RunStatus::Succeeded);
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "ok");
     }
 
     #[tokio::test]
