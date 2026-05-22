@@ -40,6 +40,8 @@ enum Command {
         parallel: bool,
         #[arg(long = "plugin-dir")]
         plugin_dir: Vec<PathBuf>,
+        #[arg(long = "stream-stage")]
+        stream_stage: Option<String>,
         #[arg(long = "backend")]
         backend: Vec<String>,
         #[arg(long = "ollama")]
@@ -123,6 +125,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             events,
             parallel,
             plugin_dir,
+            stream_stage,
             backend,
             ollama,
             api_key_env,
@@ -136,6 +139,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 events,
                 parallel,
                 plugin_dir,
+                stream_stage,
                 backend,
                 ollama,
                 api_key_env,
@@ -331,6 +335,7 @@ async fn run_pipeline(
     events: Option<PathBuf>,
     parallel: bool,
     plugin_dir: Vec<PathBuf>,
+    stream_stage: Option<String>,
     backend: Vec<String>,
     ollama: Vec<String>,
     api_key_env: Vec<String>,
@@ -338,7 +343,19 @@ async fn run_pipeline(
 ) -> Result<()> {
     let (manifest, cwd) = load_pipeline_manifest(manifest_path, input_path, inline_graph)?;
     let engine = build_engine(backend, ollama, api_key_env, api_key)?;
+    if stream_stage.is_some() && events.as_deref() == Some(Path::new("-")) {
+        anyhow::bail!("stream-stage cannot write to stdout while events stream to stdout");
+    }
+    if stream_stage.is_some()
+        && manifest
+            .outputs
+            .values()
+            .any(|output| output.path.as_str() == "-")
+    {
+        anyhow::bail!("stream-stage cannot write to stdout while manifest outputs write to stdout");
+    }
 
+    let stream_path = stream_stage.as_ref().map(|_| PathBuf::from("-"));
     let options = RunOptions {
         run_id: "cli-run".to_string(),
         trace_path: trace,
@@ -349,6 +366,8 @@ async fn run_pipeline(
             SchedulerMode::Sequential
         },
         plugin_dirs: plugin_dir,
+        stream_stage,
+        stream_path,
     };
 
     engine

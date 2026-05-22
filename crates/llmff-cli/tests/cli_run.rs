@@ -389,6 +389,99 @@ outputs:
 }
 
 #[test]
+fn run_rejects_stream_stage_with_events_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "Say hello").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args([
+        "run",
+        manifest.to_str().unwrap(),
+        "--stream-stage",
+        "draft",
+        "--events",
+        "-",
+    ])
+    .env("LLMFF_MOCK_GOOD_RESPONSE", "hello")
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains(
+        "stream-stage cannot write to stdout while events stream to stdout",
+    ));
+}
+
+#[test]
+fn run_rejects_stream_stage_with_output_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "Say hello").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+outputs:
+  final:
+    from: draft
+    path: "-"
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap(), "--stream-stage", "draft"])
+        .env("LLMFF_MOCK_GOOD_RESPONSE", "hello")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "stream-stage cannot write to stdout while manifest outputs write to stdout",
+        ));
+}
+
+#[test]
 fn run_executes_retrieve_stage() {
     let dir = tempfile::tempdir().unwrap();
     let docs = dir.path().join("docs");
@@ -1450,6 +1543,70 @@ outputs:
         std::fs::read_to_string(output).unwrap(),
         r#"{"answer":"ok"}"#
     );
+}
+
+#[tokio::test]
+async fn run_streams_infer_stage_deltas_to_stdout() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(
+            concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"hello \"}}]}\n\n",
+                "data: {\"choices\":[{\"delta\":{\"content\":\"world\"}}]}\n\n",
+                "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\n",
+                "data: [DONE]\n\n",
+            ),
+        ))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "Say hello").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: openai:gpt-test
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args([
+        "run",
+        manifest.to_str().unwrap(),
+        "--stream-stage",
+        "draft",
+        "--backend",
+        &format!("openai={}", server.uri()),
+    ])
+    .assert()
+    .success()
+    .stdout("hello world");
+
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "hello world");
 }
 
 #[tokio::test]

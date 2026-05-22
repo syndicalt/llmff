@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::fs::File;
+use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -77,6 +79,8 @@ pub struct RunOptions {
     pub event_path: Option<PathBuf>,
     pub scheduler: SchedulerMode,
     pub plugin_dirs: Vec<PathBuf>,
+    pub stream_stage: Option<String>,
+    pub stream_path: Option<PathBuf>,
 }
 
 impl Default for RunOptions {
@@ -87,6 +91,8 @@ impl Default for RunOptions {
             event_path: None,
             scheduler: SchedulerMode::Sequential,
             plugin_dirs: Vec::new(),
+            stream_stage: None,
+            stream_path: None,
         }
     }
 }
@@ -133,7 +139,13 @@ impl Engine {
         options: RunOptions,
     ) -> Result<RunReport, LlmffError> {
         let graph = self.validate_manifest(manifest.clone())?;
+        if options.stream_stage.is_some() && options.scheduler == SchedulerMode::Parallel {
+            return Err(LlmffError::Config(
+                "stream-stage cannot be used with the parallel scheduler".to_string(),
+            ));
+        }
         let plugin_tool_transports = load_plugin_tool_transports(&options.plugin_dirs)?;
+        let mut stream_writer = create_stage_stream_writer(&options, &graph, cwd)?;
         let mut statuses = BTreeMap::new();
         let mut trace = create_trace_writers(&options)?;
 
@@ -172,6 +184,7 @@ impl Engine {
                     &mut trace,
                     &options.run_id,
                     &plugin_tool_transports,
+                    stream_writer.as_mut(),
                 )
                 .await?;
             }
@@ -254,11 +267,19 @@ impl Engine {
         trace: &mut Vec<TraceWriter>,
         run_id: &str,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
+        mut stream_writer: Option<&mut StageStreamWriter>,
     ) -> Result<(), LlmffError> {
         for stage in graph.stages() {
             let stage_started = self.start_stage_trace(trace, run_id, stage)?;
             let outcome = self
-                .execute_stage(manifest, stage, statuses, cwd, plugin_tool_transports)
+                .execute_stage(
+                    manifest,
+                    stage,
+                    statuses,
+                    cwd,
+                    plugin_tool_transports,
+                    stream_writer.as_deref_mut(),
+                )
                 .await?;
             self.finish_stage_trace(trace, run_id, stage, stage_started, outcome, statuses)?;
         }
@@ -311,6 +332,7 @@ impl Engine {
                     &status_snapshot,
                     cwd,
                     plugin_tool_transports,
+                    None,
                 )
             }))
             .await;
@@ -503,6 +525,7 @@ impl Engine {
         statuses: &BTreeMap<String, StageStatus>,
         cwd: &Path,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
+        stream_writer: Option<&mut StageStreamWriter>,
     ) -> Result<StageOutcome, LlmffError> {
         if !should_execute_stage(stage, statuses)? {
             return Ok(StageOutcome::without_usage(StageStatus::Skipped));
@@ -512,7 +535,7 @@ impl Engine {
             "load" => self
                 .execute_load(manifest, stage, cwd)
                 .map(StageOutcome::without_usage),
-            "infer" => self.execute_infer(stage, statuses).await,
+            "infer" => self.execute_infer(stage, statuses, stream_writer).await,
             "validate_json" | "system" | "template" | "retrieve" | "rerank" => {
                 let input = stage
                     .from
@@ -573,22 +596,49 @@ impl Engine {
         &self,
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
+        stream_writer: Option<&mut StageStreamWriter>,
     ) -> Result<StageOutcome, LlmffError> {
         let messages = parent_messages(stage, statuses)?;
         let model = required_model(stage)?;
         let resolved = self.backend_for_model(model)?;
-        let response = resolved
-            .infer(InferRequest {
-                model: resolved.provider_model.to_string(),
-                messages,
-                temperature: stage.temperature,
-                top_p: stage.top_p,
-                max_tokens: stage.max_tokens,
-                seed: stage.seed,
-                response_format: stage.response_format.clone(),
-                stop: stage.stop.clone(),
-            })
-            .await?;
+        let request = InferRequest {
+            model: resolved.provider_model.to_string(),
+            messages,
+            temperature: stage.temperature,
+            top_p: stage.top_p,
+            max_tokens: stage.max_tokens,
+            seed: stage.seed,
+            response_format: stage.response_format.clone(),
+            stop: stage.stop.clone(),
+        };
+
+        if let Some(writer) = stream_writer {
+            if writer.stage_id == stage.id {
+                let mut stream = resolved.backend.stream(request);
+                let mut text = String::new();
+                let mut usage = None;
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk?;
+                    if !chunk.delta.is_empty() {
+                        writer.write_delta(&chunk.delta)?;
+                        text.push_str(&chunk.delta);
+                    }
+                    if chunk.usage.is_some() {
+                        usage = chunk.usage;
+                    }
+                    if chunk.done {
+                        break;
+                    }
+                }
+
+                return Ok(StageOutcome::with_usage(
+                    StageStatus::Success(Value::Text(text)),
+                    usage,
+                ));
+            }
+        }
+
+        let response = resolved.infer(request).await?;
 
         Ok(StageOutcome::with_usage(
             StageStatus::Success(Value::Text(response.text)),
@@ -1295,6 +1345,70 @@ struct ResolvedBackendMetadata {
     provider_model: String,
 }
 
+struct StageStreamWriter {
+    stage_id: String,
+    writer: BufWriter<Box<dyn Write + Send>>,
+}
+
+impl StageStreamWriter {
+    fn stdout(stage_id: String) -> Self {
+        Self {
+            stage_id,
+            writer: BufWriter::new(Box::new(std::io::stdout())),
+        }
+    }
+
+    fn create(stage_id: String, path: &Path) -> Result<Self, LlmffError> {
+        Ok(Self {
+            stage_id,
+            writer: BufWriter::new(Box::new(File::create(path)?)),
+        })
+    }
+
+    fn write_delta(&mut self, delta: &str) -> Result<(), LlmffError> {
+        self.writer.write_all(delta.as_bytes())?;
+        self.writer.flush()?;
+        Ok(())
+    }
+}
+
+fn create_stage_stream_writer(
+    options: &RunOptions,
+    graph: &Graph,
+    cwd: &Path,
+) -> Result<Option<StageStreamWriter>, LlmffError> {
+    let Some(stage_id) = options.stream_stage.as_ref() else {
+        return Ok(None);
+    };
+    let stage = graph
+        .stages()
+        .iter()
+        .find(|stage| stage.id == *stage_id)
+        .ok_or_else(|| {
+            LlmffError::Config(format!(
+                "stream-stage references unknown stage `{stage_id}`"
+            ))
+        })?;
+    if stage.op != "infer" {
+        return Err(LlmffError::Config(format!(
+            "stream-stage `{stage_id}` must reference an infer stage"
+        )));
+    }
+
+    let path = options
+        .stream_path
+        .as_deref()
+        .unwrap_or_else(|| Path::new("-"));
+    if path == Path::new("-") {
+        Ok(Some(StageStreamWriter::stdout(stage_id.clone())))
+    } else {
+        Ok(Some(StageStreamWriter::create(
+            stage_id.clone(),
+            &resolve_path_buf(cwd, path),
+        )?))
+    }
+}
+
 fn load_plugin_tool_transports(
     plugin_dirs: &[PathBuf],
 ) -> Result<BTreeMap<String, PluginToolTransport>, LlmffError> {
@@ -1619,6 +1733,10 @@ fn render_messages_as_text(messages: &[Message]) -> String {
 
 fn resolve_path(cwd: &Path, path: &str) -> PathBuf {
     let path = Path::new(path);
+    resolve_path_buf(cwd, path)
+}
+
+fn resolve_path_buf(cwd: &Path, path: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -2535,6 +2653,8 @@ outputs:
             event_path: None,
             scheduler: SchedulerMode::Sequential,
             plugin_dirs: Vec::new(),
+            stream_stage: None,
+            stream_path: None,
         };
 
         engine
@@ -2582,6 +2702,8 @@ outputs:
             event_path: None,
             scheduler: SchedulerMode::Sequential,
             plugin_dirs: Vec::new(),
+            stream_stage: None,
+            stream_path: None,
         };
 
         Engine::new()
@@ -2665,6 +2787,8 @@ outputs:
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
                     plugin_dirs: Vec::new(),
+                    stream_stage: None,
+                    stream_path: None,
                 },
             )
             .await
@@ -2721,6 +2845,8 @@ outputs:
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
                     plugin_dirs: Vec::new(),
+                    stream_stage: None,
+                    stream_path: None,
                 },
             )
             .await
@@ -2789,6 +2915,8 @@ outputs:
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
                     plugin_dirs: Vec::new(),
+                    stream_stage: None,
+                    stream_path: None,
                 },
             )
             .await
@@ -2849,6 +2977,8 @@ outputs:
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
                     plugin_dirs: Vec::new(),
+                    stream_stage: None,
+                    stream_path: None,
                 },
             )
             .await
@@ -2910,6 +3040,8 @@ graph:
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
                     plugin_dirs: Vec::new(),
+                    stream_stage: None,
+                    stream_path: None,
                 },
             )
             .await
@@ -2948,6 +3080,8 @@ graph:
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
                     plugin_dirs: Vec::new(),
+                    stream_stage: None,
+                    stream_path: None,
                 },
             )
             .await
@@ -2964,6 +3098,8 @@ graph:
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
                     plugin_dirs: Vec::new(),
+                    stream_stage: None,
+                    stream_path: None,
                 },
             )
             .await
@@ -3339,6 +3475,8 @@ graph:
                     event_path: None,
                     scheduler: SchedulerMode::Parallel,
                     plugin_dirs: Vec::new(),
+                    stream_stage: None,
+                    stream_path: None,
                 },
             )
             .await
@@ -3743,6 +3881,8 @@ outputs:
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
                     plugin_dirs: vec![plugin_dir],
+                    stream_stage: None,
+                    stream_path: None,
                 },
             )
             .await
