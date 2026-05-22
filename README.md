@@ -102,7 +102,7 @@ Tagged release builds publish archives, checksums, `.deb` packages, and Arch met
 - `llmff backends list` prints currently wired backend families.
 - `llmff backends list --format json` prints machine-readable backend family metadata and capability flags.
 - `llmff plugins list --plugin-dir <path>` discovers `llmff-plugin.yaml` manifests and prints plugin capability metadata.
-- `llmff run --plugin-dir <path>` can execute plugin-provided tool transports declared in those manifests.
+- `llmff run --plugin-dir <path>` can execute plugin-provided stages and tool transports declared in those manifests.
 - The core crate owns execution semantics; the CLI is a thin adapter.
 - Mock backends are available for deterministic local runs and tests.
 - An OpenAI-compatible backend exists in the core crate for `/v1/chat/completions` servers.
@@ -199,6 +199,12 @@ llmff inspect pipeline.yaml \
   --api-key-env openai=OPENAI_API_KEY
 ```
 
+Inspect a manifest that references plugin stages:
+
+```bash
+llmff inspect pipeline.yaml --plugin-dir ./plugins
+```
+
 List built-in stages:
 
 ```bash
@@ -223,11 +229,13 @@ List plugin manifest metadata:
 llmff plugins list --plugin-dir ./plugins --format json
 ```
 
-Run a manifest that uses a plugin tool transport:
+Run a manifest that uses plugin capabilities:
 
 ```bash
 llmff run pipeline.yaml --plugin-dir ./plugins
 ```
+
+Plugin stage capabilities run as stdin/stdout command stages with `op: plugin:<capability-name>`. Plugin tool transports run through `op: tool` with `transport: <capability-name>`.
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
@@ -506,6 +514,6 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 
 - Schema values are inline JSON strings in the current manifest format.
 - `llmff run --stream-stage <infer-stage-id>` streams one model stage's token deltas to stdout. Streaming arbitrary stage payloads is not implemented yet.
-- Plugin manifests can be discovered and listed, and plugin tool transports can run as stdin/stdout commands. Plugin stages, backends, and samplers are not wired into pipeline runtime yet.
+- Plugin manifests can be discovered and listed, and plugin stages plus plugin tool transports can run as stdin/stdout commands. Plugin backends and samplers are not wired into pipeline runtime yet.
 - Remote embedding models, external vector indexes, and multimodal values are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

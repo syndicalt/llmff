@@ -24,6 +24,12 @@ pub struct PluginToolTransport {
     pub entrypoint: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginStage {
+    pub name: String,
+    pub entrypoint: PathBuf,
+}
+
 pub fn discover_plugin_manifests(
     directory: impl AsRef<Path>,
 ) -> Result<Vec<PluginManifest>, LlmffError> {
@@ -72,59 +78,32 @@ pub fn discover_plugin_tool_transports(
     directory: impl AsRef<Path>,
 ) -> Result<Vec<PluginToolTransport>, LlmffError> {
     let directory = directory.as_ref();
-    let entries = std::fs::read_dir(directory).map_err(|error| {
-        LlmffError::Config(format!(
-            "failed to read plugin directory `{}`: {error}",
-            directory.display()
-        ))
-    })?;
     let mut transports = Vec::new();
 
-    for entry in entries {
-        let entry = entry.map_err(|error| {
-            LlmffError::Config(format!(
-                "failed to read plugin directory entry in `{}`: {error}",
-                directory.display()
-            ))
-        })?;
-        let plugin_root = entry.path();
-        let manifest_path = plugin_root.join("llmff-plugin.yaml");
-        if !manifest_path.is_file() {
-            continue;
-        }
-        let source = std::fs::read_to_string(&manifest_path).map_err(|error| {
-            LlmffError::Config(format!(
-                "failed to read plugin manifest `{}`: {error}",
-                manifest_path.display()
-            ))
-        })?;
-        let manifest: PluginManifest = serde_yaml::from_str(&source).map_err(|error| {
-            LlmffError::Config(format!(
-                "failed to parse plugin manifest `{}`: {error}",
-                manifest_path.display()
-            ))
-        })?;
-        manifest.validate(&manifest_path)?;
-
-        for capability in manifest.capabilities {
-            if capability.kind != "tool-transport" {
-                continue;
-            }
-            let entrypoint = PathBuf::from(&capability.entrypoint);
-            let entrypoint = if entrypoint.is_absolute() {
-                entrypoint
-            } else {
-                plugin_root.join(entrypoint)
-            };
-            transports.push(PluginToolTransport {
-                name: capability.name,
-                entrypoint,
-            });
-        }
+    for plugin_capability in discover_plugin_capabilities(directory, "tool-transport")? {
+        transports.push(PluginToolTransport {
+            name: plugin_capability.name,
+            entrypoint: plugin_capability.entrypoint,
+        });
     }
 
     transports.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(transports)
+}
+
+pub fn discover_plugin_stages(directory: impl AsRef<Path>) -> Result<Vec<PluginStage>, LlmffError> {
+    let directory = directory.as_ref();
+    let mut stages = Vec::new();
+
+    for plugin_capability in discover_plugin_capabilities(directory, "stage")? {
+        stages.push(PluginStage {
+            name: plugin_capability.name,
+            entrypoint: plugin_capability.entrypoint,
+        });
+    }
+
+    stages.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(stages)
 }
 
 impl PluginManifest {
@@ -167,6 +146,69 @@ fn require_non_empty(field: &str, value: &str, path: &Path) -> Result<(), LlmffE
         )));
     }
     Ok(())
+}
+
+struct ResolvedPluginCapability {
+    name: String,
+    entrypoint: PathBuf,
+}
+
+fn discover_plugin_capabilities(
+    directory: &Path,
+    kind: &str,
+) -> Result<Vec<ResolvedPluginCapability>, LlmffError> {
+    let entries = std::fs::read_dir(directory).map_err(|error| {
+        LlmffError::Config(format!(
+            "failed to read plugin directory `{}`: {error}",
+            directory.display()
+        ))
+    })?;
+    let mut capabilities = Vec::new();
+
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            LlmffError::Config(format!(
+                "failed to read plugin directory entry in `{}`: {error}",
+                directory.display()
+            ))
+        })?;
+        let plugin_root = entry.path();
+        let manifest_path = plugin_root.join("llmff-plugin.yaml");
+        if !manifest_path.is_file() {
+            continue;
+        }
+        let source = std::fs::read_to_string(&manifest_path).map_err(|error| {
+            LlmffError::Config(format!(
+                "failed to read plugin manifest `{}`: {error}",
+                manifest_path.display()
+            ))
+        })?;
+        let manifest: PluginManifest = serde_yaml::from_str(&source).map_err(|error| {
+            LlmffError::Config(format!(
+                "failed to parse plugin manifest `{}`: {error}",
+                manifest_path.display()
+            ))
+        })?;
+        manifest.validate(&manifest_path)?;
+
+        for capability in manifest.capabilities {
+            if capability.kind != kind {
+                continue;
+            }
+            let entrypoint = PathBuf::from(&capability.entrypoint);
+            let entrypoint = if entrypoint.is_absolute() {
+                entrypoint
+            } else {
+                plugin_root.join(entrypoint)
+            };
+            capabilities.push(ResolvedPluginCapability {
+                name: capability.name,
+                entrypoint,
+            });
+        }
+    }
+
+    Ok(capabilities)
 }
 
 #[cfg(test)]
@@ -267,6 +309,35 @@ capabilities:
             vec![PluginToolTransport {
                 name: "stdio-json".to_string(),
                 entrypoint: plugin_root.join("./bin/stdio-json"),
+            }]
+        );
+    }
+
+    #[test]
+    fn discovers_plugin_stages_with_entrypoints_relative_to_plugin_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_root = directory.path().join("json-tools");
+        std::fs::create_dir(&plugin_root).unwrap();
+        std::fs::write(
+            plugin_root.join("llmff-plugin.yaml"),
+            r#"
+name: json-tools
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: json.uppercase
+    entrypoint: ./bin/uppercase
+"#,
+        )
+        .unwrap();
+
+        let stages = discover_plugin_stages(directory.path()).unwrap();
+
+        assert_eq!(
+            stages,
+            vec![PluginStage {
+                name: "json.uppercase".to_string(),
+                entrypoint: plugin_root.join("./bin/uppercase"),
             }]
         );
     }
