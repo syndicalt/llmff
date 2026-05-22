@@ -152,6 +152,14 @@ Stage traces add safe operation metadata when available:
 
 Trace metadata intentionally avoids full prompt bodies, tool stdin/stdout, headers, and secrets.
 
+Summarize a trace file:
+
+```bash
+cargo run -p llmff -- trace /tmp/llmff-trace.jsonl
+```
+
+The trace summary prints run status, stage status, duration, and safe metadata only.
+
 ## Backend Notes
 
 The CLI keeps backend registration explicit. This keeps commands portable and FFmpeg-like: the command line describes the run, while environment variables are only used when you choose to read a secret by name.

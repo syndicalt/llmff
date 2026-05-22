@@ -195,6 +195,53 @@ fn inspect_example_manifest_succeeds() {
         .stdout(predicate::str::contains("ok"));
 }
 
+#[test]
+fn trace_command_summarizes_trace_jsonl() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace = dir.path().join("trace.jsonl");
+    std::fs::write(
+        &trace,
+        r#"{"run_id":"test-run","event":"stage_finished","stage_id":"draft","op":"infer","status":"success","timestamp_ms":1,"duration_ms":14,"model":"openai:gpt-test","backend":"openai","provider_model":"gpt-test"}
+{"run_id":"test-run","event":"stage_finished","stage_id":"validate","op":"validate_json","status":"invalid","timestamp_ms":2,"duration_ms":1,"validation_errors":["missing answer"]}
+{"run_id":"test-run","event":"run_finished","status":"succeeded","timestamp_ms":3}
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["trace", trace.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("draft infer success 14ms"))
+        .stdout(predicate::str::contains("model=openai:gpt-test"))
+        .stdout(predicate::str::contains("backend=openai"))
+        .stdout(predicate::str::contains("provider_model=gpt-test"))
+        .stdout(predicate::str::contains(
+            "validate validate_json invalid 1ms validation_errors=1",
+        ))
+        .stdout(predicate::str::contains("run test-run succeeded"))
+        .stdout(predicate::str::contains("missing answer").not());
+}
+
+#[test]
+fn trace_command_reports_invalid_json_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let trace = dir.path().join("trace.jsonl");
+    std::fs::write(
+        &trace,
+        r#"{"run_id":"test-run","event":"run_started","timestamp_ms":1}
+not-json
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["trace", trace.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("invalid trace JSON on line 2"));
+}
+
 #[tokio::test]
 async fn run_uses_cli_registered_openai_backend() {
     let server = MockServer::start().await;
