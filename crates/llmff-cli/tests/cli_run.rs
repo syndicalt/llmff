@@ -166,15 +166,12 @@ graph: []
     .unwrap();
 
     let mut cmd = Command::cargo_bin("llmff").unwrap();
-    cmd.args([
-        "run",
-        manifest.to_str().unwrap(),
-        "-g",
-        "load | write(-)",
-    ])
-    .assert()
-    .failure()
-    .stderr(predicate::str::contains("provide either manifest or --graph"));
+    cmd.args(["run", manifest.to_str().unwrap(), "-g", "load | write(-)"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "provide either manifest or --graph",
+        ));
 }
 
 #[test]

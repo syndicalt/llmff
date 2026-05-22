@@ -161,7 +161,10 @@ fn load_run_manifest(
         (Some(path), None) => {
             let source = std::fs::read_to_string(&path)?;
             let manifest = Manifest::from_yaml_str(&source)?;
-            let cwd = path.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+            let cwd = path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf();
             Ok((manifest, cwd))
         }
         (None, Some(graph)) => {

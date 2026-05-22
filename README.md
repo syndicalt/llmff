@@ -24,6 +24,21 @@ LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
 cargo run -p llmff -- run examples/json-repair.yaml --trace /tmp/llmff-trace.jsonl
 ```
 
+Run a compact inline graph:
+
+```bash
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
+cargo run -p llmff -- run -i examples/question.txt \
+  -g 'load | infer(model=mock:good) | write(-)'
+```
+
+Inline `load` reads stdin when `-i/--input` is omitted:
+
+```bash
+cat examples/question.txt | LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
+  cargo run -p llmff -- run -g 'load | infer(model=mock:good) | write(-)'
+```
+
 Inspect the manifest without running model calls:
 
 ```bash
@@ -37,6 +52,8 @@ cargo run -p llmff -- stages list
 ```
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
+
+Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax. Manifests remain the format for branching graphs and version-controlled recipes.
 
 Manifest stages can reference file-backed resources relative to the manifest:
 

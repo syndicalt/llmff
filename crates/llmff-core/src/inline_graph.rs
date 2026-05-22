@@ -4,10 +4,7 @@ use crate::error::LlmffError;
 use crate::manifest::{InputSpec, Manifest, StageSpec};
 
 impl Manifest {
-    pub fn from_inline_graph(
-        source: &str,
-        input_path: Option<String>,
-    ) -> Result<Self, LlmffError> {
+    pub fn from_inline_graph(source: &str, input_path: Option<String>) -> Result<Self, LlmffError> {
         let mut inputs = BTreeMap::new();
         let mut graph = Vec::new();
         let mut previous_id = None;
