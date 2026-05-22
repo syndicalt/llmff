@@ -329,7 +329,7 @@ impl Engine {
             })?;
         let text = read_input(cwd, path)?;
 
-        Ok(StageStatus::Success(Value::Text(text)))
+        decode_input(stage, input_name, input.format.as_deref(), text)
     }
 
     async fn execute_infer(
@@ -607,6 +607,30 @@ fn input_format(format: Option<&str>) -> Option<InputFormat> {
         "text" => Some(InputFormat::Text),
         "json" => Some(InputFormat::Json),
         _ => None,
+    }
+}
+
+fn decode_input(
+    stage: &StageSpec,
+    input_name: &str,
+    format: Option<&str>,
+    source: String,
+) -> Result<StageStatus, LlmffError> {
+    match input_format(format).ok_or_else(|| LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: format!(
+            "input `{input_name}` has unsupported format `{}`",
+            format.unwrap_or_default()
+        ),
+    })? {
+        InputFormat::Text => Ok(StageStatus::Success(Value::Text(source))),
+        InputFormat::Json => serde_json::from_str(&source)
+            .map(Value::Json)
+            .map(StageStatus::Success)
+            .map_err(|error| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: format!("input `{input_name}` is not valid JSON: {error}"),
+            }),
     }
 }
 
@@ -1383,6 +1407,47 @@ outputs:
             std::fs::read_to_string(output_path).unwrap(),
             r#"{"answer":"ok"}"#
         );
+    }
+
+    #[tokio::test]
+    async fn load_stage_reads_json_input_format() {
+        let dir = tempdir().unwrap();
+        let payload_path = dir.path().join("payload.json");
+        let template_path = dir.path().join("simple.tmpl");
+        let output_path = dir.path().join("selected.txt");
+        std::fs::write(&payload_path, r#"{"kind":"simple","answer":"ok"}"#).unwrap();
+        std::fs::write(&template_path, "{{answer}}").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: simple_answer
+    op: template
+    from: load_payload
+    path: {}
+outputs:
+  final:
+    from: simple_answer
+    path: {}
+"#,
+            payload_path.display(),
+            template_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let report = Engine::new().run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(report.final_status, RunStatus::Succeeded);
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "ok");
     }
 
     #[tokio::test]

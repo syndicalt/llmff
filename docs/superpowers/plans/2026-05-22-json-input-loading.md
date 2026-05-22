@@ -229,7 +229,7 @@ git commit -m "feat: validate input formats"
 - Modify: `crates/llmff-core/src/engine.rs`
 - Modify: `crates/llmff-cli/tests/cli_run.rs`
 
-- [ ] **Step 1: Write failing runtime test**
+- [x] **Step 1: Write failing runtime test**
 
 Add this test to `crates/llmff-core/src/engine.rs`:
 
@@ -280,7 +280,7 @@ outputs:
 }
 ```
 
-- [ ] **Step 2: Run runtime test to verify RED**
+- [x] **Step 2: Run runtime test to verify RED**
 
 Run:
 
@@ -290,7 +290,7 @@ cargo test -p llmff-core load_stage_reads_json_input_format
 
 Expected: FAIL because `load` returns text and field routing requires JSON.
 
-- [ ] **Step 3: Implement JSON decoding for load**
+- [x] **Step 3: Implement JSON decoding for load**
 
 In `execute_load`, after reading input text, decode by input format:
 
@@ -326,7 +326,7 @@ fn decode_input(
 }
 ```
 
-- [ ] **Step 4: Run runtime test to verify GREEN**
+- [x] **Step 4: Run runtime test to verify GREEN**
 
 Run:
 
@@ -336,7 +336,7 @@ cargo test -p llmff-core load_stage_reads_json_input_format
 
 Expected: PASS.
 
-- [ ] **Step 5: Add invalid JSON CLI test**
+- [x] **Step 5: Add invalid JSON CLI test**
 
 Add this test to `crates/llmff-cli/tests/cli_run.rs`:
 
@@ -388,7 +388,7 @@ cargo test -p llmff --test cli_run run_reports_invalid_json_input_format
 
 Expected: PASS after JSON decoding is implemented.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/llmff-core/src/engine.rs crates/llmff-cli/tests/cli_run.rs

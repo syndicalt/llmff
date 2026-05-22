@@ -126,6 +126,44 @@ outputs:
 }
 
 #[test]
+fn run_reports_invalid_json_input_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let payload = dir.path().join("payload.json");
+    let output = dir.path().join("selected.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&payload, "{not-json").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+outputs:
+  final:
+    from: load_payload
+    path: {}
+"#,
+            payload.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("input `payload` is not valid JSON"));
+}
+
+#[test]
 fn inline_graph_run_uses_input_graph_and_write_stage() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");
