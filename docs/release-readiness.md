@@ -21,3 +21,9 @@ At this point it is reasonable to say: `llmff` is installable from GitHub for ea
 - [ ] At least one end-to-end example can be run by a new user without editing repository files.
 
 Do not describe `llmff` as broadly released until every item in this section is checked.
+
+Use the tag-specific smoke gate for release verification:
+
+```bash
+scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.0
+```
