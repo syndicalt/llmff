@@ -175,6 +175,7 @@ impl Engine {
             "repair" => self.execute_repair(stage, statuses).await,
             "route" => self.execute_route(stage, statuses),
             "tool" => self.execute_tool(stage, statuses, cwd).await,
+            "write" => self.execute_write(stage, statuses, cwd),
             other => Err(LlmffError::UnknownStage(other.to_string())),
         }
     }
@@ -322,6 +323,53 @@ impl Engine {
             stage_id: stage.id.clone(),
             message: "tool requires command or url".to_string(),
         })
+    }
+
+    fn execute_write(
+        &self,
+        stage: &StageSpec,
+        statuses: &BTreeMap<String, StageStatus>,
+        cwd: &Path,
+    ) -> Result<StageStatus, LlmffError> {
+        let parent = stage
+            .from
+            .as_ref()
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "write requires parent stage".to_string(),
+            })?;
+        let status = statuses
+            .get(parent)
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: format!("unknown parent stage `{parent}`"),
+            })?;
+        let value = match status {
+            StageStatus::Success(value) => value,
+            StageStatus::Invalid { errors, .. } => {
+                return Err(LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: format!("parent stage is invalid: {}", errors.join("; ")),
+                });
+            }
+            StageStatus::Skipped => {
+                return Err(LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: "parent stage was skipped".to_string(),
+                });
+            }
+        };
+        let path = stage
+            .path
+            .as_deref()
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "write requires path".to_string(),
+            })?;
+
+        write_output(cwd, path, &serialize_value(value)?)?;
+
+        Ok(StageStatus::Success(value.clone()))
     }
 
     fn backend_for_model<'a>(&'a self, model: &'a str) -> Result<ResolvedBackend<'a>, LlmffError> {
@@ -1203,5 +1251,57 @@ outputs:
             .unwrap();
 
         assert_eq!(std::fs::read_to_string(output_path).unwrap(), "pong");
+    }
+
+    #[tokio::test]
+    async fn write_stage_writes_and_forwards_parent_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let input_path = dir.path().join("input.json");
+        let written_path = dir.path().join("written.json");
+        let output_path = dir.path().join("answer.json");
+        std::fs::write(&input_path, r#"{"answer":"ok"}"#).unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  source:
+    path: {}
+graph:
+  - id: load_source
+    op: load
+    input: source
+  - id: parse_source
+    op: validate_json
+    from: load_source
+    schema: '{{"type":"object","required":["answer"]}}'
+  - id: save_source
+    op: write
+    from: parse_source
+    path: {}
+outputs:
+  final:
+    from: save_source
+    path: {}
+"#,
+            input_path.display(),
+            written_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&written_path).unwrap(),
+            r#"{"answer":"ok"}"#
+        );
+        assert_eq!(
+            std::fs::read_to_string(&output_path).unwrap(),
+            r#"{"answer":"ok"}"#
+        );
     }
 }
