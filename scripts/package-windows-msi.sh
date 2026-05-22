@@ -126,6 +126,15 @@ if [ "$emit_wxs_only" = true ]; then
   exit 0
 fi
 
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*)
+    ;;
+  *)
+    printf 'error: Windows MSI builds require a Windows host; use --emit-wxs-only for local source validation\n' >&2
+    exit 1
+    ;;
+esac
+
 if ! command -v wix >/dev/null 2>&1; then
   printf 'error: wix is required to build Windows MSI installers\n' >&2
   exit 1
