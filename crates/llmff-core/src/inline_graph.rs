@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::LlmffError;
 use crate::manifest::{InputSpec, Manifest, StageSpec};
@@ -8,10 +8,19 @@ impl Manifest {
         let mut inputs = BTreeMap::new();
         let mut graph = Vec::new();
         let mut previous_id = None;
+        let mut stage_ids = BTreeSet::new();
 
         for (index, raw_stage) in source.split('|').enumerate() {
             let parsed = parse_stage(raw_stage.trim())?;
-            let id = format!("{}_{}", parsed.op, index + 1);
+            let id = parsed
+                .id
+                .clone()
+                .unwrap_or_else(|| format!("{}_{}", parsed.op, index + 1));
+            if !stage_ids.insert(id.clone()) {
+                return Err(inline_graph_error(format!(
+                    "duplicate inline graph stage id `{id}`"
+                )));
+            }
             let mut stage = empty_stage(id.clone(), parsed.op.clone());
 
             if parsed.op == "load" {
@@ -28,7 +37,7 @@ impl Manifest {
             }
 
             apply_inline_params(&mut stage, parsed)?;
-            previous_id = Some(id);
+            previous_id = Some(stage.id.clone());
             graph.push(stage);
         }
 
@@ -48,6 +57,7 @@ impl Manifest {
 #[derive(Debug, PartialEq)]
 struct ParsedStage {
     op: String,
+    id: Option<String>,
     positional: Option<String>,
     params: BTreeMap<String, String>,
 }
@@ -58,8 +68,10 @@ fn parse_stage(source: &str) -> Result<ParsedStage, LlmffError> {
     }
 
     let Some(open) = source.find('(') else {
+        let (op, id) = parse_stage_head(source)?;
         return Ok(ParsedStage {
-            op: source.to_string(),
+            op,
+            id,
             positional: None,
             params: BTreeMap::new(),
         });
@@ -70,21 +82,20 @@ fn parse_stage(source: &str) -> Result<ParsedStage, LlmffError> {
         )));
     }
 
-    let op = source[..open].trim();
-    if op.is_empty() {
-        return Err(inline_graph_error("inline graph stage requires operation"));
-    }
+    let (op, id) = parse_stage_head(source[..open].trim())?;
     let body = source[open + 1..source.len() - 1].trim();
     if body.is_empty() {
         return Ok(ParsedStage {
-            op: op.to_string(),
+            op,
+            id,
             positional: None,
             params: BTreeMap::new(),
         });
     }
     if !body.contains('=') {
         return Ok(ParsedStage {
-            op: op.to_string(),
+            op,
+            id,
             positional: Some(body.to_string()),
             params: BTreeMap::new(),
         });
@@ -106,10 +117,38 @@ fn parse_stage(source: &str) -> Result<ParsedStage, LlmffError> {
     }
 
     Ok(ParsedStage {
-        op: op.to_string(),
+        op,
+        id,
         positional: None,
         params,
     })
+}
+
+fn parse_stage_head(source: &str) -> Result<(String, Option<String>), LlmffError> {
+    let source = source.trim();
+    if source.is_empty() {
+        return Err(inline_graph_error("inline graph stage requires operation"));
+    }
+    let Some((op, id)) = source.split_once('#') else {
+        return Ok((source.to_string(), None));
+    };
+    let op = op.trim();
+    let id = id.trim();
+    if op.is_empty() {
+        return Err(inline_graph_error("inline graph stage requires operation"));
+    }
+    if id.is_empty() {
+        return Err(inline_graph_error(format!(
+            "inline graph stage `{op}` requires id after #"
+        )));
+    }
+    if id.contains('#') {
+        return Err(inline_graph_error(format!(
+            "inline graph stage `{op}` has invalid id `{id}`"
+        )));
+    }
+
+    Ok((op.to_string(), Some(id.to_string())))
 }
 
 fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(), LlmffError> {
@@ -161,6 +200,7 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
             "path" => stage.path = Some(value),
             "key" => stage.key = Some(value),
             "index" => stage.index = Some(value),
+            "from" => stage.from = Some(value),
             "command" => {
                 stage.command = Some(parse_command(&value)?);
             }
@@ -323,6 +363,33 @@ mod tests {
         assert_eq!(manifest.graph[2].id, "write_3");
         assert_eq!(manifest.graph[2].from.as_deref(), Some("template_2"));
         assert_eq!(manifest.graph[2].path.as_deref(), Some("answer.txt"));
+    }
+
+    #[test]
+    fn parses_named_inline_stage_ids_and_from_references() {
+        let manifest = Manifest::from_inline_graph(
+            "load#prompt | template#render(prompt.tmpl) | infer#draft(from=render,model=mock:good) | write#save(from=draft,path=answer.txt)",
+            Some("question.txt".to_string()),
+        )
+        .expect("inline graph should parse");
+
+        assert_eq!(manifest.graph[0].id, "prompt");
+        assert_eq!(manifest.graph[1].id, "render");
+        assert_eq!(manifest.graph[1].from.as_deref(), Some("prompt"));
+        assert_eq!(manifest.graph[2].id, "draft");
+        assert_eq!(manifest.graph[2].from.as_deref(), Some("render"));
+        assert_eq!(manifest.graph[3].id, "save");
+        assert_eq!(manifest.graph[3].from.as_deref(), Some("draft"));
+        assert_eq!(manifest.graph[3].path.as_deref(), Some("answer.txt"));
+    }
+
+    #[test]
+    fn rejects_duplicate_named_inline_stage_ids() {
+        let error = Manifest::from_inline_graph("load#prompt | template#prompt(prompt.tmpl)", None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("duplicate inline graph stage id `prompt`"));
     }
 
     #[test]

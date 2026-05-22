@@ -112,6 +112,7 @@ First implementation slice:
 
 - Inline graphs support command and HTTP tool stages with `command`, `method`, `url`, and `header:<name>` parameters.
 - Command tool argv values use semicolon separators inside the `command` parameter, matching the existing inline convention for list-like values.
+- Inline graphs support `op#id` named stages and `from=<id>` references for compact non-linear graph snippets while keeping manifests as the canonical format for complex branching pipelines.
 
 ## Future Capability Tracks
 
@@ -146,5 +147,4 @@ Plugin discovery implementation slice:
 - `llmff run --plugin-dir <path>` can execute plugin-provided `backend` capabilities as stdin/stdout command backends.
 - `llmff run --plugin-dir <path>` can execute plugin-provided `sampler` capabilities as stdin/stdout sampling override commands for `infer` and `repair` stages.
 
-- Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
 - More complete model/runtime abstraction once the pipeline runner is stable.
