@@ -6,7 +6,7 @@ This roadmap tracks major product capabilities that move `llmff` toward an FFmpe
 
 - Command-line-first pipeline runner.
 - YAML manifests and compact inline graphs.
-- Deterministic stages for loading, templating, system prompts, local lexical and embedding-style retrieval, caching, routing, validation, repair, tools, and writes.
+- Deterministic stages for loading, templating, system prompts, local lexical and embedding-style retrieval, local reranking, caching, routing, validation, repair, tools, and writes.
 - Mock, OpenAI-compatible, and Ollama backend adapters.
 - Dry-run inspection, JSONL traces, streamed lifecycle events, trace summaries, and a GitHub install smoke gate.
 
@@ -124,11 +124,16 @@ Embedding retrieval implementation slice:
 
 - `retrieve` supports `strategy: embedding` in manifests and `strategy=embedding` in inline graphs.
 - The first embedding strategy is deterministic and local, using character n-gram vectors and cosine similarity for offline retrieval without a vector database.
-- Remote embedding providers, persistent vector indexes, and separate reranker stages remain future work.
+
+Rerank implementation slice:
+
+- `rerank` accepts retrieve-shaped JSON and rescores candidates with `strategy: lexical` or `strategy: embedding`.
+- The first reranker is deterministic and local, preserves candidate metadata, replaces scores, and applies optional `top_k` after sorting.
+- Remote embedding providers, persistent vector indexes, and learned reranker models remain future work.
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
 - Richer backend adapters and provider capability metadata.
 - Streaming inference and streaming stage outputs.
-- Remote embedding-backed retrieval and reranking.
+- Remote embedding-backed retrieval and learned reranking.
 - Plugin loading for stages, samplers, backends, and tool transports.
 - More complete model/runtime abstraction once the pipeline runner is stable.
