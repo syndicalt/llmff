@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use llmff_core::backend::{MockBackend, OpenAiCompatibleBackend};
+use llmff_core::backend::{MockBackend, OllamaBackend, OpenAiCompatibleBackend};
 use llmff_core::engine::{Engine, RunOptions};
 use llmff_core::manifest::Manifest;
 
@@ -32,6 +32,8 @@ enum Command {
         trace: Option<PathBuf>,
         #[arg(long = "backend")]
         backend: Vec<String>,
+        #[arg(long = "ollama")]
+        ollama: Vec<String>,
         #[arg(long = "api-key-env")]
         api_key_env: Vec<String>,
         #[arg(long = "api-key")]
@@ -68,9 +70,22 @@ pub async fn run(cli: Cli) -> Result<()> {
             graph,
             trace,
             backend,
+            ollama,
             api_key_env,
             api_key,
-        } => run_pipeline(manifest, input, graph, trace, backend, api_key_env, api_key).await?,
+        } => {
+            run_pipeline(
+                manifest,
+                input,
+                graph,
+                trace,
+                backend,
+                ollama,
+                api_key_env,
+                api_key,
+            )
+            .await?
+        }
         Command::Inspect { manifest } => {
             let source = std::fs::read_to_string(&manifest)?;
             let manifest = Manifest::from_yaml_str(&source)?;
@@ -82,6 +97,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         } => {
             println!("mock:bad");
             println!("mock:good");
+            println!("ollama");
             println!("openai-compatible");
         }
         Command::Stages {
@@ -108,6 +124,7 @@ async fn run_pipeline(
     inline_graph: Option<String>,
     trace: Option<PathBuf>,
     backend: Vec<String>,
+    ollama: Vec<String>,
     api_key_env: Vec<String>,
     api_key: Vec<String>,
 ) -> Result<()> {
@@ -136,6 +153,9 @@ async fn run_pipeline(
             backend.alias,
             Arc::new(OpenAiCompatibleBackend::new(backend.value, key)),
         );
+    }
+    for backend in parse_alias_value_list(ollama)? {
+        engine = engine.with_backend(backend.alias, Arc::new(OllamaBackend::new(backend.value)));
     }
 
     let options = RunOptions {

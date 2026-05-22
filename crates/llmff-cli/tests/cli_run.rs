@@ -24,6 +24,16 @@ fn stages_list_prints_builtin_stages() {
 }
 
 #[test]
+fn backends_list_prints_ollama_backend() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+
+    cmd.args(["backends", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ollama"));
+}
+
+#[test]
 fn run_executes_manifest_with_mock_backends() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");
@@ -240,6 +250,70 @@ outputs:
         manifest.to_str().unwrap(),
         "--backend",
         &format!("openai={}", server.uri()),
+    ])
+    .assert()
+    .success();
+
+    assert_eq!(
+        std::fs::read_to_string(output).unwrap(),
+        r#"{"answer":"ok"}"#
+    );
+}
+
+#[tokio::test]
+async fn run_uses_cli_registered_ollama_backend() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/chat"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "model": "test-model",
+            "message": {
+                "role": "assistant",
+                "content": "{\"answer\":\"ok\"}"
+            },
+            "done": true
+        })))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: ollama:test-model
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args([
+        "run",
+        manifest.to_str().unwrap(),
+        "--ollama",
+        &format!("ollama={}", server.uri()),
     ])
     .assert()
     .success();
