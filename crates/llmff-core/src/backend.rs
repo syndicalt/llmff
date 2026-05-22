@@ -308,8 +308,6 @@ mod tests {
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["messages"][0]["content"], "Say hello");
         assert_eq!(body["stream"], false);
-        assert!(
-            (body["options"]["temperature"].as_f64().unwrap() - 0.2).abs() < 0.000_001
-        );
+        assert!((body["options"]["temperature"].as_f64().unwrap() - 0.2).abs() < 0.000_001);
     }
 }

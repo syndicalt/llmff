@@ -170,6 +170,23 @@ llmff run pipeline.yaml \
   --backend local=http://localhost:8000/v1
 ```
 
+Register a native Ollama backend:
+
+```bash
+llmff run pipeline.yaml \
+  --ollama ollama=http://localhost:11434
+```
+
+Then reference the alias from a manifest or inline graph:
+
+```yaml
+graph:
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: ollama:llama3.1
+```
+
 Mock backends remain available for deterministic local runs and tests:
 
 - `LLMFF_MOCK_BAD_RESPONSE`

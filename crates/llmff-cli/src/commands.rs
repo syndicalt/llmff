@@ -73,17 +73,19 @@ pub async fn run(cli: Cli) -> Result<()> {
             ollama,
             api_key_env,
             api_key,
-        } => run_pipeline(
-            manifest,
-            input,
-            graph,
-            trace,
-            backend,
-            ollama,
-            api_key_env,
-            api_key,
-        )
-        .await?,
+        } => {
+            run_pipeline(
+                manifest,
+                input,
+                graph,
+                trace,
+                backend,
+                ollama,
+                api_key_env,
+                api_key,
+            )
+            .await?
+        }
         Command::Inspect { manifest } => {
             let source = std::fs::read_to_string(&manifest)?;
             let manifest = Manifest::from_yaml_str(&source)?;
@@ -153,10 +155,7 @@ async fn run_pipeline(
         );
     }
     for backend in parse_alias_value_list(ollama)? {
-        engine = engine.with_backend(
-            backend.alias,
-            Arc::new(OllamaBackend::new(backend.value)),
-        );
+        engine = engine.with_backend(backend.alias, Arc::new(OllamaBackend::new(backend.value)));
     }
 
     let options = RunOptions {
