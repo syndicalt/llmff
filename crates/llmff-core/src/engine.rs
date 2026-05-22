@@ -7,6 +7,7 @@ use crate::error::LlmffError;
 use crate::graph::Graph;
 use crate::manifest::{Manifest, StageSpec};
 use crate::stage::execute_deterministic_stage;
+use crate::trace::{TraceEvent, TraceWriter};
 use crate::value::{StageStatus, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,6 +19,21 @@ pub enum RunStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunReport {
     pub final_status: RunStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunOptions {
+    pub run_id: String,
+    pub trace_path: Option<PathBuf>,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            run_id: "local-run".to_string(),
+            trace_path: None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -40,12 +56,58 @@ impl Engine {
         manifest: Manifest,
         cwd: &Path,
     ) -> Result<RunReport, LlmffError> {
+        self.run_manifest_with_options(manifest, cwd, RunOptions::default())
+            .await
+    }
+
+    pub async fn run_manifest_with_options(
+        &self,
+        manifest: Manifest,
+        cwd: &Path,
+        options: RunOptions,
+    ) -> Result<RunReport, LlmffError> {
         let graph = Graph::from_manifest(manifest.clone())?;
         let mut statuses = BTreeMap::new();
+        let mut trace = match options.trace_path.as_ref() {
+            Some(path) => Some(TraceWriter::create(path)?),
+            None => None,
+        };
+
+        write_trace(
+            &mut trace,
+            TraceEvent {
+                run_id: options.run_id.clone(),
+                event: "run_started".to_string(),
+                stage_id: None,
+                op: None,
+                status: None,
+            },
+        )?;
 
         for stage in graph.stages() {
+            write_trace(
+                &mut trace,
+                TraceEvent {
+                    run_id: options.run_id.clone(),
+                    event: "stage_started".to_string(),
+                    stage_id: Some(stage.id.clone()),
+                    op: Some(stage.op.clone()),
+                    status: None,
+                },
+            )?;
             let status = self.execute_stage(&manifest, stage, &statuses, cwd).await?;
+            let status_name = status_name(&status).to_string();
             statuses.insert(stage.id.clone(), status);
+            write_trace(
+                &mut trace,
+                TraceEvent {
+                    run_id: options.run_id.clone(),
+                    event: "stage_finished".to_string(),
+                    stage_id: Some(stage.id.clone()),
+                    op: Some(stage.op.clone()),
+                    status: Some(status_name),
+                },
+            )?;
         }
 
         for output in manifest.outputs.values() {
@@ -73,9 +135,21 @@ impl Engine {
             std::fs::write(resolve_path(cwd, &output.path), serialize_value(value)?)?;
         }
 
-        Ok(RunReport {
+        let report = RunReport {
             final_status: RunStatus::Succeeded,
-        })
+        };
+        write_trace(
+            &mut trace,
+            TraceEvent {
+                run_id: options.run_id,
+                event: "run_finished".to_string(),
+                stage_id: None,
+                op: None,
+                status: Some("succeeded".to_string()),
+            },
+        )?;
+
+        Ok(report)
     }
 
     async fn execute_stage(
@@ -260,6 +334,21 @@ fn resolve_path(cwd: &Path, path: &str) -> PathBuf {
     }
 }
 
+fn write_trace(trace: &mut Option<TraceWriter>, event: TraceEvent) -> Result<(), LlmffError> {
+    if let Some(trace) = trace {
+        trace.write_event(&event)?;
+    }
+    Ok(())
+}
+
+fn status_name(status: &StageStatus) -> &'static str {
+    match status {
+        StageStatus::Success(_) => "success",
+        StageStatus::Invalid { .. } => "invalid",
+        StageStatus::Skipped => "skipped",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +416,51 @@ outputs:
             std::fs::read_to_string(output_path).unwrap(),
             r#"{"answer":"ok"}"#
         );
+    }
+
+    #[tokio::test]
+    async fn writes_trace_events_for_pipeline_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "hello").unwrap();
+
+        let manifest = crate::manifest::Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let engine = Engine::new();
+        let options = RunOptions {
+            run_id: "test-run".to_string(),
+            trace_path: Some(trace_path.clone()),
+        };
+
+        engine
+            .run_manifest_with_options(manifest, dir.path(), options)
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        assert!(trace.contains(r#""event":"run_started""#));
+        assert!(trace.contains(r#""event":"stage_started""#));
+        assert!(trace.contains(r#""event":"stage_finished""#));
+        assert!(trace.contains(r#""event":"run_finished""#));
     }
 }
