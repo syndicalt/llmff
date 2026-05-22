@@ -147,6 +147,9 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
                     inline_graph_error(format!("invalid max_tokens `{value}`: {error}"))
                 })?)
             }
+            "stop" => {
+                stage.stop = parse_semicolon_list(&value, "stop", "sequence")?;
+            }
             "schema" => stage.schema = Some(value),
             "schema_path" => stage.schema_path = Some(value),
             "path" => stage.path = Some(value),
@@ -157,7 +160,7 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
             "method" => stage.method = Some(value),
             "url" => stage.url = Some(value),
             "documents" => {
-                stage.documents = parse_documents(&value)?;
+                stage.documents = parse_semicolon_list(&value, "documents", "path")?;
             }
             "top_k" => {
                 stage.top_k = Some(value.parse::<usize>().map_err(|error| {
@@ -199,20 +202,24 @@ fn parse_command(source: &str) -> Result<Vec<String>, LlmffError> {
     Ok(command)
 }
 
-fn parse_documents(source: &str) -> Result<Vec<String>, LlmffError> {
-    let documents = source
+fn parse_semicolon_list(
+    source: &str,
+    field_name: &str,
+    item_name: &str,
+) -> Result<Vec<String>, LlmffError> {
+    let values = source
         .split(';')
         .map(str::trim)
-        .filter(|document| !document.is_empty())
+        .filter(|value| !value.is_empty())
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    if documents.is_empty() {
-        return Err(inline_graph_error(
-            "documents must contain at least one path",
-        ));
+    if values.is_empty() {
+        return Err(inline_graph_error(format!(
+            "{field_name} must contain at least one {item_name}"
+        )));
     }
 
-    Ok(documents)
+    Ok(values)
 }
 
 fn empty_stage(id: String, op: String) -> StageSpec {
@@ -226,6 +233,7 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         temperature: None,
         top_p: None,
         max_tokens: None,
+        stop: Vec::new(),
         schema: None,
         schema_path: None,
         when: None,
@@ -257,7 +265,7 @@ mod tests {
     #[test]
     fn parses_linear_inline_graph() {
         let manifest = Manifest::from_inline_graph(
-            "load | infer(model=mock:good,temperature=0.2,top_p=0.9,max_tokens=256) | write(-)",
+            "load | infer(model=mock:good,temperature=0.2,top_p=0.9,max_tokens=256,stop=END;DONE) | write(-)",
             Some("question.txt".to_string()),
         )
         .expect("inline graph should parse");
@@ -280,6 +288,7 @@ mod tests {
         assert_eq!(manifest.graph[1].temperature, Some(0.2));
         assert_eq!(manifest.graph[1].top_p, Some(0.9));
         assert_eq!(manifest.graph[1].max_tokens, Some(256));
+        assert_eq!(manifest.graph[1].stop, vec!["END", "DONE"]);
 
         assert_eq!(manifest.graph[2].id, "write_3");
         assert_eq!(manifest.graph[2].op, "write");

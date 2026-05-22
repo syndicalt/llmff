@@ -466,9 +466,12 @@ graph:
     temperature: 0.2
     top_p: 0.9
     max_tokens: 256
+    stop:
+      - "\nEND"
+      - "</answer>"
 ```
 
-OpenAI-compatible backends receive `temperature`, `top_p`, and `max_tokens`. Ollama receives the same controls under `options`, with `max_tokens` mapped to `num_predict`.
+OpenAI-compatible backends receive `temperature`, `top_p`, `max_tokens`, and `stop`. Ollama receives the same controls under `options`, with `max_tokens` mapped to `num_predict`. Inline graphs accept stop sequences with semicolon separators, such as `stop=END;DONE`.
 
 Mock backends remain available for deterministic local runs and tests:
 
