@@ -569,6 +569,7 @@ impl Engine {
                 temperature: stage.temperature,
                 top_p: stage.top_p,
                 max_tokens: stage.max_tokens,
+                stop: stage.stop.clone(),
             })
             .await?;
 
@@ -614,6 +615,7 @@ impl Engine {
                         temperature: stage.temperature,
                         top_p: stage.top_p,
                         max_tokens: stage.max_tokens,
+                        stop: stage.stop.clone(),
                     })
                     .await?;
 
@@ -971,6 +973,12 @@ fn validate_sampling_parameters(stage: &StageSpec) -> Result<(), LlmffError> {
         return Err(stage_validation_error(
             stage,
             "max_tokens must be greater than 0",
+        ));
+    }
+    if stage.stop.iter().any(|stop| stop.is_empty()) {
+        return Err(stage_validation_error(
+            stage,
+            "stop sequences cannot be empty",
         ));
     }
 
@@ -1655,6 +1663,7 @@ mod tests {
     struct RecordingBackend {
         model: String,
         messages: Arc<Mutex<Vec<Message>>>,
+        stop: Arc<Mutex<Vec<String>>>,
     }
 
     #[async_trait::async_trait]
@@ -1662,6 +1671,7 @@ mod tests {
         async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
             assert_eq!(request.model, self.model);
             *self.messages.lock().unwrap() = request.messages;
+            *self.stop.lock().unwrap() = request.stop;
             Ok(InferResponse {
                 model: request.model,
                 text: "ok".to_string(),
@@ -2013,6 +2023,37 @@ graph:
         assert!(error
             .to_string()
             .contains("stage `draft` failed: top_p must be between 0 and 1"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_empty_stop_sequence() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+    stop: ["END", ""]
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .with_backend("mock:good", Arc::new(MockBackend::new("mock:good", "ok")))
+            .validate_manifest(manifest)
+            .expect_err("empty stop sequence should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("stage `draft` failed: stop sequences cannot be empty"));
     }
 
     #[test]
@@ -2986,11 +3027,13 @@ outputs:
         ))
         .unwrap();
         let messages = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(Mutex::new(Vec::new()));
         let engine = Engine::new().with_backend(
             "recording",
             Arc::new(RecordingBackend {
                 model: "test-model".to_string(),
                 messages: Arc::clone(&messages),
+                stop,
             }),
         );
 
@@ -3009,6 +3052,49 @@ outputs:
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn infer_forwards_stop_sequences_to_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        std::fs::write(&prompt_path, "Return an answer.").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: recording:test-model
+    stop:
+      - "\nEND"
+      - "</answer>"
+"#,
+            prompt_path.display()
+        ))
+        .unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(Mutex::new(Vec::new()));
+        let engine = Engine::new().with_backend(
+            "recording",
+            Arc::new(RecordingBackend {
+                model: "test-model".to_string(),
+                messages,
+                stop: Arc::clone(&stop),
+            }),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(*stop.lock().unwrap(), vec!["\nEND", "</answer>"]);
     }
 
     #[tokio::test]

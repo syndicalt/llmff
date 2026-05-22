@@ -44,6 +44,8 @@ pub struct StageSpec {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub stop: Vec<String>,
     pub schema: Option<String>,
     pub schema_path: Option<String>,
     pub when: Option<String>,
@@ -155,6 +157,9 @@ graph:
     temperature: 0.2
     top_p: 0.9
     max_tokens: 256
+    stop:
+      - "\nEND"
+      - "</answer>"
 "#;
 
         let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
@@ -163,6 +168,7 @@ graph:
         assert_eq!(stage.temperature, Some(0.2));
         assert_eq!(stage.top_p, Some(0.9));
         assert_eq!(stage.max_tokens, Some(256));
+        assert_eq!(stage.stop, vec!["\nEND", "</answer>"]);
     }
 
     #[test]
