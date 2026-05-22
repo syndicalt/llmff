@@ -242,6 +242,7 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         seed: None,
         response_format: None,
         stop: Vec::new(),
+        sampler: None,
         schema: None,
         schema_path: None,
         when: None,

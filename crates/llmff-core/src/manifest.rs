@@ -48,6 +48,7 @@ pub struct StageSpec {
     pub response_format: Option<String>,
     #[serde(default)]
     pub stop: Vec<String>,
+    pub sampler: Option<String>,
     pub schema: Option<String>,
     pub schema_path: Option<String>,
     pub when: Option<String>,
@@ -176,6 +177,23 @@ graph:
         assert_eq!(stage.seed, Some(12345));
         assert_eq!(stage.response_format.as_deref(), Some("json"));
         assert_eq!(stage.stop, vec!["\nEND", "</answer>"]);
+    }
+
+    #[test]
+    fn parses_sampler_field() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: draft
+    op: infer
+    from: prompt
+    model: mock:good
+    sampler: safe-small
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+
+        assert_eq!(manifest.graph[0].sampler.as_deref(), Some("safe-small"));
     }
 
     #[test]

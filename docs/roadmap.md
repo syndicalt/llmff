@@ -141,11 +141,10 @@ Plugin discovery implementation slice:
 - `llmff run --plugin-dir <path>` can execute plugin-provided `tool-transport` capabilities as stdin/stdout command tools.
 - `llmff run --plugin-dir <path>` can execute plugin-provided `stage` capabilities as stdin/stdout command stages with `op: plugin:<capability-name>`.
 - `llmff run --plugin-dir <path>` can execute plugin-provided `backend` capabilities as stdin/stdout command backends.
-- Runtime loading and execution of plugin-provided samplers remains future work.
+- `llmff run --plugin-dir <path>` can execute plugin-provided `sampler` capabilities as stdin/stdout sampling override commands for `infer` and `repair` stages.
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
 - Richer backend adapters and provider capability metadata.
 - Streaming arbitrary stage outputs.
 - Remote embedding-backed retrieval and learned reranking.
-- Runtime plugin loading for samplers.
 - More complete model/runtime abstraction once the pipeline runner is stable.
