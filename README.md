@@ -40,12 +40,41 @@ Use stdin/stdout by setting manifest input or output paths to `-`.
 
 ## Backend Notes
 
-The CLI currently wires mock backends through:
+The CLI keeps backend registration explicit. This keeps commands portable and FFmpeg-like: the command line describes the run, while environment variables are only used when you choose to read a secret by name.
+
+Register an OpenAI-compatible backend:
+
+```bash
+llmff run pipeline.yaml \
+  --backend openai=https://api.openai.com/v1 \
+  --api-key-env openai=OPENAI_API_KEY
+```
+
+Then reference that backend alias from a manifest:
+
+```yaml
+graph:
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: openai:gpt-4.1-mini
+```
+
+The model id before the first colon is the backend alias. The model id after the first colon is sent to the provider.
+
+For local OpenAI-compatible servers that do not require auth, omit the key flag:
+
+```bash
+llmff run pipeline.yaml \
+  --backend local=http://localhost:8000/v1
+```
+
+Mock backends remain available for deterministic local runs and tests:
 
 - `LLMFF_MOCK_BAD_RESPONSE`
 - `LLMFF_MOCK_GOOD_RESPONSE`
 
-The core crate includes an `OpenAiCompatibleBackend` for servers that implement `POST /v1/chat/completions`. CLI configuration for real OpenAI-compatible backends is intentionally not exposed until the config model is explicit about secrets and trace redaction.
+Those mock env vars are convenience fixtures, not the primary backend configuration model.
 
 ## Limitations
 
