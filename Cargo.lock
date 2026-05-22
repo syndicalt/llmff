@@ -944,8 +944,10 @@ dependencies = [
  "clap",
  "llmff-core",
  "predicates",
+ "serde_json",
  "tempfile",
  "tokio",
+ "wiremock",
 ]
 
 [[package]]
