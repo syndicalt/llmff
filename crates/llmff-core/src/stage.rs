@@ -202,6 +202,10 @@ mod tests {
             field: None,
             cases: Default::default(),
             default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
         };
 
         let output = execute_deterministic_stage(
@@ -236,6 +240,10 @@ mod tests {
             field: None,
             cases: Default::default(),
             default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
         };
 
         let output = execute_deterministic_stage(
@@ -274,6 +282,10 @@ mod tests {
             field: None,
             cases: Default::default(),
             default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
         };
 
         let output = execute_deterministic_stage(
@@ -309,6 +321,10 @@ mod tests {
             field: None,
             cases: Default::default(),
             default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
         };
 
         let error = execute_deterministic_stage(
@@ -343,6 +359,10 @@ mod tests {
             field: None,
             cases: Default::default(),
             default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
         };
 
         let output = execute_deterministic_stage(
@@ -381,6 +401,10 @@ mod tests {
             field: None,
             cases: Default::default(),
             default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
         };
 
         let output = execute_deterministic_stage(
@@ -421,6 +445,10 @@ mod tests {
             field: None,
             cases: Default::default(),
             default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
         };
 
         let output = execute_deterministic_stage(
@@ -463,6 +491,10 @@ mod tests {
             field: None,
             cases: Default::default(),
             default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
         };
 
         let error = execute_deterministic_stage(
