@@ -57,6 +57,13 @@ First implementation slice:
 - `llmff-core` owns a typed list of built-in backend families, registration flags, mock model aliases, and capability flags.
 - `llmff backends list --format json` exposes that metadata for scripts and wrappers while preserving the existing text output for humans.
 
+## Stage Metadata
+
+First implementation slice:
+
+- `llmff-core` owns a typed list of built-in stage operations, required fields, optional fields, and capability flags.
+- `llmff stages list --format json` exposes that metadata for scripts and wrappers while preserving the existing text output for humans.
+
 ## Inline Graph Expressiveness
 
 First implementation slice:

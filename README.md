@@ -46,6 +46,7 @@ Tagged release builds publish archives, checksums, `.deb` packages, and Arch met
 - `llmff run <manifest>` executes a pipeline manifest.
 - `llmff inspect <manifest>` dry-run validates graph references, stage requirements, conservative type compatibility, and backend availability.
 - `llmff stages list` prints built-in stage names.
+- `llmff stages list --format json` prints machine-readable stage metadata and capability flags.
 - `llmff backends list` prints currently wired backend families.
 - `llmff backends list --format json` prints machine-readable backend family metadata and capability flags.
 - The core crate owns execution semantics; the CLI is a thin adapter.
@@ -126,6 +127,12 @@ List built-in stages:
 
 ```bash
 llmff stages list
+```
+
+List stage capability metadata:
+
+```bash
+llmff stages list --format json
 ```
 
 List backend capability metadata:

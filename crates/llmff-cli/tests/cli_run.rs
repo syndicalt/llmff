@@ -26,6 +26,49 @@ fn stages_list_prints_builtin_stages() {
 }
 
 #[test]
+fn stages_list_json_prints_stage_metadata() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+
+    let output = cmd
+        .args(["stages", "list", "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stages: serde_json::Value =
+        serde_json::from_slice(&output).expect("stage list should be valid JSON");
+
+    let infer = stages
+        .as_array()
+        .expect("stage list should be an array")
+        .iter()
+        .find(|stage| stage["name"] == "infer")
+        .expect("infer stage should be listed");
+    assert_eq!(infer["kind"], "model");
+    assert!(infer["required_fields"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("model")));
+    assert!(infer["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("sampling")));
+
+    let tool = stages
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stage| stage["name"] == "tool")
+        .expect("tool stage should be listed");
+    assert_eq!(tool["kind"], "integration");
+    assert!(tool["optional_fields"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("command")));
+}
+
+#[test]
 fn backends_list_prints_ollama_backend() {
     let mut cmd = Command::cargo_bin("llmff").unwrap();
 
