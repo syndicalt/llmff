@@ -14,15 +14,15 @@ At this point it is reasonable to say: `llmff` is installable from GitHub for ea
 
 ## Broad Announcement
 
-- [ ] A versioned tag or release exists.
-- [ ] Fresh install has been verified from that tag or release.
-- [ ] Release notes describe supported platforms and known limitations.
-- [ ] The smoke install gate passes against the release source, not only the local checkout.
-- [ ] At least one end-to-end example can be run by a new user without editing repository files.
+- [x] A versioned tag or release exists.
+- [x] Fresh install has been verified from that tag or release.
+- [x] Release notes describe supported platforms and known limitations.
+- [x] The smoke install gate passes against the release source, not only the local checkout.
+- [x] At least one end-to-end example can be run by a new user without editing repository files.
 
 Do not describe `llmff` as broadly released until every item in this section is checked.
 
-Use the tag-specific smoke gate for release verification:
+Release `v0.1.0` was verified with:
 
 ```bash
 scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.0
