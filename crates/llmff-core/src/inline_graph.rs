@@ -150,6 +150,14 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
             "schema" => stage.schema = Some(value),
             "schema_path" => stage.schema_path = Some(value),
             "path" => stage.path = Some(value),
+            "documents" => {
+                stage.documents = parse_documents(&value)?;
+            }
+            "top_k" => {
+                stage.top_k = Some(value.parse::<usize>().map_err(|error| {
+                    inline_graph_error(format!("invalid top_k `{value}`: {error}"))
+                })?)
+            }
             other => {
                 return Err(inline_graph_error(format!(
                     "unknown inline graph parameter `{other}`"
@@ -159,6 +167,22 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
     }
 
     Ok(())
+}
+
+fn parse_documents(source: &str) -> Result<Vec<String>, LlmffError> {
+    let documents = source
+        .split(';')
+        .map(str::trim)
+        .filter(|document| !document.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if documents.is_empty() {
+        return Err(inline_graph_error(
+            "documents must contain at least one path",
+        ));
+    }
+
+    Ok(documents)
 }
 
 fn empty_stage(id: String, op: String) -> StageSpec {
@@ -248,11 +272,38 @@ mod tests {
     }
 
     #[test]
+    fn parses_retrieve_stage_parameters() {
+        let manifest = Manifest::from_inline_graph(
+            "load | retrieve(documents=docs/rust.txt;docs/python.txt,top_k=1) | write(-)",
+            Some("question.txt".to_string()),
+        )
+        .expect("inline graph should parse");
+
+        assert_eq!(manifest.graph[1].id, "retrieve_2");
+        assert_eq!(manifest.graph[1].op, "retrieve");
+        assert_eq!(manifest.graph[1].from.as_deref(), Some("load_1"));
+        assert_eq!(
+            manifest.graph[1].documents,
+            vec!["docs/rust.txt", "docs/python.txt"]
+        );
+        assert_eq!(manifest.graph[1].top_k, Some(1));
+    }
+
+    #[test]
     fn rejects_empty_inline_stage() {
         let error = Manifest::from_inline_graph("load | | write(-)", None)
             .unwrap_err()
             .to_string();
 
         assert!(error.contains("inline graph contains an empty stage"));
+    }
+
+    #[test]
+    fn rejects_empty_inline_retrieve_documents() {
+        let error = Manifest::from_inline_graph("load | retrieve(documents=;) | write(-)", None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("documents must contain at least one path"));
     }
 }

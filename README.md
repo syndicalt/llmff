@@ -72,6 +72,13 @@ llmff run -i examples/question.txt \
   -g 'load | infer(model=mock:good) | write(-)'
 ```
 
+Run inline retrieval over local documents:
+
+```bash
+llmff run -i question.txt \
+  -g 'load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=1) | write(matches.json)'
+```
+
 Inline `load` reads stdin when `-i/--input` is omitted:
 
 ```bash
@@ -109,7 +116,7 @@ llmff stages list
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
-Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Manifests remain the format for branching graphs and version-controlled recipes.
+Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Manifests remain the format for branching graphs and version-controlled recipes.
 
 For development without installing, prefix commands with `cargo run -p llmff --`, for example:
 
