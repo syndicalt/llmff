@@ -104,6 +104,7 @@ jobs:
           else
             (cd dist && shasum -a 256 -c "llmff-${version}-${{ matrix.target }}.msi.sha256")
           fi
+          scripts/smoke-windows-msi.sh --msi "dist/llmff-${version}-${{ matrix.target }}.msi"
 
       - name: Package macOS installer
         if: ${{ matrix.macos_pkg }}

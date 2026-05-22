@@ -46,6 +46,11 @@ Windows MSI implementation slice:
 - `scripts/package-windows-msi.sh` builds an unsigned x86_64 Windows MSI with WiX and writes an adjacent SHA-256 checksum.
 - `.github/workflows/release-artifacts.yml` builds and checksums the Windows MSI from the Windows release-artifact job.
 
+Windows MSI smoke implementation slice:
+
+- `scripts/smoke-windows-msi.sh` extracts a built MSI on Windows hosts and verifies the packaged `llmff.exe` with `--version`, `stages list`, `inspect`, and a deterministic mock-backed `run`.
+- `.github/workflows/release-artifacts.yml` runs the Windows MSI smoke gate from the Windows release-artifact job.
+
 macOS PKG implementation slice:
 
 - `scripts/package-macos-pkg.sh` builds an unsigned macOS Installer `.pkg` with `pkgbuild`, staging `llmff` into `/usr/local/bin`.
