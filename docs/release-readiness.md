@@ -17,6 +17,7 @@ At this point it is reasonable to say: `llmff` is installable from GitHub for ea
 - [x] A versioned tag or release exists.
 - [x] Fresh install has been verified from that tag or release.
 - [x] Release notes describe supported platforms and known limitations.
+- [x] Platform support docs describe supported CPU targets and OS assumptions.
 - [x] The smoke install gate passes against the release source, not only the local checkout.
 - [x] At least one end-to-end example can be run by a new user without editing repository files.
 - [x] Release tag workflows publish packaged artifacts as GitHub release assets.
@@ -30,3 +31,6 @@ scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.1
 ```
 
 For release tags after this packaging slice, CI uploads binary archives, checksums, Ubuntu/Debian packages, and Arch packaging metadata to the matching GitHub Release assets. Manual dispatch keeps those outputs as Actions artifacts only.
+
+Current packaged artifact targets and installer assumptions are documented in
+[`docs/platform-support.md`](platform-support.md).
