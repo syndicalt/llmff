@@ -30,6 +30,12 @@ pub struct PluginStage {
     pub entrypoint: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginBackend {
+    pub name: String,
+    pub entrypoint: PathBuf,
+}
+
 pub fn discover_plugin_manifests(
     directory: impl AsRef<Path>,
 ) -> Result<Vec<PluginManifest>, LlmffError> {
@@ -104,6 +110,23 @@ pub fn discover_plugin_stages(directory: impl AsRef<Path>) -> Result<Vec<PluginS
 
     stages.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(stages)
+}
+
+pub fn discover_plugin_backends(
+    directory: impl AsRef<Path>,
+) -> Result<Vec<PluginBackend>, LlmffError> {
+    let directory = directory.as_ref();
+    let mut backends = Vec::new();
+
+    for plugin_capability in discover_plugin_capabilities(directory, "backend")? {
+        backends.push(PluginBackend {
+            name: plugin_capability.name,
+            entrypoint: plugin_capability.entrypoint,
+        });
+    }
+
+    backends.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(backends)
 }
 
 impl PluginManifest {
@@ -338,6 +361,35 @@ capabilities:
             vec![PluginStage {
                 name: "json.uppercase".to_string(),
                 entrypoint: plugin_root.join("./bin/uppercase"),
+            }]
+        );
+    }
+
+    #[test]
+    fn discovers_plugin_backends_with_entrypoints_relative_to_plugin_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_root = directory.path().join("model-tools");
+        std::fs::create_dir(&plugin_root).unwrap();
+        std::fs::write(
+            plugin_root.join("llmff-plugin.yaml"),
+            r#"
+name: model-tools
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: local-echo
+    entrypoint: ./bin/local-echo
+"#,
+        )
+        .unwrap();
+
+        let backends = discover_plugin_backends(directory.path()).unwrap();
+
+        assert_eq!(
+            backends,
+            vec![PluginBackend {
+                name: "local-echo".to_string(),
+                entrypoint: plugin_root.join("./bin/local-echo"),
             }]
         );
     }

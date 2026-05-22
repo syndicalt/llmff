@@ -4,11 +4,11 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 use llmff_core::backend::{
-    builtin_backend_families, MockBackend, OllamaBackend, OpenAiCompatibleBackend,
+    builtin_backend_families, CommandBackend, MockBackend, OllamaBackend, OpenAiCompatibleBackend,
 };
 use llmff_core::engine::{Engine, RunOptions, SchedulerMode};
 use llmff_core::manifest::Manifest;
-use llmff_core::plugin::discover_plugin_manifests;
+use llmff_core::plugin::{discover_plugin_backends, discover_plugin_manifests};
 use llmff_core::stage::builtin_stage_metadata;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,7 +160,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             api_key,
         } => {
             let (manifest, _) = load_pipeline_manifest(manifest, input, graph)?;
-            let engine = build_engine(backend, ollama, api_key_env, api_key)?;
+            let engine = build_engine(backend, ollama, api_key_env, api_key, &plugin_dir)?;
             engine.validate_manifest_with_plugin_dirs(manifest, &plugin_dir)?;
             println!("ok");
         }
@@ -345,7 +345,7 @@ async fn run_pipeline(
     api_key: Vec<String>,
 ) -> Result<()> {
     let (manifest, cwd) = load_pipeline_manifest(manifest_path, input_path, inline_graph)?;
-    let engine = build_engine(backend, ollama, api_key_env, api_key)?;
+    let engine = build_engine(backend, ollama, api_key_env, api_key, &plugin_dir)?;
     if stream_stage.is_some() && events.as_deref() == Some(Path::new("-")) {
         anyhow::bail!("stream-stage cannot write to stdout while events stream to stdout");
     }
@@ -385,6 +385,7 @@ fn build_engine(
     ollama: Vec<String>,
     api_key_env: Vec<String>,
     api_key: Vec<String>,
+    plugin_dir: &[PathBuf],
 ) -> Result<Engine> {
     let bad = std::env::var("LLMFF_MOCK_BAD_RESPONSE").unwrap_or_else(|_| "{}".to_string());
     let good = std::env::var("LLMFF_MOCK_GOOD_RESPONSE").unwrap_or_else(|_| bad.clone());
@@ -413,6 +414,14 @@ fn build_engine(
     }
     for backend in parse_alias_value_list(ollama)? {
         engine = engine.with_backend(backend.alias, Arc::new(OllamaBackend::new(backend.value)));
+    }
+    for plugin_dir in plugin_dir {
+        for backend in discover_plugin_backends(plugin_dir)? {
+            engine = engine.with_backend(
+                backend.name.clone(),
+                Arc::new(CommandBackend::new(backend.name, backend.entrypoint)),
+            );
+        }
     }
 
     Ok(engine)

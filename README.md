@@ -102,7 +102,7 @@ Tagged release builds publish archives, checksums, `.deb` packages, and Arch met
 - `llmff backends list` prints currently wired backend families.
 - `llmff backends list --format json` prints machine-readable backend family metadata and capability flags.
 - `llmff plugins list --plugin-dir <path>` discovers `llmff-plugin.yaml` manifests and prints plugin capability metadata.
-- `llmff run --plugin-dir <path>` can execute plugin-provided stages and tool transports declared in those manifests.
+- `llmff run --plugin-dir <path>` can execute plugin-provided stages, backends, and tool transports declared in those manifests.
 - The core crate owns execution semantics; the CLI is a thin adapter.
 - Mock backends are available for deterministic local runs and tests.
 - An OpenAI-compatible backend exists in the core crate for `/v1/chat/completions` servers.
@@ -235,7 +235,11 @@ Run a manifest that uses plugin capabilities:
 llmff run pipeline.yaml --plugin-dir ./plugins
 ```
 
-Plugin stage capabilities run as stdin/stdout command stages with `op: plugin:<capability-name>`. Plugin tool transports run through `op: tool` with `transport: <capability-name>`.
+Plugin stage capabilities run as stdin/stdout command stages with `op: plugin:<capability-name>`. Plugin tool transports run through `op: tool` with `transport: <capability-name>`. Plugin backend capabilities register their capability name as a model alias, so a backend named `local-echo` serves manifest model ids such as `local-echo:test-model`. Backend commands receive the serialized inference request on stdin and return JSON on stdout:
+
+```json
+{"text":"model output","usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}
+```
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
@@ -514,6 +518,6 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 
 - Schema values are inline JSON strings in the current manifest format.
 - `llmff run --stream-stage <infer-stage-id>` streams one model stage's token deltas to stdout. Streaming arbitrary stage payloads is not implemented yet.
-- Plugin manifests can be discovered and listed, and plugin stages plus plugin tool transports can run as stdin/stdout commands. Plugin backends and samplers are not wired into pipeline runtime yet.
+- Plugin manifests can be discovered and listed, and plugin stages, backend commands, and tool transports can run through stdin/stdout plugin entrypoints. Plugin samplers are not wired into pipeline runtime yet.
 - Remote embedding models, external vector indexes, and multimodal values are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

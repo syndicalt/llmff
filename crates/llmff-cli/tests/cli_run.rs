@@ -1114,6 +1114,87 @@ outputs:
 }
 
 #[test]
+fn run_executes_plugin_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join("plugins");
+    let plugin = plugin_dir.join("model-plugin");
+    let bin = plugin.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: model-plugin
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: local-echo
+    entrypoint: ./bin/backend
+"#,
+    )
+    .unwrap();
+    let entrypoint = bin.join("backend");
+    std::fs::write(
+        &entrypoint,
+        "#!/bin/sh\ncat >/dev/null\nprintf '{\"text\":\"plugin backend response\"}'\n",
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&entrypoint).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+    }
+    std::fs::set_permissions(&entrypoint, permissions).unwrap();
+
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "ask plugin backend").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: local-echo:test-model
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args([
+            "run",
+            manifest.to_str().unwrap(),
+            "--plugin-dir",
+            plugin_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(
+        std::fs::read_to_string(output).unwrap(),
+        "plugin backend response"
+    );
+}
+
+#[test]
 fn inline_graph_run_rejects_manifest_and_graph_together() {
     let dir = tempfile::tempdir().unwrap();
     let manifest = dir.path().join("pipeline.yaml");
@@ -1186,6 +1267,67 @@ graph:
 outputs:
   final:
     from: uppercase
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args([
+        "inspect",
+        manifest.to_str().unwrap(),
+        "--plugin-dir",
+        plugin_dir.to_str().unwrap(),
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("ok"));
+}
+
+#[test]
+fn inspect_accepts_plugin_backend_with_plugin_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join("plugins");
+    let plugin = plugin_dir.join("model-plugin");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: model-plugin
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: local-echo
+    entrypoint: /bin/false
+"#,
+    )
+    .unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "ask plugin backend").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: local-echo:test-model
+outputs:
+  final:
+    from: draft
     path: {}
 "#,
             prompt.display(),
