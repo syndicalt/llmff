@@ -420,6 +420,45 @@ fn inline_graph_run_defaults_load_to_stdin_and_write_to_stdout() {
 }
 
 #[test]
+fn inline_graph_run_executes_retrieve_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let docs = dir.path().join("docs");
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("matches.json");
+    std::fs::create_dir(&docs).unwrap();
+    std::fs::write(&prompt, "rust graph").unwrap();
+    std::fs::write(
+        docs.join("rust.txt"),
+        "Rust builds reliable graph pipelines.",
+    )
+    .unwrap();
+    std::fs::write(
+        docs.join("python.txt"),
+        "Python scripts are useful for quick notebooks.",
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args([
+            "run",
+            "-i",
+            prompt.to_str().unwrap(),
+            "-g",
+            "load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=1) | write(matches.json)",
+        ])
+        .assert()
+        .success();
+
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap())
+        .expect("retrieve output should be JSON");
+    assert_eq!(json["query"], "rust graph");
+    assert_eq!(json["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(json["matches"][0]["path"], "docs/rust.txt");
+    assert_eq!(json["matches"][0]["score"], 2);
+}
+
+#[test]
 fn inline_graph_run_rejects_manifest_and_graph_together() {
     let dir = tempfile::tempdir().unwrap();
     let manifest = dir.path().join("pipeline.yaml");
