@@ -39,6 +39,8 @@ Packaged installers for Windows, macOS, Ubuntu, Debian, and Arch Linux are on th
 
 Release tags also build compressed binary archives in CI as the first packaged-artifact slice. Ubuntu/Debian `.deb` packaging and Arch `PKGBUILD` metadata are wired for the Linux release job; macOS signed/notarized installers and Windows installers are still future roadmap items.
 
+Tagged release builds publish archives, checksums, `.deb` packages, and Arch metadata as GitHub Release assets. Manual workflow runs keep the same files as Actions artifacts.
+
 ## Current Scope
 
 - `llmff run <manifest>` executes a pipeline manifest.

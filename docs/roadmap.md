@@ -45,6 +45,11 @@ Third implementation slice:
 - `scripts/package-arch.sh` generates an AUR-ready `PKGBUILD` and `.SRCINFO` for the prebuilt Linux x86_64 release archive.
 - `.github/workflows/release-artifacts.yml` generates and validates Arch packaging metadata from the Ubuntu release-artifact job.
 
+Fourth implementation slice:
+
+- `.github/workflows/release-artifacts.yml` uploads tag-built archives, checksums, `.deb` packages, and Arch metadata to the matching GitHub Release assets.
+- Manual workflow dispatch keeps generated files as Actions artifacts only.
+
 ## Future Capability Tracks
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
