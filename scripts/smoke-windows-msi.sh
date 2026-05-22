@@ -99,8 +99,39 @@ if [ -n "$msi" ]; then
   fi
 
   payload_root="$work/msi-root"
+  msiexec_log="$work/msiexec.log"
   mkdir -p "$payload_root"
-  "$msiexec_cmd" /a "$(native_path "$msi")" /qn TARGETDIR="$(native_path "$payload_root")"
+  msiexec_args=(
+    /a "$(native_path "$msi")"
+    /qn
+    /l*v "$(native_path "$msiexec_log")"
+    TARGETDIR="$(native_path "$payload_root")"
+  )
+  if command -v timeout >/dev/null 2>&1; then
+    set +e
+    timeout 180 "$msiexec_cmd" "${msiexec_args[@]}"
+    status=$?
+    set -e
+    if [ "$status" -ne 0 ]; then
+      printf 'error: msiexec administrative install failed or timed out with status %s\n' "$status" >&2
+      if [ -f "$msiexec_log" ]; then
+        tail -80 "$msiexec_log" >&2
+      fi
+      exit 1
+    fi
+  else
+    set +e
+    "$msiexec_cmd" "${msiexec_args[@]}"
+    status=$?
+    set -e
+    if [ "$status" -ne 0 ]; then
+      printf 'error: msiexec administrative install failed with status %s\n' "$status" >&2
+      if [ -f "$msiexec_log" ]; then
+        tail -80 "$msiexec_log" >&2
+      fi
+      exit 1
+    fi
+  fi
 else
   if [ ! -d "$payload_root" ]; then
     printf 'error: payload root not found: %s\n' "$payload_root" >&2
