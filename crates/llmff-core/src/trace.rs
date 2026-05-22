@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
 use serde::Serialize;
@@ -43,14 +43,20 @@ pub struct TraceEvent {
 }
 
 pub struct TraceWriter {
-    writer: BufWriter<File>,
+    writer: BufWriter<Box<dyn Write + Send>>,
 }
 
 impl TraceWriter {
     pub fn create(path: &Path) -> Result<Self, LlmffError> {
         Ok(Self {
-            writer: BufWriter::new(File::create(path)?),
+            writer: BufWriter::new(Box::new(File::create(path)?)),
         })
+    }
+
+    pub fn stdout() -> Self {
+        Self {
+            writer: BufWriter::new(Box::new(io::stdout())),
+        }
     }
 
     pub fn write_event(&mut self, event: &TraceEvent) -> Result<(), LlmffError> {

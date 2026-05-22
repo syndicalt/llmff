@@ -33,6 +33,8 @@ enum Command {
         graph: Option<String>,
         #[arg(long)]
         trace: Option<PathBuf>,
+        #[arg(long = "events")]
+        events: Option<PathBuf>,
         #[arg(long)]
         parallel: bool,
         #[arg(long = "backend")]
@@ -101,6 +103,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             input,
             graph,
             trace,
+            events,
             parallel,
             backend,
             ollama,
@@ -112,6 +115,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 input,
                 graph,
                 trace,
+                events,
                 parallel,
                 backend,
                 ollama,
@@ -280,6 +284,7 @@ async fn run_pipeline(
     input_path: Option<PathBuf>,
     inline_graph: Option<String>,
     trace: Option<PathBuf>,
+    events: Option<PathBuf>,
     parallel: bool,
     backend: Vec<String>,
     ollama: Vec<String>,
@@ -292,6 +297,7 @@ async fn run_pipeline(
     let options = RunOptions {
         run_id: "cli-run".to_string(),
         trace_path: trace,
+        event_path: events,
         scheduler: if parallel {
             SchedulerMode::Parallel
         } else {

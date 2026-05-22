@@ -73,6 +73,7 @@ impl StageOutcome {
 pub struct RunOptions {
     pub run_id: String,
     pub trace_path: Option<PathBuf>,
+    pub event_path: Option<PathBuf>,
     pub scheduler: SchedulerMode,
 }
 
@@ -81,6 +82,7 @@ impl Default for RunOptions {
         Self {
             run_id: "local-run".to_string(),
             trace_path: None,
+            event_path: None,
             scheduler: SchedulerMode::Sequential,
         }
     }
@@ -129,10 +131,7 @@ impl Engine {
     ) -> Result<RunReport, LlmffError> {
         let graph = self.validate_manifest(manifest.clone())?;
         let mut statuses = BTreeMap::new();
-        let mut trace = match options.trace_path.as_ref() {
-            Some(path) => Some(TraceWriter::create(path)?),
-            None => None,
-        };
+        let mut trace = create_trace_writers(&options)?;
 
         write_trace(
             &mut trace,
@@ -246,7 +245,7 @@ impl Engine {
         graph: &Graph,
         cwd: &Path,
         statuses: &mut BTreeMap<String, StageStatus>,
-        trace: &mut Option<TraceWriter>,
+        trace: &mut Vec<TraceWriter>,
         run_id: &str,
     ) -> Result<(), LlmffError> {
         for stage in graph.stages() {
@@ -264,7 +263,7 @@ impl Engine {
         graph: &Graph,
         cwd: &Path,
         statuses: &mut BTreeMap<String, StageStatus>,
-        trace: &mut Option<TraceWriter>,
+        trace: &mut Vec<TraceWriter>,
         run_id: &str,
     ) -> Result<(), LlmffError> {
         let mut pending = graph.stages().iter().collect::<Vec<_>>();
@@ -314,7 +313,7 @@ impl Engine {
 
     fn start_stage_trace(
         &self,
-        trace: &mut Option<TraceWriter>,
+        trace: &mut Vec<TraceWriter>,
         run_id: &str,
         stage: &StageSpec,
     ) -> Result<Instant, LlmffError> {
@@ -348,7 +347,7 @@ impl Engine {
 
     fn finish_stage_trace(
         &self,
-        trace: &mut Option<TraceWriter>,
+        trace: &mut Vec<TraceWriter>,
         run_id: &str,
         stage: &StageSpec,
         stage_started: Instant,
@@ -1549,8 +1548,26 @@ fn write_output(cwd: &Path, path: &str, value: &str) -> Result<(), LlmffError> {
     Ok(())
 }
 
-fn write_trace(trace: &mut Option<TraceWriter>, event: TraceEvent) -> Result<(), LlmffError> {
-    if let Some(trace) = trace {
+fn create_trace_writers(options: &RunOptions) -> Result<Vec<TraceWriter>, LlmffError> {
+    let mut writers = Vec::new();
+
+    if let Some(path) = options.trace_path.as_ref() {
+        writers.push(TraceWriter::create(path)?);
+    }
+
+    if let Some(path) = options.event_path.as_ref() {
+        if path == Path::new("-") {
+            writers.push(TraceWriter::stdout());
+        } else {
+            writers.push(TraceWriter::create(path)?);
+        }
+    }
+
+    Ok(writers)
+}
+
+fn write_trace(trace: &mut Vec<TraceWriter>, event: TraceEvent) -> Result<(), LlmffError> {
+    for trace in trace {
         trace.write_event(&event)?;
     }
     Ok(())
@@ -2286,6 +2303,7 @@ outputs:
         let options = RunOptions {
             run_id: "test-run".to_string(),
             trace_path: Some(trace_path.clone()),
+            event_path: None,
             scheduler: SchedulerMode::Sequential,
         };
 
@@ -2331,6 +2349,7 @@ outputs:
         let options = RunOptions {
             run_id: "trace-test".to_string(),
             trace_path: Some(trace_path.clone()),
+            event_path: None,
             scheduler: SchedulerMode::Sequential,
         };
 
@@ -2412,6 +2431,7 @@ outputs:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    event_path: None,
                     scheduler: SchedulerMode::Sequential,
                 },
             )
@@ -2466,6 +2486,7 @@ outputs:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    event_path: None,
                     scheduler: SchedulerMode::Sequential,
                 },
             )
@@ -2532,6 +2553,7 @@ outputs:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    event_path: None,
                     scheduler: SchedulerMode::Sequential,
                 },
             )
@@ -2590,6 +2612,7 @@ outputs:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    event_path: None,
                     scheduler: SchedulerMode::Sequential,
                 },
             )
@@ -2649,6 +2672,7 @@ graph:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    event_path: None,
                     scheduler: SchedulerMode::Sequential,
                 },
             )
@@ -2685,6 +2709,7 @@ graph:
                 RunOptions {
                     run_id: "cache-miss".to_string(),
                     trace_path: Some(first_trace_path.clone()),
+                    event_path: None,
                     scheduler: SchedulerMode::Sequential,
                 },
             )
@@ -2699,6 +2724,7 @@ graph:
                 RunOptions {
                     run_id: "cache-hit".to_string(),
                     trace_path: Some(second_trace_path.clone()),
+                    event_path: None,
                     scheduler: SchedulerMode::Sequential,
                 },
             )
@@ -2929,6 +2955,7 @@ outputs:
                 RunOptions {
                     run_id: "parallel-test".to_string(),
                     trace_path: None,
+                    event_path: None,
                     scheduler: SchedulerMode::Parallel,
                 },
             )
