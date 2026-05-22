@@ -35,6 +35,11 @@ First implementation slice:
 - `scripts/package-archive.sh` creates a compressed binary archive and adjacent SHA-256 checksum from an already-built `llmff` binary.
 - `.github/workflows/release-artifacts.yml` builds release binaries on tag pushes for Linux, macOS Apple Silicon, macOS Intel, and Windows, then uploads archive artifacts.
 
+Second implementation slice:
+
+- `scripts/package-deb.sh` creates an Ubuntu/Debian `.deb` package and adjacent SHA-256 checksum from an already-built Linux `llmff` binary.
+- `.github/workflows/release-artifacts.yml` builds and inspects an `amd64` `.deb` from the Ubuntu release-artifact job.
+
 ## Future Capability Tracks
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
