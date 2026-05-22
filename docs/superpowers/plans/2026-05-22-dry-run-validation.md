@@ -23,7 +23,7 @@
 - Modify: `crates/llmff-core/src/engine.rs`
 - Test: `crates/llmff-core/src/engine.rs`
 
-- [ ] **Step 1: Write failing engine tests**
+- [x] **Step 1: Write failing engine tests**
 
 Add these tests to the existing `#[cfg(test)] mod tests` in `crates/llmff-core/src/engine.rs`:
 
@@ -101,7 +101,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -111,7 +111,7 @@ cargo test -p llmff-core validate_manifest_
 
 Expected: FAIL because `Engine::validate_manifest` does not exist.
 
-- [ ] **Step 3: Implement minimal engine validation**
+- [x] **Step 3: Implement minimal engine validation**
 
 Add `pub fn validate_manifest(&self, manifest: Manifest) -> Result<Graph, LlmffError>` to `impl Engine`, call it from `run_manifest_with_options`, and add private helpers:
 
@@ -170,7 +170,7 @@ fn validate_stage(&self, stage: &StageSpec) -> Result<(), LlmffError> {
 
 Use small private helpers returning `LlmffError::StageExecution` for stage requirement errors.
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -180,7 +180,7 @@ cargo test -p llmff-core validate_manifest_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/llmff-core/src/engine.rs
@@ -193,7 +193,7 @@ git commit -m "feat: validate manifests without execution"
 - Modify: `crates/llmff-cli/src/commands.rs`
 - Test: `crates/llmff-cli/tests/cli_run.rs`
 
-- [ ] **Step 1: Write failing CLI tests**
+- [x] **Step 1: Write failing CLI tests**
 
 Add these tests near `inspect_example_manifest_succeeds`:
 
@@ -276,7 +276,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -286,7 +286,7 @@ cargo test -p llmff --test cli_run inspect_
 
 Expected: FAIL because `inspect` does not accept backend flags and does not use engine validation.
 
-- [ ] **Step 3: Implement shared CLI engine construction**
+- [x] **Step 3: Implement shared CLI engine construction**
 
 In `crates/llmff-cli/src/commands.rs`, add the same backend flags to `Command::Inspect`, route them through the match arm, extract `build_engine`, and replace direct graph validation with `engine.validate_manifest(manifest)?`.
 
@@ -329,7 +329,7 @@ fn build_engine(
 }
 ```
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -339,7 +339,7 @@ cargo test -p llmff --test cli_run inspect_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/llmff-cli/src/commands.rs crates/llmff-cli/tests/cli_run.rs
@@ -353,11 +353,11 @@ git commit -m "feat: inspect backend availability"
 - Modify: `docs/superpowers/specs/2026-05-22-dry-run-validation-design.md`
 - Modify: `docs/superpowers/plans/2026-05-22-dry-run-validation.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Document that `inspect` performs dry-run validation and accepts the same explicit backend registration flags as `run`.
 
-- [ ] **Step 2: Run final verification**
+- [x] **Step 2: Run final verification**
 
 Run:
 
