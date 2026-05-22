@@ -27,6 +27,7 @@ Do not describe `llmff` as broadly released until every item in this section is 
 Release `v0.1.1` was verified with:
 
 ```bash
+scripts/release-preflight.sh v0.1.1
 scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.1
 ```
 
