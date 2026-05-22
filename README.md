@@ -47,6 +47,12 @@ Generate and validate Windows MSI packaging metadata:
 scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.1 --target x86_64-pc-windows-msvc --out-dir dist --emit-wxs-only
 ```
 
+Generate and validate macOS installer payload metadata:
+
+```bash
+scripts/package-macos-pkg.sh --binary target/release/llmff --version 0.1.1 --target aarch64-apple-darwin --out-dir dist --emit-payload-only
+```
+
 Smoke test a generated Debian package without root:
 
 ```bash
@@ -55,7 +61,7 @@ scripts/smoke-deb.sh --deb dist/llmff_0.1.1_amd64.deb
 
 Packaged installers for Windows, macOS, Ubuntu, Debian, and Arch Linux are on the roadmap; current releases install through Cargo from GitHub.
 
-Release tags also build compressed binary archives in CI as the first packaged-artifact slice. Ubuntu/Debian `.deb` packaging, Arch `PKGBUILD` metadata, and unsigned Windows MSI packaging are wired into release artifact jobs; macOS signed/notarized installers and signed Windows installers are still future roadmap items.
+Release tags also build compressed binary archives in CI as the first packaged-artifact slice. Ubuntu/Debian `.deb` packaging, Arch `PKGBUILD` metadata, unsigned Windows MSI packaging, and unsigned macOS `.pkg` packaging are wired into release artifact jobs; signed/notarized macOS installers and signed Windows installers are still future roadmap items.
 
 Tagged release builds publish archives, checksums, `.deb` packages, and Arch metadata as GitHub Release assets. Manual workflow runs keep the same files as Actions artifacts.
 
