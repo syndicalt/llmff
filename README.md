@@ -85,6 +85,12 @@ Inspect the manifest without running model calls:
 llmff inspect examples/json-repair.yaml
 ```
 
+Inspect an inline graph without running model calls:
+
+```bash
+llmff inspect -g 'load | infer(model=mock:good) | write(-)'
+```
+
 `inspect` catches type mismatches that are statically provable, such as field-based route stages whose source is known to be text rather than JSON.
 
 Inspect a manifest that references a registered backend alias:
@@ -103,7 +109,7 @@ llmff stages list
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
-Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax. Manifests remain the format for branching graphs and version-controlled recipes.
+Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Manifests remain the format for branching graphs and version-controlled recipes.
 
 For development without installing, prefix commands with `cargo run -p llmff --`, for example:
 

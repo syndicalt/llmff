@@ -453,6 +453,32 @@ fn inspect_example_manifest_succeeds() {
 }
 
 #[test]
+fn inspect_accepts_inline_graph() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+
+    cmd.args(["inspect", "-g", "load | infer(model=mock:good) | write(-)"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ok"));
+}
+
+#[test]
+fn inspect_rejects_inline_graph_with_missing_backend() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+
+    cmd.args([
+        "inspect",
+        "-g",
+        "load | infer(model=openai:gpt-test) | write(-)",
+    ])
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains(
+        "no backend configured for `openai:gpt-test`",
+    ));
+}
+
+#[test]
 fn inspect_rejects_unregistered_backend_alias() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");
