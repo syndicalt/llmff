@@ -50,6 +50,9 @@ enum Command {
         #[command(subcommand)]
         command: StagesCommand,
     },
+    Trace {
+        path: PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -113,9 +116,76 @@ pub async fn run(cli: Cli) -> Result<()> {
             println!("tool");
             println!("write");
         }
+        Command::Trace { path } => summarize_trace(&path)?,
     }
 
     Ok(())
+}
+
+fn summarize_trace(path: &Path) -> Result<()> {
+    let source = std::fs::read_to_string(path)?;
+    for (index, line) in source.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event: serde_json::Value = serde_json::from_str(line).map_err(|error| {
+            anyhow::anyhow!("invalid trace JSON on line {}: {error}", index + 1)
+        })?;
+        if let Some(summary) = summarize_trace_event(&event) {
+            println!("{summary}");
+        }
+    }
+
+    Ok(())
+}
+
+fn summarize_trace_event(event: &serde_json::Value) -> Option<String> {
+    match event.get("event")?.as_str()? {
+        "run_finished" => Some(format!(
+            "run {} {}",
+            string_field(event, "run_id").unwrap_or("unknown"),
+            string_field(event, "status").unwrap_or("unknown")
+        )),
+        "stage_finished" => {
+            let mut parts = vec![
+                string_field(event, "stage_id").unwrap_or("unknown").to_string(),
+                string_field(event, "op").unwrap_or("unknown").to_string(),
+                string_field(event, "status").unwrap_or("unknown").to_string(),
+                format!("{}ms", integer_field(event, "duration_ms").unwrap_or(0)),
+            ];
+
+            push_string_metadata(&mut parts, event, "model");
+            push_string_metadata(&mut parts, event, "backend");
+            push_string_metadata(&mut parts, event, "provider_model");
+            if let Some(count) = event
+                .get("validation_errors")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len)
+            {
+                parts.push(format!("validation_errors={count}"));
+            }
+            push_string_metadata(&mut parts, event, "tool_kind");
+            push_string_metadata(&mut parts, event, "tool_target");
+            push_string_metadata(&mut parts, event, "output_path");
+
+            Some(parts.join(" "))
+        }
+        _ => None,
+    }
+}
+
+fn push_string_metadata(parts: &mut Vec<String>, event: &serde_json::Value, name: &str) {
+    if let Some(value) = string_field(event, name) {
+        parts.push(format!("{name}={value}"));
+    }
+}
+
+fn string_field<'a>(event: &'a serde_json::Value, name: &str) -> Option<&'a str> {
+    event.get(name).and_then(serde_json::Value::as_str)
+}
+
+fn integer_field(event: &serde_json::Value, name: &str) -> Option<u64> {
+    event.get(name).and_then(serde_json::Value::as_u64)
 }
 
 async fn run_pipeline(
