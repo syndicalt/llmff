@@ -204,6 +204,8 @@ impl Engine {
     }
 
     fn validate_stage(&self, stage: &StageSpec) -> Result<(), LlmffError> {
+        validate_when_condition(stage)?;
+
         match stage.op.as_str() {
             "load" => {
                 require_stage_field(stage, stage.input.as_deref(), "load requires input")?;
@@ -573,6 +575,25 @@ fn stage_validation_error(stage: &StageSpec, message: impl Into<String>) -> Llmf
     LlmffError::StageExecution {
         stage_id: stage.id.clone(),
         message: message.into(),
+    }
+}
+
+fn validate_when_condition(stage: &StageSpec) -> Result<(), LlmffError> {
+    let Some(condition) = stage.when.as_deref() else {
+        return Ok(());
+    };
+
+    match condition {
+        "success" | "invalid" | "skipped" => {
+            if stage.from.is_none() {
+                return Err(stage_validation_error(stage, "when requires from"));
+            }
+            Ok(())
+        }
+        other => Err(stage_validation_error(
+            stage,
+            format!("unknown when condition `{other}`"),
+        )),
     }
 }
 
@@ -1067,6 +1088,40 @@ graph:
         assert!(error
             .to_string()
             .contains("no backend configured for `openai:gpt-test`"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_unknown_when_condition() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    when: maybe
+    model: mock:good
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .with_backend(
+                "mock:good",
+                Arc::new(MockBackend::new("mock:good", "ok")),
+            )
+            .validate_manifest(manifest)
+            .expect_err("unknown when condition should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("stage `draft` failed: unknown when condition `maybe`"));
     }
 
     #[test]
