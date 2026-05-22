@@ -23,7 +23,7 @@
 - Modify: `crates/llmff-core/src/graph.rs`
 - Test: `crates/llmff-core/src/graph.rs`
 
-- [ ] **Step 1: Write failing graph tests**
+- [x] **Step 1: Write failing graph tests**
 
 Add these tests to `crates/llmff-core/src/graph.rs`:
 
@@ -136,7 +136,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -146,7 +146,7 @@ cargo test -p llmff-core graph::tests::orders_forward graph::tests::rejects_stag
 
 Expected: FAIL because graph validation currently rejects forward references before topological ordering.
 
-- [ ] **Step 3: Implement full-reference validation and topological sort**
+- [x] **Step 3: Implement full-reference validation and topological sort**
 
 In `crates/llmff-core/src/graph.rs`:
 
@@ -157,7 +157,7 @@ In `crates/llmff-core/src/graph.rs`:
 - Preserve manifest order as the ready-stage tiebreaker by scanning the original stage vector each iteration.
 - Return `GraphValidation("cycle detected in graph")` if no stage can be selected while unordered stages remain.
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -167,7 +167,7 @@ cargo test -p llmff-core graph::tests::orders_forward graph::tests::rejects_stag
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/llmff-core/src/graph.rs
@@ -180,7 +180,7 @@ git commit -m "feat: order graph stages by dependency"
 - Modify: `crates/llmff-core/src/engine.rs`
 - Test: `crates/llmff-core/src/engine.rs`
 
-- [ ] **Step 1: Write failing engine test**
+- [x] **Step 1: Write failing engine test**
 
 Add this test to `crates/llmff-core/src/engine.rs`:
 
@@ -231,7 +231,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run test to verify RED if Task 1 is not yet enough**
+- [x] **Step 2: Run test to verify RED if Task 1 is not yet enough**
 
 Run:
 
@@ -241,11 +241,11 @@ cargo test -p llmff-core engine::tests::runs_manifest_in_dependency_order
 
 Expected before Task 1 implementation: FAIL. If Task 1 already made it pass, keep the test because it proves engine integration.
 
-- [ ] **Step 3: Implement only if needed**
+- [x] **Step 3: Implement only if needed**
 
 If the test fails after Task 1, update `run_manifest_with_options` to keep using the sorted `Graph::stages()` order and avoid iterating `manifest.graph` directly.
 
-- [ ] **Step 4: Run engine test**
+- [x] **Step 4: Run engine test**
 
 Run:
 
@@ -255,7 +255,7 @@ cargo test -p llmff-core engine::tests::runs_manifest_in_dependency_order
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/llmff-core/src/engine.rs
@@ -270,7 +270,7 @@ git commit -m "test: prove dependency-order execution"
 - Modify: `docs/superpowers/specs/2026-05-22-dependency-order-execution-design.md`
 - Modify: `docs/superpowers/plans/2026-05-22-dependency-order-execution.md`
 
-- [ ] **Step 1: Update documentation**
+- [x] **Step 1: Update documentation**
 
 Update README:
 
@@ -279,7 +279,7 @@ Update README:
 
 Update the route stage design note to say the earlier-order target restriction was superseded by dependency-order execution.
 
-- [ ] **Step 2: Run final verification**
+- [x] **Step 2: Run final verification**
 
 Run:
 

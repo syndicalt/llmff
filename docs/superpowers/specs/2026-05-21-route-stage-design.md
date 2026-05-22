@@ -35,10 +35,10 @@ Field-based routing:
 
 - `from` identifies the condition source.
 - Status routing uses the status of `from`.
-- `on_success`, `on_invalid`, and `on_skipped` point to stage ids that already appear earlier in the graph.
+- `on_success`, `on_invalid`, and `on_skipped` point to stage ids in the graph.
 - Field routing requires the `from` status to be `Success(Value::Json(object))`.
 - Field values must be strings, numbers, or booleans. Values are matched as their compact JSON/string representation.
-- `cases` maps field values to stage ids that already appear earlier in the graph.
+- `cases` maps field values to stage ids in the graph.
 - `default` is used when no case matches.
 - The route output is an exact clone of the selected stage status.
 - If no route matches, fail with a `StageExecution` error naming the route stage.
@@ -53,7 +53,9 @@ Field-based routing:
 - `cases` values
 - `default`
 
-Targets must refer to stages that are earlier in manifest order. This keeps the current sequential scheduler honest and avoids hidden forward dependencies.
+Targets may appear anywhere in the manifest after the dependency-order scheduler upgrade. The graph validator rejects missing targets and cycles, and the scheduler executes target stages before the route stage.
+
+Earlier versions required route targets to appear earlier in manifest order. That restriction is superseded by `docs/superpowers/specs/2026-05-22-dependency-order-execution-design.md`.
 
 ## Out Of Scope
 
