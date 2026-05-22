@@ -569,6 +569,7 @@ impl Engine {
                 temperature: stage.temperature,
                 top_p: stage.top_p,
                 max_tokens: stage.max_tokens,
+                response_format: stage.response_format.clone(),
                 stop: stage.stop.clone(),
             })
             .await?;
@@ -615,6 +616,7 @@ impl Engine {
                         temperature: stage.temperature,
                         top_p: stage.top_p,
                         max_tokens: stage.max_tokens,
+                        response_format: stage.response_format.clone(),
                         stop: stage.stop.clone(),
                     })
                     .await?;
@@ -974,6 +976,14 @@ fn validate_sampling_parameters(stage: &StageSpec) -> Result<(), LlmffError> {
             stage,
             "max_tokens must be greater than 0",
         ));
+    }
+    if let Some(response_format) = stage.response_format.as_deref() {
+        if response_format != "json" {
+            return Err(stage_validation_error(
+                stage,
+                "response_format must be json",
+            ));
+        }
     }
     if stage.stop.iter().any(|stop| stop.is_empty()) {
         return Err(stage_validation_error(
@@ -1663,6 +1673,7 @@ mod tests {
     struct RecordingBackend {
         model: String,
         messages: Arc<Mutex<Vec<Message>>>,
+        response_format: Arc<Mutex<Option<String>>>,
         stop: Arc<Mutex<Vec<String>>>,
     }
 
@@ -1671,6 +1682,7 @@ mod tests {
         async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
             assert_eq!(request.model, self.model);
             *self.messages.lock().unwrap() = request.messages;
+            *self.response_format.lock().unwrap() = request.response_format;
             *self.stop.lock().unwrap() = request.stop;
             Ok(InferResponse {
                 model: request.model,
@@ -2054,6 +2066,37 @@ graph:
         assert!(error
             .to_string()
             .contains("stage `draft` failed: stop sequences cannot be empty"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_unknown_response_format() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+    response_format: xml
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .with_backend("mock:good", Arc::new(MockBackend::new("mock:good", "ok")))
+            .validate_manifest(manifest)
+            .expect_err("unknown response format should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("stage `draft` failed: response_format must be json"));
     }
 
     #[test]
@@ -3027,12 +3070,14 @@ outputs:
         ))
         .unwrap();
         let messages = Arc::new(Mutex::new(Vec::new()));
+        let response_format = Arc::new(Mutex::new(None));
         let stop = Arc::new(Mutex::new(Vec::new()));
         let engine = Engine::new().with_backend(
             "recording",
             Arc::new(RecordingBackend {
                 model: "test-model".to_string(),
                 messages: Arc::clone(&messages),
+                response_format,
                 stop,
             }),
         );
@@ -3052,6 +3097,49 @@ outputs:
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn infer_forwards_response_format_to_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        std::fs::write(&prompt_path, "Return an answer.").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: recording:test-model
+    response_format: json
+"#,
+            prompt_path.display()
+        ))
+        .unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let response_format = Arc::new(Mutex::new(None));
+        let stop = Arc::new(Mutex::new(Vec::new()));
+        let engine = Engine::new().with_backend(
+            "recording",
+            Arc::new(RecordingBackend {
+                model: "test-model".to_string(),
+                messages,
+                response_format: Arc::clone(&response_format),
+                stop,
+            }),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(*response_format.lock().unwrap(), Some("json".to_string()));
     }
 
     #[tokio::test]
@@ -3082,12 +3170,14 @@ graph:
         ))
         .unwrap();
         let messages = Arc::new(Mutex::new(Vec::new()));
+        let response_format = Arc::new(Mutex::new(None));
         let stop = Arc::new(Mutex::new(Vec::new()));
         let engine = Engine::new().with_backend(
             "recording",
             Arc::new(RecordingBackend {
                 model: "test-model".to_string(),
                 messages,
+                response_format,
                 stop: Arc::clone(&stop),
             }),
         );
