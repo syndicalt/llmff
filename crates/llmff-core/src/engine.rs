@@ -12,6 +12,7 @@ use crate::backend::{Backend, InferRequest, UsageMetadata};
 use crate::error::LlmffError;
 use crate::graph::{stage_dependencies, Graph};
 use crate::manifest::{Manifest, StageSpec};
+use crate::plugin::{discover_plugin_tool_transports, PluginToolTransport};
 use crate::stage::execute_deterministic_stage;
 use crate::trace::{TraceEvent, TraceWriter};
 use crate::value::{Message, StageStatus, Value};
@@ -75,6 +76,7 @@ pub struct RunOptions {
     pub trace_path: Option<PathBuf>,
     pub event_path: Option<PathBuf>,
     pub scheduler: SchedulerMode,
+    pub plugin_dirs: Vec<PathBuf>,
 }
 
 impl Default for RunOptions {
@@ -84,6 +86,7 @@ impl Default for RunOptions {
             trace_path: None,
             event_path: None,
             scheduler: SchedulerMode::Sequential,
+            plugin_dirs: Vec::new(),
         }
     }
 }
@@ -130,6 +133,7 @@ impl Engine {
         options: RunOptions,
     ) -> Result<RunReport, LlmffError> {
         let graph = self.validate_manifest(manifest.clone())?;
+        let plugin_tool_transports = load_plugin_tool_transports(&options.plugin_dirs)?;
         let mut statuses = BTreeMap::new();
         let mut trace = create_trace_writers(&options)?;
 
@@ -167,6 +171,7 @@ impl Engine {
                     &mut statuses,
                     &mut trace,
                     &options.run_id,
+                    &plugin_tool_transports,
                 )
                 .await?;
             }
@@ -178,6 +183,7 @@ impl Engine {
                     &mut statuses,
                     &mut trace,
                     &options.run_id,
+                    &plugin_tool_transports,
                 )
                 .await?;
             }
@@ -247,10 +253,13 @@ impl Engine {
         statuses: &mut BTreeMap<String, StageStatus>,
         trace: &mut Vec<TraceWriter>,
         run_id: &str,
+        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
     ) -> Result<(), LlmffError> {
         for stage in graph.stages() {
             let stage_started = self.start_stage_trace(trace, run_id, stage)?;
-            let outcome = self.execute_stage(manifest, stage, statuses, cwd).await?;
+            let outcome = self
+                .execute_stage(manifest, stage, statuses, cwd, plugin_tool_transports)
+                .await?;
             self.finish_stage_trace(trace, run_id, stage, stage_started, outcome, statuses)?;
         }
 
@@ -265,6 +274,7 @@ impl Engine {
         statuses: &mut BTreeMap<String, StageStatus>,
         trace: &mut Vec<TraceWriter>,
         run_id: &str,
+        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
     ) -> Result<(), LlmffError> {
         let mut pending = graph.stages().iter().collect::<Vec<_>>();
 
@@ -294,11 +304,15 @@ impl Engine {
                 .map(|stage| self.start_stage_trace(trace, run_id, stage))
                 .collect::<Result<Vec<_>, _>>()?;
             let status_snapshot = statuses.clone();
-            let outcomes = futures::future::join_all(
-                ready
-                    .iter()
-                    .map(|stage| self.execute_stage(manifest, stage, &status_snapshot, cwd)),
-            )
+            let outcomes = futures::future::join_all(ready.iter().map(|stage| {
+                self.execute_stage(
+                    manifest,
+                    stage,
+                    &status_snapshot,
+                    cwd,
+                    plugin_tool_transports,
+                )
+            }))
             .await;
 
             for ((stage, started), outcome) in ready.into_iter().zip(starts).zip(outcomes) {
@@ -488,6 +502,7 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         cwd: &Path,
+        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
     ) -> Result<StageOutcome, LlmffError> {
         if !should_execute_stage(stage, statuses)? {
             return Ok(StageOutcome::without_usage(StageStatus::Skipped));
@@ -512,7 +527,7 @@ impl Engine {
                 .execute_route(stage, statuses)
                 .map(StageOutcome::without_usage),
             "tool" => self
-                .execute_tool(stage, statuses, cwd)
+                .execute_tool(stage, statuses, cwd, plugin_tool_transports)
                 .await
                 .map(StageOutcome::without_usage),
             "write" => self
@@ -674,6 +689,7 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         cwd: &Path,
+        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
     ) -> Result<StageStatus, LlmffError> {
         if let Some(command) = &stage.command {
             return execute_command_tool(stage, statuses, cwd, command);
@@ -681,10 +697,24 @@ impl Engine {
         if stage.url.is_some() {
             return execute_http_tool(stage, statuses).await;
         }
+        if let Some(transport) = &stage.transport {
+            let plugin_transport = plugin_tool_transports.get(transport).ok_or_else(|| {
+                LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: format!("unknown plugin tool transport `{transport}`"),
+                }
+            })?;
+            return execute_command_tool(
+                stage,
+                statuses,
+                cwd,
+                &[plugin_transport.entrypoint.to_string_lossy().into_owned()],
+            );
+        }
 
         Err(LlmffError::StageExecution {
             stage_id: stage.id.clone(),
-            message: "tool requires command or url".to_string(),
+            message: "tool requires command, url, or plugin transport".to_string(),
         })
     }
 
@@ -856,6 +886,9 @@ impl Engine {
             } else if let Some(url) = &stage.url {
                 metadata.tool_kind = Some("http".to_string());
                 metadata.tool_target = Some(url.clone());
+            } else if let Some(transport) = &stage.transport {
+                metadata.tool_kind = Some("plugin".to_string());
+                metadata.tool_target = Some(transport.clone());
             }
         }
 
@@ -1260,6 +1293,24 @@ struct TraceMetadata {
 struct ResolvedBackendMetadata {
     backend_alias: String,
     provider_model: String,
+}
+
+fn load_plugin_tool_transports(
+    plugin_dirs: &[PathBuf],
+) -> Result<BTreeMap<String, PluginToolTransport>, LlmffError> {
+    let mut transports = BTreeMap::new();
+    for plugin_dir in plugin_dirs {
+        for transport in discover_plugin_tool_transports(plugin_dir)? {
+            if transports.contains_key(&transport.name) {
+                return Err(LlmffError::Config(format!(
+                    "duplicate plugin tool transport `{}`",
+                    transport.name
+                )));
+            }
+            transports.insert(transport.name.clone(), transport);
+        }
+    }
+    Ok(transports)
 }
 
 fn execute_command_tool(
@@ -2483,6 +2534,7 @@ outputs:
             trace_path: Some(trace_path.clone()),
             event_path: None,
             scheduler: SchedulerMode::Sequential,
+            plugin_dirs: Vec::new(),
         };
 
         engine
@@ -2529,6 +2581,7 @@ outputs:
             trace_path: Some(trace_path.clone()),
             event_path: None,
             scheduler: SchedulerMode::Sequential,
+            plugin_dirs: Vec::new(),
         };
 
         Engine::new()
@@ -2611,6 +2664,7 @@ outputs:
                     trace_path: Some(trace_path.clone()),
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
+                    plugin_dirs: Vec::new(),
                 },
             )
             .await
@@ -2666,6 +2720,7 @@ outputs:
                     trace_path: Some(trace_path.clone()),
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
+                    plugin_dirs: Vec::new(),
                 },
             )
             .await
@@ -2733,6 +2788,7 @@ outputs:
                     trace_path: Some(trace_path.clone()),
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
+                    plugin_dirs: Vec::new(),
                 },
             )
             .await
@@ -2792,6 +2848,7 @@ outputs:
                     trace_path: Some(trace_path.clone()),
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
+                    plugin_dirs: Vec::new(),
                 },
             )
             .await
@@ -2852,6 +2909,7 @@ graph:
                     trace_path: Some(trace_path.clone()),
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
+                    plugin_dirs: Vec::new(),
                 },
             )
             .await
@@ -2889,6 +2947,7 @@ graph:
                     trace_path: Some(first_trace_path.clone()),
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
+                    plugin_dirs: Vec::new(),
                 },
             )
             .await
@@ -2904,6 +2963,7 @@ graph:
                     trace_path: Some(second_trace_path.clone()),
                     event_path: None,
                     scheduler: SchedulerMode::Sequential,
+                    plugin_dirs: Vec::new(),
                 },
             )
             .await
@@ -3278,6 +3338,7 @@ graph:
                     trace_path: None,
                     event_path: None,
                     scheduler: SchedulerMode::Parallel,
+                    plugin_dirs: Vec::new(),
                 },
             )
             .await
@@ -3623,6 +3684,74 @@ outputs:
             .to_string();
 
         assert!(error.contains("tool command exited with status"));
+    }
+
+    #[tokio::test]
+    async fn tool_stage_uses_plugin_tool_transport() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_dir = dir.path().join("plugins");
+        let plugin = plugin_dir.join("cat-plugin");
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(
+            plugin.join("llmff-plugin.yaml"),
+            r#"
+name: cat-plugin
+version: 0.1.0
+capabilities:
+  - kind: tool-transport
+    name: stdio-cat
+    entrypoint: /bin/cat
+"#,
+        )
+        .unwrap();
+
+        let input_path = dir.path().join("input.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&input_path, "hello plugin").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  source:
+    path: {}
+graph:
+  - id: load_source
+    op: load
+    input: source
+  - id: call_tool
+    op: tool
+    from: load_source
+    transport: stdio-cat
+outputs:
+  final:
+    from: call_tool
+    path: {}
+"#,
+            input_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "plugin-test".to_string(),
+                    trace_path: None,
+                    event_path: None,
+                    scheduler: SchedulerMode::Sequential,
+                    plugin_dirs: vec![plugin_dir],
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(output_path).unwrap(),
+            "hello plugin"
+        );
     }
 
     #[tokio::test]

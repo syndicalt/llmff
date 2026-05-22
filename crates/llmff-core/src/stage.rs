@@ -134,9 +134,9 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
         StageMetadata {
             name: "tool",
             kind: "integration",
-            required_fields: &["from", "transport"],
-            optional_fields: &["command", "method", "url", "headers"],
-            capabilities: &["command-tool", "http-tool"],
+            required_fields: &["from", "command|url|transport"],
+            optional_fields: &["method", "headers"],
+            capabilities: &["command-tool", "http-tool", "plugin-tool-transport"],
         },
         StageMetadata {
             name: "write",
@@ -700,8 +700,8 @@ mod tests {
             .find(|stage| stage.name == "tool")
             .expect("tool stage should be described");
         assert_eq!(tool.kind, "integration");
-        assert!(tool.optional_fields.contains(&"command"));
-        assert!(tool.optional_fields.contains(&"url"));
+        assert!(tool.required_fields.contains(&"command|url|transport"));
+        assert!(tool.capabilities.contains(&"plugin-tool-transport"));
     }
 
     #[test]
@@ -729,6 +729,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -776,6 +777,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -827,6 +829,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -875,6 +878,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -932,6 +936,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -998,6 +1003,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -1045,6 +1051,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -1111,6 +1118,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -1169,6 +1177,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -1227,6 +1236,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -1280,6 +1290,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),
@@ -1335,6 +1346,7 @@ mod tests {
             cases: Default::default(),
             default: None,
             command: None,
+            transport: None,
             method: None,
             url: None,
             headers: Default::default(),

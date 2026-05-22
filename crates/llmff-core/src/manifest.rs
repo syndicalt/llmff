@@ -59,6 +59,7 @@ pub struct StageSpec {
     pub cases: BTreeMap<String, String>,
     pub default: Option<String>,
     pub command: Option<Vec<String>>,
+    pub transport: Option<String>,
     pub method: Option<String>,
     pub url: Option<String>,
     #[serde(default)]
