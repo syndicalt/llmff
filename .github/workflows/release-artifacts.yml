@@ -48,12 +48,10 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install WiX
+      - name: Restore WiX tool
         if: ${{ matrix.windows_msi }}
         shell: bash
-        run: |
-          dotnet tool install --global wix --version 5.*
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+        run: dotnet tool restore
 
       - name: Build release binary
         run: cargo build --locked --release -p llmff
