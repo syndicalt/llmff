@@ -1,0 +1,25 @@
+version: 1
+inputs:
+  prompt:
+    path: ./question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:bad
+  - id: validate
+    op: validate_json
+    from: draft
+    schema: '{"type":"object","required":["answer"],"properties":{"answer":{"type":"string"}},"additionalProperties":false}'
+  - id: repair
+    op: repair
+    from: validate
+    when: invalid
+    model: mock:good
+outputs:
+  final:
+    from: repair
+    path: ./answer.json
