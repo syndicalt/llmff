@@ -165,4 +165,8 @@ Plugin discovery implementation slice:
 - `llmff run --plugin-dir <path>` can execute plugin-provided `backend` capabilities as stdin/stdout command backends.
 - `llmff run --plugin-dir <path>` can execute plugin-provided `sampler` capabilities as stdin/stdout sampling override commands for `infer` and `repair` stages.
 
-- More complete model/runtime abstraction once the pipeline runner is stable.
+Model/runtime metadata implementation slice:
+
+- `llmff models list` exposes the runtime model aliases available to the current command line, including built-in mock models, CLI-registered OpenAI-compatible or Ollama aliases, and plugin command backends.
+- `llmff models list --format json` reports model alias, backend name, backend kind, runtime class, source, registration flag, API key requirement, and portable capability flags.
+- This keeps backend family metadata under `llmff backends list` while giving wrappers and supervisors a model/runtime inventory shaped around executable model ids.

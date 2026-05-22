@@ -224,6 +224,110 @@ capabilities:
 }
 
 #[test]
+fn models_list_json_includes_runtime_registered_models() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+
+    let output = cmd
+        .args([
+            "models",
+            "list",
+            "--format",
+            "json",
+            "--backend",
+            "openai_alt=https://api.example.test/v1",
+            "--ollama",
+            "local=http://localhost:11434",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let models: serde_json::Value =
+        serde_json::from_slice(&output).expect("model list should be valid JSON");
+
+    let openai_model = models
+        .as_array()
+        .expect("model list should be an array")
+        .iter()
+        .find(|model| model["model"] == "openai_alt:<model>")
+        .expect("CLI OpenAI-compatible model should be listed");
+    assert_eq!(openai_model["backend"], "openai_alt");
+    assert_eq!(openai_model["backend_kind"], "openai-compatible");
+    assert_eq!(openai_model["runtime"], "remote-chat");
+    assert_eq!(openai_model["source"], "cli");
+    assert_eq!(openai_model["requires_api_key"], true);
+    assert!(openai_model["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("streaming-inference")));
+
+    let ollama_model = models
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["model"] == "local:<model>")
+        .expect("CLI Ollama model should be listed");
+    assert_eq!(ollama_model["backend"], "local");
+    assert_eq!(ollama_model["runtime"], "local-chat");
+    assert_eq!(ollama_model["source"], "cli");
+    assert_eq!(ollama_model["requires_api_key"], false);
+}
+
+#[test]
+fn models_list_json_includes_plugin_backend_models() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join("plugins");
+    let plugin = plugin_dir.join("model-plugin");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: model-plugin
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: local-echo
+    entrypoint: /bin/false
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    let output = cmd
+        .args([
+            "models",
+            "list",
+            "--format",
+            "json",
+            "--plugin-dir",
+            plugin_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let models: serde_json::Value =
+        serde_json::from_slice(&output).expect("model list should be valid JSON");
+
+    let plugin_model = models
+        .as_array()
+        .expect("model list should be an array")
+        .iter()
+        .find(|model| model["model"] == "local-echo:<model>")
+        .expect("plugin backend model should be listed");
+    assert_eq!(plugin_model["backend"], "local-echo");
+    assert_eq!(plugin_model["backend_kind"], "plugin-command");
+    assert_eq!(plugin_model["runtime"], "command");
+    assert_eq!(plugin_model["source"], "plugin");
+    assert!(plugin_model["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("usage-metadata")));
+}
+
+#[test]
 fn plugins_list_json_prints_discovered_plugin_manifests() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir(directory.path().join("json-tools")).unwrap();

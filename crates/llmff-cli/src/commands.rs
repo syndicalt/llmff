@@ -72,6 +72,10 @@ enum Command {
         #[command(subcommand)]
         command: BackendsCommand,
     },
+    Models {
+        #[command(subcommand)]
+        command: ModelsCommand,
+    },
     Stages {
         #[command(subcommand)]
         command: StagesCommand,
@@ -95,6 +99,20 @@ enum StagesCommand {
 
 #[derive(Debug, Subcommand)]
 enum BackendsCommand {
+    List {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+        #[arg(long = "backend")]
+        backend: Vec<String>,
+        #[arg(long = "ollama")]
+        ollama: Vec<String>,
+        #[arg(long = "plugin-dir")]
+        plugin_dir: Vec<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ModelsCommand {
     List {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
@@ -179,6 +197,15 @@ pub async fn run(cli: Cli) -> Result<()> {
                     plugin_dir,
                 },
         } => print_backend_families(format, backend, ollama, plugin_dir)?,
+        Command::Models {
+            command:
+                ModelsCommand::List {
+                    format,
+                    backend,
+                    ollama,
+                    plugin_dir,
+                },
+        } => print_model_runtimes(format, backend, ollama, plugin_dir)?,
         Command::Stages {
             command: StagesCommand::List { format },
         } => print_stage_metadata(format)?,
@@ -319,6 +346,114 @@ fn backend_family_views(
     }
 
     Ok(families)
+}
+
+fn print_model_runtimes(
+    format: OutputFormat,
+    backend: Vec<String>,
+    ollama: Vec<String>,
+    plugin_dir: Vec<PathBuf>,
+) -> Result<()> {
+    let models = model_runtime_views(backend, ollama, plugin_dir)?;
+    match format {
+        OutputFormat::Text => {
+            for model in models {
+                if let Some(name) = model.get("model").and_then(serde_json::Value::as_str) {
+                    println!("{name}");
+                }
+            }
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&models)?);
+        }
+    }
+
+    Ok(())
+}
+
+fn model_runtime_views(
+    backend: Vec<String>,
+    ollama: Vec<String>,
+    plugin_dir: Vec<PathBuf>,
+) -> Result<Vec<serde_json::Value>> {
+    let mut models = Vec::new();
+
+    for family in builtin_backend_families() {
+        for model in family.model_aliases {
+            models.push(serde_json::json!({
+                "model": model,
+                "backend": family.name,
+                "backend_kind": family.kind,
+                "runtime": family.kind,
+                "source": "built-in",
+                "requires_api_key": family.requires_api_key,
+                "registration_flag": family.registration_flag,
+                "capabilities": family.capabilities,
+            }));
+        }
+    }
+
+    for backend in parse_alias_value_list(backend)? {
+        models.push(serde_json::json!({
+            "model": format!("{}:<model>", backend.alias),
+            "backend": backend.alias,
+            "backend_kind": "openai-compatible",
+            "runtime": "remote-chat",
+            "source": "cli",
+            "requires_api_key": true,
+            "registration_flag": format!("--backend {}=<base-url>", backend.alias),
+            "capabilities": [
+                "chat-messages",
+                "response-format-json",
+                "sampling",
+                "seed-control",
+                "stop-sequences",
+                "streaming-inference",
+                "usage-metadata",
+            ],
+        }));
+    }
+
+    for backend in parse_alias_value_list(ollama)? {
+        models.push(serde_json::json!({
+            "model": format!("{}:<model>", backend.alias),
+            "backend": backend.alias,
+            "backend_kind": "ollama",
+            "runtime": "local-chat",
+            "source": "cli",
+            "requires_api_key": false,
+            "registration_flag": format!("--ollama {}=<base-url>", backend.alias),
+            "capabilities": [
+                "chat-messages",
+                "response-format-json",
+                "sampling",
+                "seed-control",
+                "stop-sequences",
+                "usage-metadata",
+            ],
+        }));
+    }
+
+    for plugin_dir in plugin_dir {
+        for backend in discover_plugin_backends(&plugin_dir)? {
+            models.push(serde_json::json!({
+                "model": format!("{}:<model>", backend.name),
+                "backend": backend.name,
+                "backend_kind": "plugin-command",
+                "runtime": "command",
+                "source": "plugin",
+                "requires_api_key": false,
+                "registration_flag": "--plugin-dir",
+                "capabilities": [
+                    "chat-messages",
+                    "command-backend",
+                    "usage-metadata",
+                ],
+            }));
+        }
+    }
+
+    Ok(models)
 }
 
 fn print_plugin_manifests(plugin_dir: &Path, format: OutputFormat) -> Result<()> {

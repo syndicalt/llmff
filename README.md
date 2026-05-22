@@ -101,6 +101,7 @@ Tagged release builds publish archives, checksums, `.deb` packages, and Arch met
 - `llmff stages list --format json` prints machine-readable stage metadata and capability flags.
 - `llmff backends list` prints built-in and explicitly registered backend families.
 - `llmff backends list --format json` prints machine-readable backend family metadata and capability flags, including backends registered with `--backend`, `--ollama`, or `--plugin-dir`.
+- `llmff models list --format json` prints runtime model metadata for built-in mock models, CLI-registered OpenAI-compatible or Ollama aliases, and plugin command backends.
 - `llmff plugins list --plugin-dir <path>` discovers `llmff-plugin.yaml` manifests and prints plugin capability metadata.
 - `llmff run --plugin-dir <path>` can execute plugin-provided stages, backends, and tool transports declared in those manifests.
 - The core crate owns execution semantics; the CLI is a thin adapter.
@@ -235,6 +236,15 @@ Include runtime-registered providers in backend metadata:
 
 ```bash
 llmff backends list --format json \
+  --backend openai_alt=https://api.example.test/v1 \
+  --ollama local=http://localhost:11434 \
+  --plugin-dir ./plugins
+```
+
+List runtime model metadata separately from backend family metadata:
+
+```bash
+llmff models list --format json \
   --backend openai_alt=https://api.example.test/v1 \
   --ollama local=http://localhost:11434 \
   --plugin-dir ./plugins
@@ -538,6 +548,11 @@ Mock backends remain available for deterministic local runs and tests:
 - `LLMFF_MOCK_GOOD_RESPONSE`
 
 Those mock env vars are convenience fixtures, not the primary backend configuration model.
+
+`llmff models list` reports the runtime model aliases that the current command
+line makes available. JSON output includes the model alias, backend name,
+backend kind, runtime class, source, registration flag, API key requirement,
+and portable capability flags.
 
 ## Limitations
 
