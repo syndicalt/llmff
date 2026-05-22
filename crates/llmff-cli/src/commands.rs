@@ -42,7 +42,11 @@ enum Command {
         api_key: Vec<String>,
     },
     Inspect {
-        manifest: PathBuf,
+        manifest: Option<PathBuf>,
+        #[arg(short = 'i', long = "input")]
+        input: Option<PathBuf>,
+        #[arg(short = 'g', long = "graph")]
+        graph: Option<String>,
         #[arg(long = "backend")]
         backend: Vec<String>,
         #[arg(long = "ollama")]
@@ -103,13 +107,14 @@ pub async fn run(cli: Cli) -> Result<()> {
         }
         Command::Inspect {
             manifest,
+            input,
+            graph,
             backend,
             ollama,
             api_key_env,
             api_key,
         } => {
-            let source = std::fs::read_to_string(&manifest)?;
-            let manifest = Manifest::from_yaml_str(&source)?;
+            let (manifest, _) = load_pipeline_manifest(manifest, input, graph)?;
             let engine = build_engine(backend, ollama, api_key_env, api_key)?;
             engine.validate_manifest(manifest)?;
             println!("ok");
@@ -241,7 +246,7 @@ async fn run_pipeline(
     api_key_env: Vec<String>,
     api_key: Vec<String>,
 ) -> Result<()> {
-    let (manifest, cwd) = load_run_manifest(manifest_path, input_path, inline_graph)?;
+    let (manifest, cwd) = load_pipeline_manifest(manifest_path, input_path, inline_graph)?;
     let engine = build_engine(backend, ollama, api_key_env, api_key)?;
 
     let options = RunOptions {
@@ -299,7 +304,7 @@ fn build_engine(
     Ok(engine)
 }
 
-fn load_run_manifest(
+fn load_pipeline_manifest(
     manifest_path: Option<PathBuf>,
     input_path: Option<PathBuf>,
     inline_graph: Option<String>,
