@@ -114,6 +114,19 @@ graph:
     default: fast_answer
 ```
 
+Stages can be guarded with `when` so they only run when their parent stage has a matching status:
+
+```yaml
+graph:
+  - id: repair
+    op: repair
+    from: validate
+    when: invalid
+    model: mock:good
+```
+
+Supported conditions are `success`, `invalid`, and `skipped`. A non-matching condition marks the guarded stage as skipped before any stage-specific work runs, so model calls, tool calls, and writes are not invoked for skipped stages. Skipped stages still appear in traces with `status=skipped`.
+
 Tool stages call explicitly declared commands or HTTP endpoints:
 
 ```yaml

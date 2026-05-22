@@ -23,7 +23,7 @@
 - Modify: `crates/llmff-core/src/engine.rs`
 - Modify: `crates/llmff-cli/tests/cli_run.rs`
 
-- [ ] **Step 1: Write failing core validation test**
+- [x] **Step 1: Write failing core validation test**
 
 Add this test to `crates/llmff-core/src/engine.rs`:
 
@@ -60,7 +60,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -70,7 +70,7 @@ cargo test -p llmff-core validate_manifest_rejects_unknown_when_condition
 
 Expected: FAIL because unknown `when` values are currently accepted.
 
-- [ ] **Step 3: Implement validation**
+- [x] **Step 3: Implement validation**
 
 In `Engine::validate_stage`, call a helper for all stages:
 
@@ -100,7 +100,7 @@ fn validate_when_condition(stage: &StageSpec) -> Result<(), LlmffError> {
 }
 ```
 
-- [ ] **Step 4: Run test to verify GREEN**
+- [x] **Step 4: Run test to verify GREEN**
 
 Run:
 
@@ -110,7 +110,7 @@ cargo test -p llmff-core validate_manifest_rejects_unknown_when_condition
 
 Expected: PASS.
 
-- [ ] **Step 5: Add CLI inspect test and commit**
+- [x] **Step 5: Add CLI inspect test and commit**
 
 Add this test to `crates/llmff-cli/tests/cli_run.rs` near other inspect tests:
 
@@ -172,7 +172,7 @@ git commit -m "feat: validate when conditions"
 **Files:**
 - Modify: `crates/llmff-core/src/engine.rs`
 
-- [ ] **Step 1: Write failing runtime tests**
+- [x] **Step 1: Write failing runtime tests**
 
 Add these tests to `crates/llmff-core/src/engine.rs`:
 
@@ -285,7 +285,7 @@ outputs:
 }
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -295,7 +295,7 @@ cargo test -p llmff-core when_invalid_
 
 Expected: at least `when_invalid_skips_stage_on_success_parent` FAILS because the repair stage currently forwards success instead of returning skipped.
 
-- [ ] **Step 3: Implement pre-dispatch condition checks**
+- [x] **Step 3: Implement pre-dispatch condition checks**
 
 In `execute_stage`, before the `match stage.op.as_str()` dispatch, add:
 
@@ -336,7 +336,7 @@ fn matches_when(condition: &str, status: &StageStatus) -> bool {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -346,7 +346,7 @@ cargo test -p llmff-core when_invalid_
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/llmff-core/src/engine.rs
@@ -361,15 +361,15 @@ git commit -m "feat: execute when conditions"
 - Modify: `docs/superpowers/specs/2026-05-22-when-conditions-design.md`
 - Modify: `docs/superpowers/plans/2026-05-22-when-conditions.md`
 
-- [ ] **Step 1: Add trace regression if needed**
+- [x] **Step 1: Add trace regression if needed**
 
 If existing trace tests do not cover skipped stages, add a focused test asserting a skipped stage writes `status: "skipped"` in trace JSONL.
 
-- [ ] **Step 2: Document `when`**
+- [x] **Step 2: Document `when`**
 
 Update README with a short `when` section near route docs.
 
-- [ ] **Step 3: Run final verification**
+- [x] **Step 3: Run final verification**
 
 Run:
 
@@ -381,7 +381,7 @@ cargo run -p llmff -- inspect examples/json-repair.yaml
 
 Expected: all commands exit 0; inspect prints `ok`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add crates/llmff-core/src/engine.rs README.md docs/superpowers/specs/2026-05-22-when-conditions-design.md docs/superpowers/plans/2026-05-22-when-conditions.md

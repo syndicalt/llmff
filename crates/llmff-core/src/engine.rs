@@ -608,10 +608,13 @@ fn should_execute_stage(
     let Some(condition) = stage.when.as_deref() else {
         return Ok(true);
     };
-    let parent_id = stage.from.as_ref().ok_or_else(|| LlmffError::StageExecution {
-        stage_id: stage.id.clone(),
-        message: "when requires parent stage".to_string(),
-    })?;
+    let parent_id = stage
+        .from
+        .as_ref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "when requires parent stage".to_string(),
+        })?;
     let parent = statuses
         .get(parent_id)
         .ok_or_else(|| LlmffError::StageExecution {
@@ -1145,10 +1148,7 @@ graph:
         .unwrap();
 
         let error = Engine::new()
-            .with_backend(
-                "mock:good",
-                Arc::new(MockBackend::new("mock:good", "ok")),
-            )
+            .with_backend("mock:good", Arc::new(MockBackend::new("mock:good", "ok")))
             .validate_manifest(manifest)
             .expect_err("unknown when condition should be rejected");
 
@@ -1453,7 +1453,10 @@ outputs:
         let report = engine.run_manifest(manifest, dir.path()).await.unwrap();
 
         assert_eq!(report.final_status, RunStatus::Succeeded);
-        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "repair skipped");
+        assert_eq!(
+            std::fs::read_to_string(output_path).unwrap(),
+            "repair skipped"
+        );
     }
 
     #[tokio::test]
@@ -1548,6 +1551,80 @@ outputs:
             .find(|event| event["event"] == "stage_finished")
             .expect("stage_finished event should exist");
         assert!(stage_finished["duration_ms"].is_u64());
+    }
+
+    #[tokio::test]
+    async fn trace_events_include_skipped_when_stage_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.json");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "Return an answer object").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+  - id: validate
+    op: validate_json
+    from: draft
+    schema: '{{"type":"object","required":["answer"]}}'
+  - id: repair
+    op: repair
+    from: validate
+    when: invalid
+    model: mock:repair
+  - id: choose_final
+    op: route
+    from: validate
+    on_success: validate
+    on_invalid: repair
+outputs:
+  final:
+    from: choose_final
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let engine = Engine::new()
+            .with_backend(
+                "mock:good",
+                Arc::new(MockBackend::new("mock:good", r#"{"answer":"ok"}"#)),
+            )
+            .with_backend(
+                "mock:repair",
+                Arc::new(MockBackend::new("mock:repair", r#"{"answer":"repaired"}"#)),
+            );
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "trace-test".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let repair_finished = trace_stage_finished(&events, "repair");
+
+        assert_eq!(repair_finished["status"], "skipped");
     }
 
     #[tokio::test]
