@@ -20,7 +20,9 @@ impl Graph {
                     stage.id
                 )));
             }
+        }
 
+        for stage in &manifest.graph {
             if let Some(input) = &stage.input {
                 if !input_ids.contains(input) {
                     return Err(LlmffError::GraphValidation(format!(
@@ -52,13 +54,62 @@ impl Graph {
         }
 
         Ok(Self {
-            stages: manifest.graph,
+            stages: order_stages(manifest.graph)?,
         })
     }
 
     pub fn stages(&self) -> &[StageSpec] {
         &self.stages
     }
+}
+
+fn order_stages(stages: Vec<StageSpec>) -> Result<Vec<StageSpec>, LlmffError> {
+    let mut ordered = Vec::with_capacity(stages.len());
+    let mut completed = BTreeSet::new();
+    let mut remaining = stages;
+
+    while !remaining.is_empty() {
+        let Some(index) = remaining
+            .iter()
+            .position(|stage| stage_dependencies(stage).is_subset(&completed))
+        else {
+            return Err(LlmffError::GraphValidation(
+                "cycle detected in graph".to_string(),
+            ));
+        };
+
+        let stage = remaining.remove(index);
+        completed.insert(stage.id.clone());
+        ordered.push(stage);
+    }
+
+    Ok(ordered)
+}
+
+fn stage_dependencies(stage: &StageSpec) -> BTreeSet<String> {
+    let mut dependencies = BTreeSet::new();
+
+    if let Some(parent) = &stage.from {
+        dependencies.insert(parent.clone());
+    }
+
+    for target in [
+        stage.on_success.as_deref(),
+        stage.on_invalid.as_deref(),
+        stage.on_skipped.as_deref(),
+        stage.default.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        dependencies.insert(target.to_string());
+    }
+
+    for target in stage.cases.values() {
+        dependencies.insert(target.clone());
+    }
+
+    dependencies
 }
 
 fn validate_route_targets(
@@ -188,6 +239,40 @@ outputs:
     }
 
     #[test]
+    fn orders_forward_stage_references_by_dependency() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: ./question.txt
+graph:
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:json
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: draft
+    path: ./answer.json
+"#,
+        )
+        .unwrap();
+
+        let graph = Graph::from_manifest(manifest).expect("forward references should validate");
+        let stage_ids = graph
+            .stages()
+            .iter()
+            .map(|stage| stage.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(stage_ids, vec!["load_prompt", "draft"]);
+    }
+
+    #[test]
     fn validates_route_targets() {
         let manifest = Manifest::from_yaml_str(
             r#"
@@ -216,6 +301,79 @@ outputs:
         let graph = Graph::from_manifest(manifest).expect("graph should validate");
 
         assert_eq!(graph.stages().len(), 3);
+    }
+
+    #[test]
+    fn orders_forward_route_targets_before_route_stage() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: ./question.txt
+graph:
+  - id: choose
+    op: route
+    from: validate
+    on_success: validate
+    on_invalid: repair
+  - id: repair
+    op: repair
+    from: validate
+    model: mock:good
+  - id: validate
+    op: validate_json
+    from: draft
+    schema: '{"type":"object","required":["answer"]}'
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:bad
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: choose
+    path: ./answer.json
+"#,
+        )
+        .unwrap();
+
+        let graph = Graph::from_manifest(manifest).expect("forward route targets should validate");
+        let stage_ids = graph
+            .stages()
+            .iter()
+            .map(|stage| stage.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            stage_ids,
+            vec!["load_prompt", "draft", "validate", "repair", "choose"]
+        );
+    }
+
+    #[test]
+    fn rejects_stage_reference_cycle() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: first
+    op: template
+    from: second
+    path: prompt.tmpl
+  - id: second
+    op: template
+    from: first
+    path: prompt.tmpl
+"#,
+        )
+        .unwrap();
+
+        let error = Graph::from_manifest(manifest).unwrap_err().to_string();
+
+        assert!(error.contains("cycle detected in graph"));
     }
 
     #[test]

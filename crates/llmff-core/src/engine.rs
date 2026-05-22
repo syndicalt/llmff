@@ -995,6 +995,51 @@ graph:
     }
 
     #[tokio::test]
+    async fn runs_manifest_in_dependency_order() {
+        let dir = tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, "Return an answer object").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: write_answer
+    op: write
+    from: draft
+    path: {}
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+  - id: load_prompt
+    op: load
+    input: prompt
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let engine = Engine::new().with_backend(
+            "mock:good",
+            Arc::new(MockBackend::new("mock:good", "dependency ordered")),
+        );
+
+        let report = engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(report.final_status, RunStatus::Succeeded);
+        assert_eq!(
+            std::fs::read_to_string(output_path).unwrap(),
+            "dependency ordered"
+        );
+    }
+
+    #[tokio::test]
     async fn runs_json_repair_pipeline_end_to_end() {
         let dir = tempdir().unwrap();
         let prompt_path = dir.path().join("question.txt");
