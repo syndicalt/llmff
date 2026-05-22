@@ -50,6 +50,13 @@ Fourth implementation slice:
 - `.github/workflows/release-artifacts.yml` uploads tag-built archives, checksums, `.deb` packages, and Arch metadata to the matching GitHub Release assets.
 - Manual workflow dispatch keeps generated files as Actions artifacts only.
 
+## Backend Metadata
+
+First implementation slice:
+
+- `llmff-core` owns a typed list of built-in backend families, registration flags, mock model aliases, and capability flags.
+- `llmff backends list --format json` exposes that metadata for scripts and wrappers while preserving the existing text output for humans.
+
 ## Future Capability Tracks
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.

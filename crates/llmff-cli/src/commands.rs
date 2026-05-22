@@ -2,8 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
-use llmff_core::backend::{MockBackend, OllamaBackend, OpenAiCompatibleBackend};
+use clap::{Parser, Subcommand, ValueEnum};
+use llmff_core::backend::{
+    builtin_backend_families, MockBackend, OllamaBackend, OpenAiCompatibleBackend,
+};
 use llmff_core::engine::{Engine, RunOptions, SchedulerMode};
 use llmff_core::manifest::Manifest;
 
@@ -76,7 +78,16 @@ enum StagesCommand {
 
 #[derive(Debug, Subcommand)]
 enum BackendsCommand {
-    List,
+    List {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum OutputFormat {
+    Text,
+    Json,
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
@@ -120,13 +131,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             println!("ok");
         }
         Command::Backends {
-            command: BackendsCommand::List,
-        } => {
-            println!("mock:bad");
-            println!("mock:good");
-            println!("ollama");
-            println!("openai-compatible");
-        }
+            command: BackendsCommand::List { format },
+        } => print_backend_families(format)?,
         Command::Stages {
             command: StagesCommand::List,
         } => {
@@ -143,6 +149,30 @@ pub async fn run(cli: Cli) -> Result<()> {
             println!("write");
         }
         Command::Trace { path } => summarize_trace(&path)?,
+    }
+
+    Ok(())
+}
+
+fn print_backend_families(format: OutputFormat) -> Result<()> {
+    match format {
+        OutputFormat::Text => {
+            for backend in builtin_backend_families() {
+                if backend.model_aliases.is_empty() {
+                    println!("{}", backend.name);
+                } else {
+                    for alias in backend.model_aliases {
+                        println!("{alias}");
+                    }
+                }
+            }
+        }
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(builtin_backend_families())?
+            );
+        }
     }
 
     Ok(())

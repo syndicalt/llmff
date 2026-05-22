@@ -47,6 +47,7 @@ Tagged release builds publish archives, checksums, `.deb` packages, and Arch met
 - `llmff inspect <manifest>` dry-run validates graph references, stage requirements, conservative type compatibility, and backend availability.
 - `llmff stages list` prints built-in stage names.
 - `llmff backends list` prints currently wired backend families.
+- `llmff backends list --format json` prints machine-readable backend family metadata and capability flags.
 - The core crate owns execution semantics; the CLI is a thin adapter.
 - Mock backends are available for deterministic local runs and tests.
 - An OpenAI-compatible backend exists in the core crate for `/v1/chat/completions` servers.
@@ -125,6 +126,12 @@ List built-in stages:
 
 ```bash
 llmff stages list
+```
+
+List backend capability metadata:
+
+```bash
+llmff backends list --format json
 ```
 
 Use stdin/stdout by setting manifest input or output paths to `-`.

@@ -32,7 +32,37 @@ fn backends_list_prints_ollama_backend() {
     cmd.args(["backends", "list"])
         .assert()
         .success()
+        .stdout(predicate::str::contains("mock:good"))
         .stdout(predicate::str::contains("ollama"));
+}
+
+#[test]
+fn backends_list_json_prints_backend_capabilities() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+
+    let output = cmd
+        .args(["backends", "list", "--format", "json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let backends: serde_json::Value =
+        serde_json::from_slice(&output).expect("backend list should be valid JSON");
+
+    let openai = backends
+        .as_array()
+        .expect("backend list should be an array")
+        .iter()
+        .find(|backend| backend["name"] == "openai-compatible")
+        .expect("OpenAI-compatible backend should be listed");
+    assert_eq!(openai["kind"], "remote-chat");
+    assert_eq!(openai["registration_flag"], "--backend <alias>=<base-url>");
+    assert_eq!(openai["requires_api_key"], true);
+    assert!(openai["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("usage-metadata")));
 }
 
 #[test]
