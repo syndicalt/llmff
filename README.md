@@ -124,6 +124,19 @@ graph:
 
 `retrieve` renders its parent value as query text, tokenizes the query and each document, scores documents by matching unique query terms, sorts by score and path, and returns JSON with `query` and `matches`. Document paths are relative to the manifest unless absolute. `top_k` is optional and must be greater than zero when present.
 
+Cache stages persist and reuse successful parent values across runs:
+
+```yaml
+graph:
+  - id: cached_prompt
+    op: cache
+    from: render_prompt
+    path: .llmff/cache
+    key: prompt-v1
+```
+
+`cache` stores typed values as versioned JSON records under `path`, defaulting to `.llmff/cache`. With an explicit `key`, the manifest author controls the cache identity; without one, the parent value is part of the digest. Cache stages do not require environment variables and only cache successful parent values.
+
 Route stages choose between already-computed stage outputs:
 
 ```yaml
@@ -210,8 +223,9 @@ Stage traces add safe operation metadata when available:
 - `validation_errors` for invalid validation results.
 - `tool_kind` and `tool_target` for tool stages.
 - `output_path` for write stages.
+- `cache_hit` and `cache_path` for cache stages.
 
-Trace metadata intentionally avoids full prompt bodies, tool stdin/stdout, headers, and secrets.
+Trace metadata intentionally avoids full prompt bodies, cached values, tool stdin/stdout, headers, and secrets.
 
 Summarize a trace file:
 
@@ -296,5 +310,5 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 ## Limitations
 
 - Schema values are inline JSON strings in the current manifest format.
-- Embedding, reranking, multimodal values, cache stages, and plugin loading are not implemented yet.
+- Embedding, reranking, multimodal values, and plugin loading are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

@@ -19,6 +19,7 @@ fn stages_list_prints_builtin_stages() {
     cmd.args(["stages", "list"])
         .assert()
         .success()
+        .stdout(predicate::str::contains("cache"))
         .stdout(predicate::str::contains("infer"))
         .stdout(predicate::str::contains("retrieve"))
         .stdout(predicate::str::contains("validate_json"));
@@ -200,6 +201,57 @@ outputs:
     assert_eq!(json["matches"].as_array().unwrap().len(), 1);
     assert_eq!(json["matches"][0]["path"], "docs/rust.txt");
     assert_eq!(json["matches"][0]["score"], 2);
+}
+
+#[test]
+fn run_executes_cache_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "first").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: cached
+    op: cache
+    from: load_prompt
+    path: .llmff/cache
+    key: answer-v1
+outputs:
+  final:
+    from: cached
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut first = Command::cargo_bin("llmff").unwrap();
+    first
+        .args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), "first");
+
+    std::fs::write(&prompt, "second").unwrap();
+    let mut second = Command::cargo_bin("llmff").unwrap();
+    second
+        .args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), "first");
 }
 
 #[test]
@@ -684,6 +736,7 @@ fn trace_command_summarizes_trace_jsonl() {
         &trace,
         r#"{"run_id":"test-run","event":"stage_finished","stage_id":"draft","op":"infer","status":"success","timestamp_ms":1,"duration_ms":14,"model":"openai:gpt-test","backend":"openai","provider_model":"gpt-test","prompt_tokens":12,"completion_tokens":8,"total_tokens":20}
 {"run_id":"test-run","event":"stage_finished","stage_id":"validate","op":"validate_json","status":"invalid","timestamp_ms":2,"duration_ms":1,"validation_errors":["missing answer"]}
+{"run_id":"test-run","event":"stage_finished","stage_id":"cached","op":"cache","status":"success","timestamp_ms":3,"duration_ms":1,"cache_hit":true,"cache_path":".llmff/cache"}
 {"run_id":"test-run","event":"run_finished","status":"succeeded","timestamp_ms":3}
 "#,
     )
@@ -702,6 +755,9 @@ fn trace_command_summarizes_trace_jsonl() {
         .stdout(predicate::str::contains("completion_tokens=8"))
         .stdout(predicate::str::contains(
             "validate validate_json invalid 1ms validation_errors=1",
+        ))
+        .stdout(predicate::str::contains(
+            "cached cache success 1ms cache_hit=true cache_path=.llmff/cache",
         ))
         .stdout(predicate::str::contains("run test-run succeeded"))
         .stdout(predicate::str::contains("missing answer").not());

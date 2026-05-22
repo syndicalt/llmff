@@ -36,6 +36,10 @@ pub struct TraceEvent {
     pub completion_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_hit: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_path: Option<String>,
 }
 
 pub struct TraceWriter {

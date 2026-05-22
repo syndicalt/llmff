@@ -187,6 +187,7 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         headers: BTreeMap::new(),
         documents: Vec::new(),
         top_k: None,
+        key: None,
     }
 }
 
