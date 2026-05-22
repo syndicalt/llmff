@@ -1087,10 +1087,12 @@ outputs:
         let events = parse_trace_events(&trace);
         let validate_finished = trace_stage_finished(&events, "validate");
 
-        assert!(validate_finished["validation_errors"].as_array().unwrap()[0]
-            .as_str()
-            .unwrap()
-            .contains("answer"));
+        assert!(
+            validate_finished["validation_errors"].as_array().unwrap()[0]
+                .as_str()
+                .unwrap()
+                .contains("answer")
+        );
     }
 
     #[tokio::test]

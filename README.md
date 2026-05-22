@@ -139,6 +139,19 @@ graph:
 
 Top-level `outputs` remain supported for simple final outputs. Use `write` when the pipeline itself should express the write step, or when an intermediate value should be saved.
 
+## Trace Notes
+
+`--trace <path>` writes JSONL events for run and stage lifecycle events. Trace events include `timestamp_ms`; `stage_finished` events also include `duration_ms`.
+
+Stage traces add safe operation metadata when available:
+
+- `model`, `backend`, and `provider_model` for model-calling stages.
+- `validation_errors` for invalid validation results.
+- `tool_kind` and `tool_target` for tool stages.
+- `output_path` for write stages.
+
+Trace metadata intentionally avoids full prompt bodies, tool stdin/stdout, headers, and secrets.
+
 ## Backend Notes
 
 The CLI keeps backend registration explicit. This keeps commands portable and FFmpeg-like: the command line describes the run, while environment variables are only used when you choose to read a secret by name.
