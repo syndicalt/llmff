@@ -10,6 +10,8 @@ pub enum LlmffError {
     UnknownStage(String),
     #[error("stage `{stage_id}` failed: {message}")]
     StageExecution { stage_id: String, message: String },
+    #[error("backend error: {0}")]
+    Backend(String),
     #[error("not implemented: {0}")]
     NotImplemented(&'static str),
 }
