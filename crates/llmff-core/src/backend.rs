@@ -12,6 +12,7 @@ pub struct InferRequest {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub max_tokens: Option<u32>,
+    pub seed: Option<u64>,
     pub response_format: Option<String>,
     pub stop: Vec<String>,
 }
@@ -60,6 +61,7 @@ pub fn builtin_backend_families() -> &'static [BackendFamily] {
                 "chat-messages",
                 "response-format-json",
                 "sampling",
+                "seed-control",
                 "stop-sequences",
                 "usage-metadata",
             ],
@@ -74,6 +76,7 @@ pub fn builtin_backend_families() -> &'static [BackendFamily] {
                 "chat-messages",
                 "response-format-json",
                 "sampling",
+                "seed-control",
                 "stop-sequences",
                 "usage-metadata",
             ],
@@ -152,6 +155,9 @@ impl Backend for OpenAiCompatibleBackend {
         }
         if let Some(max_tokens) = request.max_tokens {
             body["max_tokens"] = json!(max_tokens);
+        }
+        if let Some(seed) = request.seed {
+            body["seed"] = json!(seed);
         }
         if request.response_format.as_deref() == Some("json") {
             body["response_format"] = json!({ "type": "json_object" });
@@ -278,6 +284,9 @@ fn ollama_chat_request_body(request: &InferRequest) -> serde_json::Value {
     if let Some(max_tokens) = request.max_tokens {
         options.insert("num_predict".to_string(), json!(max_tokens));
     }
+    if let Some(seed) = request.seed {
+        options.insert("seed".to_string(), json!(seed));
+    }
     if !request.stop.is_empty() {
         options.insert("stop".to_string(), json!(request.stop));
     }
@@ -399,6 +408,7 @@ mod tests {
                 temperature: Some(0.2),
                 top_p: None,
                 max_tokens: None,
+                seed: None,
                 response_format: None,
                 stop: Vec::new(),
             })
@@ -451,6 +461,7 @@ mod tests {
                 temperature: Some(0.0),
                 top_p: Some(0.9),
                 max_tokens: Some(256),
+                seed: Some(12345),
                 response_format: Some("json".to_string()),
                 stop: vec!["\nEND".to_string(), "</answer>".to_string()],
             })
@@ -472,6 +483,7 @@ mod tests {
         assert_eq!(body["messages"][1]["content"], "Say hello");
         assert!((body["top_p"].as_f64().unwrap() - 0.9).abs() < 0.000_001);
         assert_eq!(body["max_tokens"], 256);
+        assert_eq!(body["seed"], 12345);
         assert_eq!(body["response_format"]["type"], "json_object");
         assert_eq!(body["stop"], serde_json::json!(["\nEND", "</answer>"]));
     }
@@ -507,6 +519,7 @@ mod tests {
                 temperature: None,
                 top_p: None,
                 max_tokens: None,
+                seed: None,
                 response_format: None,
                 stop: Vec::new(),
             })
@@ -554,6 +567,7 @@ mod tests {
                 temperature: Some(0.2),
                 top_p: Some(0.8),
                 max_tokens: Some(128),
+                seed: Some(12345),
                 response_format: Some("json".to_string()),
                 stop: vec!["END".to_string(), "DONE".to_string()],
             })
@@ -578,6 +592,7 @@ mod tests {
         assert!((body["options"]["temperature"].as_f64().unwrap() - 0.2).abs() < 0.000_001);
         assert!((body["options"]["top_p"].as_f64().unwrap() - 0.8).abs() < 0.000_001);
         assert_eq!(body["options"]["num_predict"], 128);
+        assert_eq!(body["options"]["seed"], 12345);
         assert_eq!(body["format"], "json");
         assert_eq!(body["options"]["stop"], serde_json::json!(["END", "DONE"]));
     }

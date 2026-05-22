@@ -1202,6 +1202,23 @@ fn inspect_accepts_inline_graph_json_response_format() {
 }
 
 #[test]
+fn inspect_accepts_inline_graph_seed() {
+    let prompt = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(prompt.path(), "Return an answer object").unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args([
+        "inspect",
+        "-i",
+        prompt.path().to_str().unwrap(),
+        "-g",
+        "load | infer(model=mock:good,seed=12345) | write(-)",
+    ])
+    .assert()
+    .success();
+}
+
+#[test]
 fn trace_command_summarizes_trace_jsonl() {
     let dir = tempfile::tempdir().unwrap();
     let trace = dir.path().join("trace.jsonl");

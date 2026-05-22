@@ -569,6 +569,7 @@ impl Engine {
                 temperature: stage.temperature,
                 top_p: stage.top_p,
                 max_tokens: stage.max_tokens,
+                seed: stage.seed,
                 response_format: stage.response_format.clone(),
                 stop: stage.stop.clone(),
             })
@@ -616,6 +617,7 @@ impl Engine {
                         temperature: stage.temperature,
                         top_p: stage.top_p,
                         max_tokens: stage.max_tokens,
+                        seed: stage.seed,
                         response_format: stage.response_format.clone(),
                         stop: stage.stop.clone(),
                     })
@@ -1673,6 +1675,7 @@ mod tests {
     struct RecordingBackend {
         model: String,
         messages: Arc<Mutex<Vec<Message>>>,
+        seed: Arc<Mutex<Option<u64>>>,
         response_format: Arc<Mutex<Option<String>>>,
         stop: Arc<Mutex<Vec<String>>>,
     }
@@ -1682,6 +1685,7 @@ mod tests {
         async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
             assert_eq!(request.model, self.model);
             *self.messages.lock().unwrap() = request.messages;
+            *self.seed.lock().unwrap() = request.seed;
             *self.response_format.lock().unwrap() = request.response_format;
             *self.stop.lock().unwrap() = request.stop;
             Ok(InferResponse {
@@ -3070,6 +3074,7 @@ outputs:
         ))
         .unwrap();
         let messages = Arc::new(Mutex::new(Vec::new()));
+        let seed = Arc::new(Mutex::new(None));
         let response_format = Arc::new(Mutex::new(None));
         let stop = Arc::new(Mutex::new(Vec::new()));
         let engine = Engine::new().with_backend(
@@ -3077,6 +3082,7 @@ outputs:
             Arc::new(RecordingBackend {
                 model: "test-model".to_string(),
                 messages: Arc::clone(&messages),
+                seed,
                 response_format,
                 stop,
             }),
@@ -3097,6 +3103,51 @@ outputs:
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn infer_forwards_seed_to_backend() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        std::fs::write(&prompt_path, "Return an answer.").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: recording:test-model
+    seed: 12345
+"#,
+            prompt_path.display()
+        ))
+        .unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let seed = Arc::new(Mutex::new(None));
+        let response_format = Arc::new(Mutex::new(None));
+        let stop = Arc::new(Mutex::new(Vec::new()));
+        let engine = Engine::new().with_backend(
+            "recording",
+            Arc::new(RecordingBackend {
+                model: "test-model".to_string(),
+                messages,
+                seed: Arc::clone(&seed),
+                response_format,
+                stop,
+            }),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(*seed.lock().unwrap(), Some(12345));
     }
 
     #[tokio::test]
@@ -3125,6 +3176,7 @@ graph:
         ))
         .unwrap();
         let messages = Arc::new(Mutex::new(Vec::new()));
+        let seed = Arc::new(Mutex::new(None));
         let response_format = Arc::new(Mutex::new(None));
         let stop = Arc::new(Mutex::new(Vec::new()));
         let engine = Engine::new().with_backend(
@@ -3132,6 +3184,7 @@ graph:
             Arc::new(RecordingBackend {
                 model: "test-model".to_string(),
                 messages,
+                seed,
                 response_format: Arc::clone(&response_format),
                 stop,
             }),
@@ -3170,6 +3223,7 @@ graph:
         ))
         .unwrap();
         let messages = Arc::new(Mutex::new(Vec::new()));
+        let seed = Arc::new(Mutex::new(None));
         let response_format = Arc::new(Mutex::new(None));
         let stop = Arc::new(Mutex::new(Vec::new()));
         let engine = Engine::new().with_backend(
@@ -3177,6 +3231,7 @@ graph:
             Arc::new(RecordingBackend {
                 model: "test-model".to_string(),
                 messages,
+                seed,
                 response_format,
                 stop: Arc::clone(&stop),
             }),

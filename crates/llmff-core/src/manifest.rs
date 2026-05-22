@@ -44,6 +44,7 @@ pub struct StageSpec {
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub max_tokens: Option<u32>,
+    pub seed: Option<u64>,
     pub response_format: Option<String>,
     #[serde(default)]
     pub stop: Vec<String>,
@@ -158,6 +159,7 @@ graph:
     temperature: 0.2
     top_p: 0.9
     max_tokens: 256
+    seed: 12345
     response_format: json
     stop:
       - "\nEND"
@@ -170,6 +172,7 @@ graph:
         assert_eq!(stage.temperature, Some(0.2));
         assert_eq!(stage.top_p, Some(0.9));
         assert_eq!(stage.max_tokens, Some(256));
+        assert_eq!(stage.seed, Some(12345));
         assert_eq!(stage.response_format.as_deref(), Some("json"));
         assert_eq!(stage.stop, vec!["\nEND", "</answer>"]);
     }
