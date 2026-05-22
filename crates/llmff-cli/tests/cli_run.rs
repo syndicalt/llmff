@@ -459,6 +459,32 @@ fn inline_graph_run_executes_retrieve_stage() {
 }
 
 #[test]
+fn inline_graph_run_executes_cache_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.txt");
+    std::fs::write(&prompt, "first").unwrap();
+
+    let graph = "load | cache(path=.llmff/cache,key=answer-v1) | write(answer.txt)";
+    let mut first = Command::cargo_bin("llmff").unwrap();
+    first
+        .current_dir(dir.path())
+        .args(["run", "-i", prompt.to_str().unwrap(), "-g", graph])
+        .assert()
+        .success();
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), "first");
+
+    std::fs::write(&prompt, "second").unwrap();
+    let mut second = Command::cargo_bin("llmff").unwrap();
+    second
+        .current_dir(dir.path())
+        .args(["run", "-i", prompt.to_str().unwrap(), "-g", graph])
+        .assert()
+        .success();
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), "first");
+}
+
+#[test]
 fn inline_graph_run_rejects_manifest_and_graph_together() {
     let dir = tempfile::tempdir().unwrap();
     let manifest = dir.path().join("pipeline.yaml");

@@ -150,6 +150,7 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
             "schema" => stage.schema = Some(value),
             "schema_path" => stage.schema_path = Some(value),
             "path" => stage.path = Some(value),
+            "key" => stage.key = Some(value),
             "documents" => {
                 stage.documents = parse_documents(&value)?;
             }
@@ -287,6 +288,21 @@ mod tests {
             vec!["docs/rust.txt", "docs/python.txt"]
         );
         assert_eq!(manifest.graph[1].top_k, Some(1));
+    }
+
+    #[test]
+    fn parses_cache_stage_parameters() {
+        let manifest = Manifest::from_inline_graph(
+            "load | cache(path=.llmff/cache,key=prompt-v1) | write(-)",
+            Some("question.txt".to_string()),
+        )
+        .expect("inline graph should parse");
+
+        assert_eq!(manifest.graph[1].id, "cache_2");
+        assert_eq!(manifest.graph[1].op, "cache");
+        assert_eq!(manifest.graph[1].from.as_deref(), Some("load_1"));
+        assert_eq!(manifest.graph[1].path.as_deref(), Some(".llmff/cache"));
+        assert_eq!(manifest.graph[1].key.as_deref(), Some("prompt-v1"));
     }
 
     #[test]
