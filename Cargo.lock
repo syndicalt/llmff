@@ -944,8 +944,10 @@ dependencies = [
  "clap",
  "llmff-core",
  "predicates",
+ "serde_json",
  "tempfile",
  "tokio",
+ "wiremock",
 ]
 
 [[package]]
@@ -953,6 +955,7 @@ name = "llmff-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures",
  "jsonschema",
  "reqwest 0.12.28",
  "serde",

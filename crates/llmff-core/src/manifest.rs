@@ -24,6 +24,7 @@ impl Manifest {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct InputSpec {
     pub path: Option<String>,
+    pub format: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -41,8 +42,26 @@ pub struct StageSpec {
     pub path: Option<String>,
     pub model: Option<String>,
     pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub max_tokens: Option<u32>,
     pub schema: Option<String>,
+    pub schema_path: Option<String>,
     pub when: Option<String>,
+    pub on_success: Option<String>,
+    pub on_invalid: Option<String>,
+    pub on_skipped: Option<String>,
+    pub field: Option<String>,
+    #[serde(default)]
+    pub cases: BTreeMap<String, String>,
+    pub default: Option<String>,
+    pub command: Option<Vec<String>>,
+    pub method: Option<String>,
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub documents: Vec<String>,
+    pub top_k: Option<usize>,
 }
 
 #[cfg(test)]
@@ -82,5 +101,143 @@ outputs:
         assert_eq!(manifest.graph[1].op, "infer");
         assert_eq!(manifest.graph[1].model.as_deref(), Some("mock:json"));
         assert_eq!(manifest.outputs["final"].from, "draft");
+    }
+
+    #[test]
+    fn parses_schema_path() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: validate
+    op: validate_json
+    from: draft
+    schema_path: ./answer.schema.json
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+
+        assert_eq!(
+            manifest.graph[0].schema_path.as_deref(),
+            Some("./answer.schema.json")
+        );
+    }
+
+    #[test]
+    fn parses_input_format() {
+        let yaml = r#"
+version: 1
+inputs:
+  payload:
+    path: ./payload.json
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+
+        assert_eq!(manifest.inputs["payload"].format.as_deref(), Some("json"));
+    }
+
+    #[test]
+    fn parses_sampling_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: draft
+    op: infer
+    from: prompt
+    model: mock:good
+    temperature: 0.2
+    top_p: 0.9
+    max_tokens: 256
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(stage.temperature, Some(0.2));
+        assert_eq!(stage.top_p, Some(0.9));
+        assert_eq!(stage.max_tokens, Some(256));
+    }
+
+    #[test]
+    fn parses_route_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: choose
+    op: route
+    from: classify
+    on_success: fast_answer
+    on_invalid: repair_answer
+    on_skipped: fallback_answer
+    field: kind
+    cases:
+      simple: fast_answer
+      hard: strong_answer
+    default: fallback_answer
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(stage.on_success.as_deref(), Some("fast_answer"));
+        assert_eq!(stage.on_invalid.as_deref(), Some("repair_answer"));
+        assert_eq!(stage.on_skipped.as_deref(), Some("fallback_answer"));
+        assert_eq!(stage.field.as_deref(), Some("kind"));
+        assert_eq!(stage.cases["simple"], "fast_answer");
+        assert_eq!(stage.cases["hard"], "strong_answer");
+        assert_eq!(stage.default.as_deref(), Some("fallback_answer"));
+    }
+
+    #[test]
+    fn parses_tool_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: call_tool
+    op: tool
+    from: render_prompt
+    command: ["/bin/cat"]
+    method: POST
+    url: http://127.0.0.1:8080/process
+    headers:
+      content-type: application/json
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(
+            stage.command.as_deref(),
+            Some(&["/bin/cat".to_string()][..])
+        );
+        assert_eq!(stage.method.as_deref(), Some("POST"));
+        assert_eq!(stage.url.as_deref(), Some("http://127.0.0.1:8080/process"));
+        assert_eq!(stage.headers["content-type"], "application/json");
+    }
+
+    #[test]
+    fn parses_retrieve_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: retrieve_context
+    op: retrieve
+    from: load_prompt
+    documents:
+      - docs/rust.txt
+      - docs/python.txt
+    top_k: 1
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(stage.documents, vec!["docs/rust.txt", "docs/python.txt"]);
+        assert_eq!(stage.top_k, Some(1));
     }
 }
