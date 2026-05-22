@@ -40,6 +40,11 @@ Second implementation slice:
 - `scripts/package-deb.sh` creates an Ubuntu/Debian `.deb` package and adjacent SHA-256 checksum from an already-built Linux `llmff` binary.
 - `.github/workflows/release-artifacts.yml` builds and inspects an `amd64` `.deb` from the Ubuntu release-artifact job.
 
+Third implementation slice:
+
+- `scripts/package-arch.sh` generates an AUR-ready `PKGBUILD` and `.SRCINFO` for the prebuilt Linux x86_64 release archive.
+- `.github/workflows/release-artifacts.yml` generates and validates Arch packaging metadata from the Ubuntu release-artifact job.
+
 ## Future Capability Tracks
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
