@@ -38,6 +38,8 @@ enum Command {
         events: Option<PathBuf>,
         #[arg(long)]
         parallel: bool,
+        #[arg(long = "plugin-dir")]
+        plugin_dir: Vec<PathBuf>,
         #[arg(long = "backend")]
         backend: Vec<String>,
         #[arg(long = "ollama")]
@@ -120,6 +122,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             trace,
             events,
             parallel,
+            plugin_dir,
             backend,
             ollama,
             api_key_env,
@@ -132,6 +135,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 trace,
                 events,
                 parallel,
+                plugin_dir,
                 backend,
                 ollama,
                 api_key_env,
@@ -326,6 +330,7 @@ async fn run_pipeline(
     trace: Option<PathBuf>,
     events: Option<PathBuf>,
     parallel: bool,
+    plugin_dir: Vec<PathBuf>,
     backend: Vec<String>,
     ollama: Vec<String>,
     api_key_env: Vec<String>,
@@ -343,6 +348,7 @@ async fn run_pipeline(
         } else {
             SchedulerMode::Sequential
         },
+        plugin_dirs: plugin_dir,
     };
 
     engine

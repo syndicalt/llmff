@@ -62,10 +62,14 @@ fn stages_list_json_prints_stage_metadata() {
         .find(|stage| stage["name"] == "tool")
         .expect("tool stage should be listed");
     assert_eq!(tool["kind"], "integration");
-    assert!(tool["optional_fields"]
+    assert!(tool["required_fields"]
         .as_array()
         .unwrap()
-        .contains(&serde_json::json!("command")));
+        .contains(&serde_json::json!("command|url|transport")));
+    assert!(tool["capabilities"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("plugin-tool-transport")));
 }
 
 #[test]
@@ -878,6 +882,69 @@ async fn inline_graph_run_executes_http_tool_stage() {
         .success();
 
     assert_eq!(std::fs::read_to_string(output).unwrap(), "tool response");
+}
+
+#[test]
+fn run_executes_plugin_tool_transport() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join("plugins");
+    let plugin = plugin_dir.join("cat-plugin");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: cat-plugin
+version: 0.1.0
+capabilities:
+  - kind: tool-transport
+    name: stdio-cat
+    entrypoint: /bin/cat
+"#,
+    )
+    .unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("tool-output.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "plugin stdin").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: call_tool
+    op: tool
+    from: load_prompt
+    transport: stdio-cat
+outputs:
+  final:
+    from: call_tool
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args([
+            "run",
+            manifest.to_str().unwrap(),
+            "--plugin-dir",
+            plugin_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "plugin stdin");
 }
 
 #[test]

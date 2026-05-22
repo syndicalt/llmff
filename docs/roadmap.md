@@ -137,11 +137,12 @@ Plugin discovery implementation slice:
 - `llmff-core` parses `llmff-plugin.yaml` manifests from immediate child directories of a plugin directory.
 - Plugin manifests declare a name, version, and typed capabilities for `stage`, `sampler`, `backend`, or `tool-transport` extension points.
 - `llmff plugins list --plugin-dir <path> --format json` exposes discovered plugin metadata for scripts and wrappers.
-- Runtime loading and execution of plugin-provided stages, samplers, backends, and tool transports remain future work.
+- `llmff run --plugin-dir <path>` can execute plugin-provided `tool-transport` capabilities as stdin/stdout command tools.
+- Runtime loading and execution of plugin-provided stages, samplers, and backends remain future work.
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
 - Richer backend adapters and provider capability metadata.
 - CLI streaming inference and streaming stage outputs.
 - Remote embedding-backed retrieval and learned reranking.
-- Runtime plugin loading for stages, samplers, backends, and tool transports.
+- Runtime plugin loading for stages, samplers, and backends.
 - More complete model/runtime abstraction once the pipeline runner is stable.

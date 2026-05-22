@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,12 @@ pub struct PluginCapability {
     pub kind: String,
     pub name: String,
     pub entrypoint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginToolTransport {
+    pub name: String,
+    pub entrypoint: PathBuf,
 }
 
 pub fn discover_plugin_manifests(
@@ -60,6 +66,65 @@ pub fn discover_plugin_manifests(
 
     manifests.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(manifests)
+}
+
+pub fn discover_plugin_tool_transports(
+    directory: impl AsRef<Path>,
+) -> Result<Vec<PluginToolTransport>, LlmffError> {
+    let directory = directory.as_ref();
+    let entries = std::fs::read_dir(directory).map_err(|error| {
+        LlmffError::Config(format!(
+            "failed to read plugin directory `{}`: {error}",
+            directory.display()
+        ))
+    })?;
+    let mut transports = Vec::new();
+
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            LlmffError::Config(format!(
+                "failed to read plugin directory entry in `{}`: {error}",
+                directory.display()
+            ))
+        })?;
+        let plugin_root = entry.path();
+        let manifest_path = plugin_root.join("llmff-plugin.yaml");
+        if !manifest_path.is_file() {
+            continue;
+        }
+        let source = std::fs::read_to_string(&manifest_path).map_err(|error| {
+            LlmffError::Config(format!(
+                "failed to read plugin manifest `{}`: {error}",
+                manifest_path.display()
+            ))
+        })?;
+        let manifest: PluginManifest = serde_yaml::from_str(&source).map_err(|error| {
+            LlmffError::Config(format!(
+                "failed to parse plugin manifest `{}`: {error}",
+                manifest_path.display()
+            ))
+        })?;
+        manifest.validate(&manifest_path)?;
+
+        for capability in manifest.capabilities {
+            if capability.kind != "tool-transport" {
+                continue;
+            }
+            let entrypoint = PathBuf::from(&capability.entrypoint);
+            let entrypoint = if entrypoint.is_absolute() {
+                entrypoint
+            } else {
+                plugin_root.join(entrypoint)
+            };
+            transports.push(PluginToolTransport {
+                name: capability.name,
+                entrypoint,
+            });
+        }
+    }
+
+    transports.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(transports)
 }
 
 impl PluginManifest {
@@ -175,5 +240,34 @@ capabilities:
         assert!(error
             .to_string()
             .contains("unknown capability kind `widget`"));
+    }
+
+    #[test]
+    fn discovers_tool_transports_with_entrypoints_relative_to_plugin_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_root = directory.path().join("json-tools");
+        std::fs::create_dir(&plugin_root).unwrap();
+        std::fs::write(
+            plugin_root.join("llmff-plugin.yaml"),
+            r#"
+name: json-tools
+version: 0.1.0
+capabilities:
+  - kind: tool-transport
+    name: stdio-json
+    entrypoint: ./bin/stdio-json
+"#,
+        )
+        .unwrap();
+
+        let transports = discover_plugin_tool_transports(directory.path()).unwrap();
+
+        assert_eq!(
+            transports,
+            vec![PluginToolTransport {
+                name: "stdio-json".to_string(),
+                entrypoint: plugin_root.join("./bin/stdio-json"),
+            }]
+        );
     }
 }

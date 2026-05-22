@@ -150,13 +150,21 @@ fn validate_tool_stage(stage: &StageSpec) -> Result<(), LlmffError> {
         return Ok(());
     }
 
+    let transport_count = usize::from(stage.command.is_some())
+        + usize::from(stage.url.is_some())
+        + usize::from(stage.transport.is_some());
+    if transport_count == 0 {
+        return Err(LlmffError::GraphValidation(
+            "tool requires command, url, or plugin transport".to_string(),
+        ));
+    }
+    if transport_count > 1 {
+        return Err(LlmffError::GraphValidation(
+            "tool cannot define more than one transport".to_string(),
+        ));
+    }
+
     match (&stage.command, &stage.url) {
-        (None, None) => Err(LlmffError::GraphValidation(
-            "tool requires command or url".to_string(),
-        )),
-        (Some(_), Some(_)) => Err(LlmffError::GraphValidation(
-            "tool cannot define both command and url".to_string(),
-        )),
         (Some(command), None) if command.is_empty() => Err(LlmffError::GraphValidation(
             "tool command cannot be empty".to_string(),
         )),
@@ -422,7 +430,7 @@ outputs:
 
         let error = Graph::from_manifest(manifest).unwrap_err().to_string();
 
-        assert!(error.contains("tool requires command or url"));
+        assert!(error.contains("tool requires command, url, or plugin transport"));
     }
 
     #[test]
@@ -449,7 +457,7 @@ outputs:
 
         let error = Graph::from_manifest(manifest).unwrap_err().to_string();
 
-        assert!(error.contains("tool cannot define both command and url"));
+        assert!(error.contains("tool cannot define more than one transport"));
     }
 
     #[test]

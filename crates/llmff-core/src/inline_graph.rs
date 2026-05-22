@@ -252,6 +252,7 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         cases: BTreeMap::new(),
         default: None,
         command: None,
+        transport: None,
         method: None,
         url: None,
         headers: BTreeMap::new(),
