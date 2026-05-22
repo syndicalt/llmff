@@ -215,10 +215,10 @@ impl Engine {
     ) -> Result<StageStatus, LlmffError> {
         let prompt = parent_text(stage, statuses)?;
         let model = required_model(stage)?;
-        let backend = self.backend_for_model(model)?;
-        let response = backend
+        let resolved = self.backend_for_model(model)?;
+        let response = resolved
             .infer(InferRequest {
-                model: model.to_string(),
+                model: resolved.provider_model.to_string(),
                 prompt,
                 temperature: stage.temperature,
             })
@@ -246,10 +246,10 @@ impl Engine {
             StageStatus::Skipped => Ok(StageStatus::Skipped),
             StageStatus::Invalid { value, errors } => {
                 let model = required_model(stage)?;
-                let backend = self.backend_for_model(model)?;
-                let response = backend
+                let resolved = self.backend_for_model(model)?;
+                let response = resolved
                     .infer(InferRequest {
-                        model: model.to_string(),
+                        model: resolved.provider_model.to_string(),
                         prompt: format!(
                             "Repair this output so it satisfies validation errors.\nErrors:\n{}\nOutput:\n{}",
                             errors.join("\n"),
@@ -264,10 +264,39 @@ impl Engine {
         }
     }
 
-    fn backend_for_model(&self, model: &str) -> Result<&Arc<dyn Backend>, LlmffError> {
-        self.backends
-            .get(model)
-            .ok_or_else(|| LlmffError::Backend(format!("no backend configured for `{model}`")))
+    fn backend_for_model<'a>(&'a self, model: &'a str) -> Result<ResolvedBackend<'a>, LlmffError> {
+        if let Some(backend) = self.backends.get(model) {
+            return Ok(ResolvedBackend {
+                backend,
+                provider_model: model,
+            });
+        }
+
+        if let Some((alias, provider_model)) = model.split_once(':') {
+            if let Some(backend) = self.backends.get(alias) {
+                return Ok(ResolvedBackend {
+                    backend,
+                    provider_model,
+                });
+            }
+        }
+
+        Err(LlmffError::Backend(format!(
+            "no backend configured for `{model}`"
+        )))
+    }
+}
+
+struct ResolvedBackend<'a> {
+    backend: &'a Arc<dyn Backend>,
+    provider_model: &'a str,
+}
+
+impl std::ops::Deref for ResolvedBackend<'_> {
+    type Target = Arc<dyn Backend>;
+
+    fn deref(&self) -> &Self::Target {
+        self.backend
     }
 }
 
@@ -486,5 +515,49 @@ outputs:
         assert!(trace.contains(r#""event":"stage_started""#));
         assert!(trace.contains(r#""event":"stage_finished""#));
         assert!(trace.contains(r#""event":"run_finished""#));
+    }
+
+    #[tokio::test]
+    async fn alias_backend_receives_provider_model_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, "Say hello").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: openai:gpt-test
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let engine = Engine::new().with_backend(
+            "openai",
+            Arc::new(MockBackend::new("gpt-test", "hello from alias")),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(output_path).unwrap(),
+            "hello from alias"
+        );
     }
 }
