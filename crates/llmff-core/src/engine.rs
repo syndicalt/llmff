@@ -7,7 +7,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::backend::{Backend, InferRequest, UsageMetadata};
 use crate::error::LlmffError;
-use crate::graph::Graph;
+use crate::graph::{stage_dependencies, Graph};
 use crate::manifest::{Manifest, StageSpec};
 use crate::stage::execute_deterministic_stage;
 use crate::trace::{TraceEvent, TraceWriter};
@@ -22,6 +22,12 @@ pub enum RunStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunReport {
     pub final_status: RunStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchedulerMode {
+    Sequential,
+    Parallel,
 }
 
 struct StageOutcome {
@@ -46,6 +52,7 @@ impl StageOutcome {
 pub struct RunOptions {
     pub run_id: String,
     pub trace_path: Option<PathBuf>,
+    pub scheduler: SchedulerMode,
 }
 
 impl Default for RunOptions {
@@ -53,6 +60,7 @@ impl Default for RunOptions {
         Self {
             run_id: "local-run".to_string(),
             trace_path: None,
+            scheduler: SchedulerMode::Sequential,
         }
     }
 }
@@ -128,57 +136,29 @@ impl Engine {
             },
         )?;
 
-        for stage in graph.stages() {
-            let stage_started = Instant::now();
-            write_trace(
-                &mut trace,
-                TraceEvent {
-                    run_id: options.run_id.clone(),
-                    event: "stage_started".to_string(),
-                    stage_id: Some(stage.id.clone()),
-                    op: Some(stage.op.clone()),
-                    status: None,
-                    timestamp_ms: timestamp_ms(),
-                    duration_ms: None,
-                    model: None,
-                    backend: None,
-                    provider_model: None,
-                    validation_errors: None,
-                    tool_kind: None,
-                    tool_target: None,
-                    output_path: None,
-                    prompt_tokens: None,
-                    completion_tokens: None,
-                    total_tokens: None,
-                },
-            )?;
-            let outcome = self.execute_stage(&manifest, stage, &statuses, cwd).await?;
-            let status = outcome.status;
-            let status_name = status_name(&status).to_string();
-            let metadata = self.trace_metadata(stage, &status, outcome.usage.as_ref());
-            statuses.insert(stage.id.clone(), status);
-            write_trace(
-                &mut trace,
-                TraceEvent {
-                    run_id: options.run_id.clone(),
-                    event: "stage_finished".to_string(),
-                    stage_id: Some(stage.id.clone()),
-                    op: Some(stage.op.clone()),
-                    status: Some(status_name),
-                    timestamp_ms: timestamp_ms(),
-                    duration_ms: Some(stage_started.elapsed().as_millis()),
-                    model: metadata.model,
-                    backend: metadata.backend,
-                    provider_model: metadata.provider_model,
-                    validation_errors: metadata.validation_errors,
-                    tool_kind: metadata.tool_kind,
-                    tool_target: metadata.tool_target,
-                    output_path: metadata.output_path,
-                    prompt_tokens: metadata.prompt_tokens,
-                    completion_tokens: metadata.completion_tokens,
-                    total_tokens: metadata.total_tokens,
-                },
-            )?;
+        match options.scheduler {
+            SchedulerMode::Sequential => {
+                self.run_stages_sequentially(
+                    &manifest,
+                    &graph,
+                    cwd,
+                    &mut statuses,
+                    &mut trace,
+                    &options.run_id,
+                )
+                .await?;
+            }
+            SchedulerMode::Parallel => {
+                self.run_stages_in_parallel(
+                    &manifest,
+                    &graph,
+                    cwd,
+                    &mut statuses,
+                    &mut trace,
+                    &options.run_id,
+                )
+                .await?;
+            }
         }
 
         for output in manifest.outputs.values() {
@@ -233,6 +213,147 @@ impl Engine {
         )?;
 
         Ok(report)
+    }
+
+    async fn run_stages_sequentially(
+        &self,
+        manifest: &Manifest,
+        graph: &Graph,
+        cwd: &Path,
+        statuses: &mut BTreeMap<String, StageStatus>,
+        trace: &mut Option<TraceWriter>,
+        run_id: &str,
+    ) -> Result<(), LlmffError> {
+        for stage in graph.stages() {
+            let stage_started = self.start_stage_trace(trace, run_id, stage)?;
+            let outcome = self.execute_stage(manifest, stage, statuses, cwd).await?;
+            self.finish_stage_trace(trace, run_id, stage, stage_started, outcome, statuses)?;
+        }
+
+        Ok(())
+    }
+
+    async fn run_stages_in_parallel(
+        &self,
+        manifest: &Manifest,
+        graph: &Graph,
+        cwd: &Path,
+        statuses: &mut BTreeMap<String, StageStatus>,
+        trace: &mut Option<TraceWriter>,
+        run_id: &str,
+    ) -> Result<(), LlmffError> {
+        let mut pending = graph.stages().iter().collect::<Vec<_>>();
+
+        while !pending.is_empty() {
+            let mut ready = Vec::new();
+            let mut waiting = Vec::new();
+
+            for stage in pending {
+                if stage_dependencies(stage)
+                    .iter()
+                    .all(|dependency| statuses.contains_key(dependency))
+                {
+                    ready.push(stage);
+                } else {
+                    waiting.push(stage);
+                }
+            }
+
+            if ready.is_empty() {
+                return Err(LlmffError::GraphValidation(
+                    "cycle detected in graph".to_string(),
+                ));
+            }
+
+            let starts = ready
+                .iter()
+                .map(|stage| self.start_stage_trace(trace, run_id, stage))
+                .collect::<Result<Vec<_>, _>>()?;
+            let status_snapshot = statuses.clone();
+            let outcomes = futures::future::join_all(
+                ready
+                    .iter()
+                    .map(|stage| self.execute_stage(manifest, stage, &status_snapshot, cwd)),
+            )
+            .await;
+
+            for ((stage, started), outcome) in ready.into_iter().zip(starts).zip(outcomes) {
+                self.finish_stage_trace(trace, run_id, stage, started, outcome?, statuses)?;
+            }
+
+            pending = waiting;
+        }
+
+        Ok(())
+    }
+
+    fn start_stage_trace(
+        &self,
+        trace: &mut Option<TraceWriter>,
+        run_id: &str,
+        stage: &StageSpec,
+    ) -> Result<Instant, LlmffError> {
+        let started = Instant::now();
+        write_trace(
+            trace,
+            TraceEvent {
+                run_id: run_id.to_string(),
+                event: "stage_started".to_string(),
+                stage_id: Some(stage.id.clone()),
+                op: Some(stage.op.clone()),
+                status: None,
+                timestamp_ms: timestamp_ms(),
+                duration_ms: None,
+                model: None,
+                backend: None,
+                provider_model: None,
+                validation_errors: None,
+                tool_kind: None,
+                tool_target: None,
+                output_path: None,
+                prompt_tokens: None,
+                completion_tokens: None,
+                total_tokens: None,
+            },
+        )?;
+        Ok(started)
+    }
+
+    fn finish_stage_trace(
+        &self,
+        trace: &mut Option<TraceWriter>,
+        run_id: &str,
+        stage: &StageSpec,
+        stage_started: Instant,
+        outcome: StageOutcome,
+        statuses: &mut BTreeMap<String, StageStatus>,
+    ) -> Result<(), LlmffError> {
+        let status = outcome.status;
+        let status_name = status_name(&status).to_string();
+        let metadata = self.trace_metadata(stage, &status, outcome.usage.as_ref());
+        statuses.insert(stage.id.clone(), status);
+        write_trace(
+            trace,
+            TraceEvent {
+                run_id: run_id.to_string(),
+                event: "stage_finished".to_string(),
+                stage_id: Some(stage.id.clone()),
+                op: Some(stage.op.clone()),
+                status: Some(status_name),
+                timestamp_ms: timestamp_ms(),
+                duration_ms: Some(stage_started.elapsed().as_millis()),
+                model: metadata.model,
+                backend: metadata.backend,
+                provider_model: metadata.provider_model,
+                validation_errors: metadata.validation_errors,
+                tool_kind: metadata.tool_kind,
+                tool_target: metadata.tool_target,
+                output_path: metadata.output_path,
+                prompt_tokens: metadata.prompt_tokens,
+                completion_tokens: metadata.completion_tokens,
+                total_tokens: metadata.total_tokens,
+            },
+        )
     }
 
     fn validate_stage(&self, stage: &StageSpec) -> Result<(), LlmffError> {
@@ -1244,7 +1365,9 @@ fn status_name(status: &StageStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use tempfile::tempdir;
 
@@ -1286,6 +1409,28 @@ mod tests {
             Ok(InferResponse {
                 model: request.model,
                 text: "ok".to_string(),
+                usage: None,
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct DelayedBackend {
+        active: Arc<AtomicUsize>,
+        max_active: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl Backend for DelayedBackend {
+        async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_active.fetch_max(active, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            self.active.fetch_sub(1, Ordering::SeqCst);
+
+            Ok(InferResponse {
+                model: request.model.clone(),
+                text: request.model,
                 usage: None,
             })
         }
@@ -1838,6 +1983,7 @@ outputs:
         let options = RunOptions {
             run_id: "test-run".to_string(),
             trace_path: Some(trace_path.clone()),
+            scheduler: SchedulerMode::Sequential,
         };
 
         engine
@@ -1882,6 +2028,7 @@ outputs:
         let options = RunOptions {
             run_id: "trace-test".to_string(),
             trace_path: Some(trace_path.clone()),
+            scheduler: SchedulerMode::Sequential,
         };
 
         Engine::new()
@@ -1962,6 +2109,7 @@ outputs:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    scheduler: SchedulerMode::Sequential,
                 },
             )
             .await
@@ -2015,6 +2163,7 @@ outputs:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    scheduler: SchedulerMode::Sequential,
                 },
             )
             .await
@@ -2080,6 +2229,7 @@ outputs:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    scheduler: SchedulerMode::Sequential,
                 },
             )
             .await
@@ -2137,6 +2287,7 @@ outputs:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    scheduler: SchedulerMode::Sequential,
                 },
             )
             .await
@@ -2195,6 +2346,7 @@ graph:
                 RunOptions {
                     run_id: "trace-test".to_string(),
                     trace_path: Some(trace_path.clone()),
+                    scheduler: SchedulerMode::Sequential,
                 },
             )
             .await
@@ -2389,6 +2541,49 @@ outputs:
     }
 
     #[tokio::test]
+    async fn default_scheduler_runs_ready_model_stages_sequentially() {
+        let (manifest, dir, active, max_active) = parallel_scheduler_fixture();
+        let engine = Engine::new().with_backend(
+            "delay",
+            Arc::new(DelayedBackend {
+                active,
+                max_active: Arc::clone(&max_active),
+            }),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn parallel_scheduler_runs_ready_model_stages_concurrently() {
+        let (manifest, dir, active, max_active) = parallel_scheduler_fixture();
+        let engine = Engine::new().with_backend(
+            "delay",
+            Arc::new(DelayedBackend {
+                active,
+                max_active: Arc::clone(&max_active),
+            }),
+        );
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "parallel-test".to_string(),
+                    trace_path: None,
+                    scheduler: SchedulerMode::Parallel,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(max_active.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
     async fn route_stage_selects_success_target() {
         let dir = tempfile::tempdir().unwrap();
         let prompt_path = dir.path().join("question.txt");
@@ -2432,6 +2627,53 @@ outputs:
             std::fs::read_to_string(output_path).unwrap(),
             r#"{"answer":"ok"}"#
         );
+    }
+
+    fn parallel_scheduler_fixture() -> (
+        Manifest,
+        tempfile::TempDir,
+        Arc<AtomicUsize>,
+        Arc<AtomicUsize>,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, "Say hello").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft_a
+    op: infer
+    from: load_prompt
+    model: delay:a
+  - id: draft_b
+    op: infer
+    from: load_prompt
+    model: delay:b
+outputs:
+  final:
+    from: draft_a
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        (
+            manifest,
+            dir,
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicUsize::new(0)),
+        )
     }
 
     #[tokio::test]
