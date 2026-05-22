@@ -54,6 +54,15 @@ impl Engine {
         self
     }
 
+    pub fn validate_manifest(&self, manifest: Manifest) -> Result<Graph, LlmffError> {
+        let graph = Graph::from_manifest(manifest)?;
+        for stage in graph.stages() {
+            self.validate_stage(stage)?;
+        }
+
+        Ok(graph)
+    }
+
     pub async fn run_manifest(
         &self,
         manifest: Manifest,
@@ -69,7 +78,7 @@ impl Engine {
         cwd: &Path,
         options: RunOptions,
     ) -> Result<RunReport, LlmffError> {
-        let graph = Graph::from_manifest(manifest.clone())?;
+        let graph = self.validate_manifest(manifest.clone())?;
         let mut statuses = BTreeMap::new();
         let mut trace = match options.trace_path.as_ref() {
             Some(path) => Some(TraceWriter::create(path)?),
@@ -191,6 +200,70 @@ impl Engine {
         )?;
 
         Ok(report)
+    }
+
+    fn validate_stage(&self, stage: &StageSpec) -> Result<(), LlmffError> {
+        match stage.op.as_str() {
+            "load" => {
+                require_stage_field(stage, stage.input.as_deref(), "load requires input")?;
+                Ok(())
+            }
+            "infer" => {
+                require_stage_field(stage, stage.from.as_deref(), "infer requires from")?;
+                let model =
+                    require_stage_field(stage, stage.model.as_deref(), "infer requires model")?;
+                self.backend_for_model(model).map(|_| ())
+            }
+            "validate_json" => {
+                require_stage_field(stage, stage.from.as_deref(), "validate_json requires from")?;
+                if stage.schema.is_none() && stage.schema_path.is_none() {
+                    return Err(stage_validation_error(
+                        stage,
+                        "validate_json requires schema or schema_path",
+                    ));
+                }
+                Ok(())
+            }
+            "system" => {
+                require_stage_field(stage, stage.from.as_deref(), "system requires from")?;
+                Ok(())
+            }
+            "template" => {
+                require_stage_field(stage, stage.from.as_deref(), "template requires from")?;
+                require_stage_field(stage, stage.path.as_deref(), "template requires path")?;
+                Ok(())
+            }
+            "repair" => {
+                require_stage_field(stage, stage.from.as_deref(), "repair requires from")?;
+                let model =
+                    require_stage_field(stage, stage.model.as_deref(), "repair requires model")?;
+                self.backend_for_model(model).map(|_| ())
+            }
+            "route" => {
+                require_stage_field(stage, stage.from.as_deref(), "route requires from")?;
+                if stage.on_success.is_none()
+                    && stage.on_invalid.is_none()
+                    && stage.on_skipped.is_none()
+                    && stage.cases.is_empty()
+                    && stage.default.is_none()
+                {
+                    return Err(stage_validation_error(
+                        stage,
+                        "route requires at least one target",
+                    ));
+                }
+                Ok(())
+            }
+            "tool" => {
+                require_stage_field(stage, stage.from.as_deref(), "tool requires from")?;
+                Ok(())
+            }
+            "write" => {
+                require_stage_field(stage, stage.from.as_deref(), "write requires from")?;
+                Ok(())
+            }
+            other => Err(LlmffError::UnknownStage(other.to_string())),
+        }
     }
 
     async fn execute_stage(
@@ -484,6 +557,21 @@ impl Engine {
                 backend_alias: alias.to_string(),
                 provider_model: provider_model.to_string(),
             })
+    }
+}
+
+fn require_stage_field<'a>(
+    stage: &StageSpec,
+    value: Option<&'a str>,
+    message: &'static str,
+) -> Result<&'a str, LlmffError> {
+    value.ok_or_else(|| stage_validation_error(stage, message))
+}
+
+fn stage_validation_error(stage: &StageSpec, message: impl Into<String>) -> LlmffError {
+    LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: message.into(),
     }
 }
 
@@ -824,6 +912,87 @@ mod tests {
     use crate::manifest::Manifest;
     use wiremock::matchers::{body_string, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn validate_manifest_rejects_unknown_stage_operation() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: mystery
+    op: unknown_op
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("unknown stage operation should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("unknown stage operation `unknown_op`"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_missing_required_stage_parameters() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: prompt
+  - id: validate
+    op: validate_json
+    from: draft
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("missing infer model should be rejected first");
+
+        assert!(error
+            .to_string()
+            .contains("stage `draft` failed: infer requires model"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_missing_backend_without_calling_it() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: prompt
+    model: openai:gpt-test
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("unregistered backend alias should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("no backend configured for `openai:gpt-test`"));
+    }
 
     #[tokio::test]
     async fn runs_json_repair_pipeline_end_to_end() {
