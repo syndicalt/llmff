@@ -342,6 +342,8 @@ llmff run pipeline.yaml \
   --api-key-env openai=OPENAI_API_KEY
 ```
 
+OpenAI-compatible backend URLs may point either at the server root or at the API root. Both `https://api.openai.com` and `https://api.openai.com/v1` resolve to the `/v1/chat/completions` endpoint.
+
 Then reference that backend alias from a manifest:
 
 ```yaml

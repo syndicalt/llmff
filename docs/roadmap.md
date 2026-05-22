@@ -57,6 +57,10 @@ First implementation slice:
 - `llmff-core` owns a typed list of built-in backend families, registration flags, mock model aliases, and capability flags.
 - `llmff backends list --format json` exposes that metadata for scripts and wrappers while preserving the existing text output for humans.
 
+Second implementation slice:
+
+- OpenAI-compatible backend registration accepts either a server root URL or a `/v1` API root URL and resolves both to `/v1/chat/completions`.
+
 ## Stage Metadata
 
 First implementation slice:
