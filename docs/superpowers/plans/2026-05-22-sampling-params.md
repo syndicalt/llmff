@@ -356,7 +356,7 @@ git commit -m "feat: forward sampling parameters"
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-05-22-sampling-params.md`
 
-- [ ] **Step 1: Write failing inline graph test**
+- [x] **Step 1: Write failing inline graph test**
 
 Add assertions to `parses_linear_inline_graph`:
 
@@ -371,7 +371,7 @@ Change the inline graph source to:
 "load | infer(model=mock:good,temperature=0.2,top_p=0.9,max_tokens=256) | write(-)"
 ```
 
-- [ ] **Step 2: Run inline graph test to verify RED**
+- [x] **Step 2: Run inline graph test to verify RED**
 
 Run:
 
@@ -381,7 +381,7 @@ cargo test -p llmff-core inline_graph::tests::parses_linear_inline_graph
 
 Expected: FAIL because inline graph does not parse `top_p` or `max_tokens`.
 
-- [ ] **Step 3: Implement inline parsing**
+- [x] **Step 3: Implement inline parsing**
 
 In `apply_inline_params`, add:
 
@@ -398,7 +398,7 @@ In `apply_inline_params`, add:
 }
 ```
 
-- [ ] **Step 4: Run inline graph test to verify GREEN**
+- [x] **Step 4: Run inline graph test to verify GREEN**
 
 Run:
 
@@ -408,7 +408,7 @@ cargo test -p llmff-core inline_graph::tests::parses_linear_inline_graph
 
 Expected: PASS.
 
-- [ ] **Step 5: Document sampling controls**
+- [x] **Step 5: Document sampling controls**
 
 Update `README.md` near backend notes:
 
@@ -429,7 +429,7 @@ graph:
 OpenAI-compatible backends receive `temperature`, `top_p`, and `max_tokens`. Ollama receives the same controls under `options`, with `max_tokens` mapped to `num_predict`.
 ```
 
-- [ ] **Step 6: Run final verification**
+- [x] **Step 6: Run final verification**
 
 Run:
 
@@ -441,7 +441,7 @@ cargo run -p llmff -- inspect examples/json-repair.yaml
 
 Expected: all commands exit 0; inspect prints `ok`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add README.md crates/llmff-core/src/inline_graph.rs docs/superpowers/plans/2026-05-22-sampling-params.md

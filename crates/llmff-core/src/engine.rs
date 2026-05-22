@@ -1300,10 +1300,7 @@ graph:
         .unwrap();
 
         let error = Engine::new()
-            .with_backend(
-                "mock:good",
-                Arc::new(MockBackend::new("mock:good", "ok")),
-            )
+            .with_backend("mock:good", Arc::new(MockBackend::new("mock:good", "ok")))
             .validate_manifest(manifest)
             .expect_err("invalid sampling parameter should be rejected");
 

@@ -246,6 +246,21 @@ graph:
     model: ollama:llama3.1
 ```
 
+Model-calling stages accept portable sampling controls:
+
+```yaml
+graph:
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: openai:gpt-test
+    temperature: 0.2
+    top_p: 0.9
+    max_tokens: 256
+```
+
+OpenAI-compatible backends receive `temperature`, `top_p`, and `max_tokens`. Ollama receives the same controls under `options`, with `max_tokens` mapped to `num_predict`.
+
 Mock backends remain available for deterministic local runs and tests:
 
 - `LLMFF_MOCK_BAD_RESPONSE`

@@ -137,6 +137,16 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
                     inline_graph_error(format!("invalid temperature `{value}`: {error}"))
                 })?)
             }
+            "top_p" => {
+                stage.top_p = Some(value.parse::<f32>().map_err(|error| {
+                    inline_graph_error(format!("invalid top_p `{value}`: {error}"))
+                })?)
+            }
+            "max_tokens" => {
+                stage.max_tokens = Some(value.parse::<u32>().map_err(|error| {
+                    inline_graph_error(format!("invalid max_tokens `{value}`: {error}"))
+                })?)
+            }
             "schema" => stage.schema = Some(value),
             "schema_path" => stage.schema_path = Some(value),
             "path" => stage.path = Some(value),
@@ -189,7 +199,7 @@ mod tests {
     #[test]
     fn parses_linear_inline_graph() {
         let manifest = Manifest::from_inline_graph(
-            "load | infer(model=mock:good,temperature=0.2) | write(-)",
+            "load | infer(model=mock:good,temperature=0.2,top_p=0.9,max_tokens=256) | write(-)",
             Some("question.txt".to_string()),
         )
         .expect("inline graph should parse");
@@ -210,6 +220,8 @@ mod tests {
         assert_eq!(manifest.graph[1].from.as_deref(), Some("load_1"));
         assert_eq!(manifest.graph[1].model.as_deref(), Some("mock:good"));
         assert_eq!(manifest.graph[1].temperature, Some(0.2));
+        assert_eq!(manifest.graph[1].top_p, Some(0.9));
+        assert_eq!(manifest.graph[1].max_tokens, Some(256));
 
         assert_eq!(manifest.graph[2].id, "write_3");
         assert_eq!(manifest.graph[2].op, "write");
