@@ -11,7 +11,7 @@ source-build fallback for users who are outside the prebuilt artifact set.
 | `x86_64-unknown-linux-gnu` | Ubuntu, Debian, and compatible glibc Linux distributions on x86_64 | `.tar.gz`, `.deb`, Arch Linux `PKGBUILD` and `.SRCINFO` metadata | The prebuilt binary targets glibc Linux. The `.deb` package is built as `amd64`. Arch Linux support is metadata for the same prebuilt archive, suitable for an AUR-style package flow. |
 | `aarch64-apple-darwin` | macOS on Apple Silicon | `.tar.gz`, signed and notarized `.pkg` on release tags, unsigned `.pkg` on manual dispatch | The `.pkg` installs `llmff` into `/usr/local/bin`. Release-tag CI signs the package with a Developer ID Installer certificate, submits it to Apple notarization, staples the notarization ticket, regenerates the checksum, and smoke-tests the signed package payload. |
 | `x86_64-apple-darwin` | macOS on Intel Macs | `.tar.gz`, signed and notarized `.pkg` on release tags, unsigned `.pkg` on manual dispatch | The `.pkg` installs `llmff` into `/usr/local/bin`. Release-tag CI signs the package with a Developer ID Installer certificate, submits it to Apple notarization, staples the notarization ticket, regenerates the checksum, and smoke-tests the signed package payload. |
-| `x86_64-pc-windows-msvc` | 64-bit Windows | `.zip`, signed `.msi` on release tags, unsigned `.msi` on manual dispatch | The MSI is built with WiX on a Windows runner and installs `llmff.exe` under Program Files. Release-tag CI signs the MSI with Authenticode, verifies the signature, regenerates the checksum, and smoke-tests the signed installer payload. |
+| `x86_64-pc-windows-msvc` | 64-bit Windows | signed `llmff.exe` archive on release tags, unsigned `.zip` on manual dispatch, signed `.msi` on release tags, unsigned `.msi` on manual dispatch | The Windows archive contains `llmff.exe`. The MSI is built with WiX on a Windows runner and installs `llmff.exe` under Program Files. Release-tag CI signs the executable before archive packaging, signs the MSI with Authenticode, verifies both signatures, regenerates checksums, and smoke-tests the signed payloads. |
 
 ## Installer Status
 
@@ -28,11 +28,13 @@ source-build fallback for users who are outside the prebuilt artifact set.
   the checksum, and expands the signed and notarized package payload with
   `scripts/smoke-macos-pkg.sh`.
 - Windows: CI builds an x86_64 MSI on a Windows host. Manual workflow dispatch
-  keeps the MSI unsigned for packaging tests. Tag-triggered release CI first
-  runs `scripts/check-release-signing-gates.sh --platform windows`, then signs
-  the MSI with `scripts/sign-windows-msi.ps1`, verifies the Authenticode
-  signature with `signtool`, regenerates the checksum, and extracts the signed
-  MSI payload with `scripts/smoke-windows-msi.sh`.
+  keeps the `.zip` and MSI unsigned for packaging tests. Tag-triggered release
+  CI first runs `scripts/check-release-signing-gates.sh --platform windows`,
+  then signs the release `llmff.exe` with `scripts/sign-windows-binary.ps1`
+  before archive packaging. It also signs the MSI with
+  `scripts/sign-windows-msi.ps1`, verifies both Authenticode signatures with
+  `signtool`, regenerates checksums, and extracts the signed MSI payload with
+  `scripts/smoke-windows-msi.sh`.
 - Archives: CI builds `.tar.gz` archives for Linux and macOS and a `.zip`
   archive for Windows. `scripts/smoke-archive.sh` extracts each archive and
   runs the packaged binary.
@@ -47,8 +49,9 @@ Every packaged binary smoke gate exercises the same CLI surface:
 - one deterministic mock-backed `llmff run`
 
 The current gates cover raw archives, Debian packages, macOS package payloads,
-Windows MSI payloads, tag-only signing credential preflights, Windows MSI
-Authenticode signing, and macOS package signing and notarization wiring.
+Windows MSI payloads, tag-only signing credential preflights, signed Windows
+executable archives, Windows MSI Authenticode signing, and macOS package
+signing and notarization wiring.
 
 Before creating or pushing a release tag, run the metadata preflight:
 

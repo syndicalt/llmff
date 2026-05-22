@@ -57,6 +57,12 @@ Windows Authenticode signing implementation slice:
 - `.github/workflows/release-artifacts.yml` signs Windows MSI artifacts only on tag-triggered release jobs, regenerates the MSI checksum after signing, and smoke-tests the signed MSI payload before upload.
 - `scripts/check-windows-signing-wiring.sh` and `scripts/release-preflight.sh` keep Windows signing CI and documentation wiring covered by local release preflight.
 
+Windows executable archive signing implementation slice:
+
+- `scripts/sign-windows-binary.ps1` imports the release P12 certificate, signs the built `llmff.exe` with `signtool`, verifies the Authenticode signature, and removes the imported certificate.
+- `.github/workflows/release-artifacts.yml` signs the Windows release binary only on tag-triggered jobs before packaging the `.zip`, so the archive contains a signed executable and manual dispatch remains unsigned for packaging tests.
+- `scripts/check-windows-signing-wiring.sh` and `scripts/release-preflight.sh` keep Windows executable archive signing CI and documentation wiring covered by local release preflight.
+
 macOS PKG implementation slice:
 
 - `scripts/package-macos-pkg.sh` builds an unsigned macOS Installer `.pkg` with `pkgbuild`, staging `llmff` into `/usr/local/bin`.
