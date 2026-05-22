@@ -276,8 +276,34 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
 
+  publish-release:
+    name: publish release assets
+    needs: archive
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ -f release-assets/arch/.SRCINFO ]]; then
+            cp release-assets/arch/.SRCINFO "release-assets/llmff-${version}-arch.SRCINFO"
+          elif [[ -f release-assets/.SRCINFO ]]; then
+            cp release-assets/.SRCINFO "release-assets/llmff-${version}-arch.SRCINFO"
+          fi
+          test -f release-assets/PKGBUILD
+          test -f "release-assets/llmff-${version}-arch.SRCINFO"
+
       - name: Ensure GitHub Release exists
-        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -300,16 +326,14 @@ jobs:
           fi
 
       - name: Upload GitHub Release assets
-        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          shopt -s nullglob
-          assets=(dist/* dist/arch/* dist/arch/.SRCINFO)
+          shopt -s globstar nullglob
           files=()
-          for asset in "${assets[@]}"; do
-            if [[ -f "$asset" ]]; then
+          for asset in release-assets/**; do
+            if [[ -f "$asset" && "$(basename "$asset")" != ".SRCINFO" ]]; then
               files+=("$asset")
             fi
           done
