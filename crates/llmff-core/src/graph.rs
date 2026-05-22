@@ -108,6 +108,9 @@ fn validate_tool_stage(stage: &StageSpec) -> Result<(), LlmffError> {
         (Some(command), None) if command.is_empty() => Err(LlmffError::GraphValidation(
             "tool command cannot be empty".to_string(),
         )),
+        (None, Some(_)) if stage.method.is_none() => Err(LlmffError::GraphValidation(
+            "http tool requires method".to_string(),
+        )),
         _ => Ok(()),
     }
 }
@@ -299,5 +302,30 @@ outputs:
         let error = Graph::from_manifest(manifest).unwrap_err().to_string();
 
         assert!(error.contains("tool command cannot be empty"));
+    }
+
+    #[test]
+    fn rejects_tool_url_without_method() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: call_tool
+    op: tool
+    from: source
+    url: http://127.0.0.1:8080/process
+outputs:
+  final:
+    from: call_tool
+    path: ./answer.txt
+"#,
+        )
+        .unwrap();
+
+        let error = Graph::from_manifest(manifest).unwrap_err().to_string();
+
+        assert!(error.contains("http tool requires method"));
     }
 }

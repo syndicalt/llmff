@@ -314,10 +314,13 @@ impl Engine {
         if let Some(command) = &stage.command {
             return execute_command_tool(stage, statuses, cwd, command);
         }
+        if stage.url.is_some() {
+            return execute_http_tool(stage, statuses).await;
+        }
 
         Err(LlmffError::StageExecution {
             stage_id: stage.id.clone(),
-            message: "http tool execution is not implemented".to_string(),
+            message: "tool requires command or url".to_string(),
         })
     }
 
@@ -412,6 +415,70 @@ fn resolve_command_path(cwd: &Path, program: &str) -> PathBuf {
     } else {
         path.to_path_buf()
     }
+}
+
+async fn execute_http_tool(
+    stage: &StageSpec,
+    statuses: &BTreeMap<String, StageStatus>,
+) -> Result<StageStatus, LlmffError> {
+    let input = parent_text(stage, statuses)?;
+    let method = stage
+        .method
+        .as_deref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "http tool requires method".to_string(),
+        })?
+        .parse::<reqwest::Method>()
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("invalid http tool method: {error}"),
+        })?;
+    let url = stage
+        .url
+        .as_deref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "http tool requires url".to_string(),
+        })?;
+
+    let client = reqwest::Client::new();
+    let mut request = client.request(method.clone(), url);
+    for (name, value) in &stage.headers {
+        request = request.header(name, value);
+    }
+    if method_allows_body(&method) {
+        request = request.body(input);
+    }
+
+    let response = request.send().await.map_err(|error| LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: format!("http tool request failed: {error}"),
+    })?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("failed to read http tool response: {error}"),
+        })?;
+
+    if !status.is_success() {
+        return Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("http tool returned status {status}: {body}"),
+        });
+    }
+
+    Ok(StageStatus::Success(Value::Text(body)))
+}
+
+fn method_allows_body(method: &reqwest::Method) -> bool {
+    matches!(
+        *method,
+        reqwest::Method::POST | reqwest::Method::PUT | reqwest::Method::PATCH
+    )
 }
 
 fn select_status_route<'a>(stage: &'a StageSpec, source: &StageStatus) -> Option<&'a str> {
@@ -586,6 +653,8 @@ mod tests {
 
     use crate::backend::MockBackend;
     use crate::manifest::Manifest;
+    use wiremock::matchers::{body_string, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn runs_json_repair_pipeline_end_to_end() {
@@ -1077,5 +1146,56 @@ outputs:
             .to_string();
 
         assert!(error.contains("tool command exited with status"));
+    }
+
+    #[tokio::test]
+    async fn tool_stage_posts_parent_body_to_http_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let input_path = dir.path().join("input.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&input_path, "ping").unwrap();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/process"))
+            .and(header("content-type", "text/plain"))
+            .and(body_string("ping"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("pong"))
+            .mount(&server)
+            .await;
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  source:
+    path: {}
+graph:
+  - id: load_source
+    op: load
+    input: source
+  - id: call_tool
+    op: tool
+    from: load_source
+    method: POST
+    url: {}/process
+    headers:
+      content-type: text/plain
+outputs:
+  final:
+    from: call_tool
+    path: {}
+"#,
+            input_path.display(),
+            server.uri(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "pong");
     }
 }
