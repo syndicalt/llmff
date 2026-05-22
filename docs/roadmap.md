@@ -51,6 +51,12 @@ Windows MSI smoke implementation slice:
 - `scripts/smoke-windows-msi.sh` extracts a built MSI on Windows hosts and verifies the packaged `llmff.exe` with `--version`, `stages list`, `inspect`, and a deterministic mock-backed `run`.
 - `.github/workflows/release-artifacts.yml` runs the Windows MSI smoke gate from the Windows release-artifact job.
 
+Windows Authenticode signing implementation slice:
+
+- `scripts/sign-windows-msi.ps1` imports the release P12 certificate, signs a built MSI with `signtool`, verifies the Authenticode signature, and removes the imported certificate.
+- `.github/workflows/release-artifacts.yml` signs Windows MSI artifacts only on tag-triggered release jobs, regenerates the MSI checksum after signing, and smoke-tests the signed MSI payload before upload.
+- `scripts/check-windows-signing-wiring.sh` and `scripts/release-preflight.sh` keep Windows signing CI and documentation wiring covered by local release preflight.
+
 macOS PKG implementation slice:
 
 - `scripts/package-macos-pkg.sh` builds an unsigned macOS Installer `.pkg` with `pkgbuild`, staging `llmff` into `/usr/local/bin`.

@@ -35,9 +35,12 @@ scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.1
 For release tags after this packaging slice, CI creates the GitHub Release when the tag does not already have one, then uploads binary archives, checksums, Ubuntu/Debian packages, and Arch packaging metadata to the matching GitHub Release assets. Manual dispatch keeps those outputs as Actions artifacts only.
 
 Release-tag CI also runs signing and notarization release gates before native
-macOS or Windows installer publication. The gates fail when required Apple or
-Authenticode credentials are absent; manual workflow dispatch remains available
-for unsigned artifact testing.
+macOS or Windows installer publication. Windows release tags sign and verify
+the MSI with Authenticode before regenerating its checksum and smoke-testing
+the signed package. macOS release tags currently enforce credential presence
+before installer publication; package signing and notarization command wiring
+remain separate release work. Manual workflow dispatch remains available for
+unsigned artifact testing.
 
 Current packaged artifact targets and installer assumptions are documented in
 [`docs/platform-support.md`](platform-support.md).

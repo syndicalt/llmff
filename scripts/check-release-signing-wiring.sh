@@ -50,3 +50,4 @@ require_text 'docs/platform-support.md' 'scripts/check-release-signing-gates.sh 
 require_text 'docs/platform-support.md' 'scripts/check-release-signing-gates.sh --platform macos'
 require_text 'docs/release-readiness.md' 'signing and notarization release gates'
 require_text 'docs/roadmap.md' 'Signing gate implementation slice'
+require_text 'scripts/release-preflight.sh' 'bash scripts/check-windows-signing-wiring.sh'
