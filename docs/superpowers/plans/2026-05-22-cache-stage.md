@@ -24,7 +24,7 @@
 
 ## Task 1: Manifest and Dependency Wiring
 
-- [ ] **Step 1: Write failing manifest cache-key test**
+- [x] **Step 1: Write failing manifest cache-key test**
 
 Add `parses_cache_fields` in `crates/llmff-core/src/manifest.rs`:
 
@@ -49,7 +49,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -59,7 +59,7 @@ cargo test -p llmff-core manifest::tests::parses_cache_fields
 
 Expected: FAIL because `StageSpec` has no `key` field.
 
-- [ ] **Step 3: Implement manifest field and dependency wiring**
+- [x] **Step 3: Implement manifest field and dependency wiring**
 
 Add to `StageSpec`:
 
@@ -71,7 +71,7 @@ Initialize `key: None` in every existing `StageSpec` literal and in `empty_stage
 
 Add `sha2 = "0.10"` to workspace dependencies and `sha2.workspace = true` to `llmff-core`.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run:
 

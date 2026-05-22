@@ -62,6 +62,7 @@ pub struct StageSpec {
     #[serde(default)]
     pub documents: Vec<String>,
     pub top_k: Option<usize>,
+    pub key: Option<String>,
 }
 
 #[cfg(test)]
@@ -239,5 +240,24 @@ graph:
 
         assert_eq!(stage.documents, vec!["docs/rust.txt", "docs/python.txt"]);
         assert_eq!(stage.top_k, Some(1));
+    }
+
+    #[test]
+    fn parses_cache_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: cached_prompt
+    op: cache
+    from: render_prompt
+    path: .llmff/cache
+    key: prompt-v1
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(stage.path.as_deref(), Some(".llmff/cache"));
+        assert_eq!(stage.key.as_deref(), Some("prompt-v1"));
     }
 }

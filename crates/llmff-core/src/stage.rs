@@ -313,6 +313,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            key: None,
         };
 
         let output = execute_deterministic_stage(
@@ -355,6 +356,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            key: None,
         };
 
         let output = execute_deterministic_stage(
@@ -401,6 +403,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            key: None,
         };
 
         let output = execute_deterministic_stage(
@@ -444,6 +447,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            key: None,
         };
 
         let error = execute_deterministic_stage(
@@ -496,6 +500,7 @@ mod tests {
             headers: Default::default(),
             documents: vec!["docs/python.txt".to_string(), "docs/rust.txt".to_string()],
             top_k: Some(1),
+            key: None,
         };
 
         let output = execute_deterministic_stage(
@@ -547,6 +552,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            key: None,
         };
 
         let output = execute_deterministic_stage(
@@ -600,6 +606,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            key: None,
         };
 
         let output = execute_deterministic_stage(
@@ -653,6 +660,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            key: None,
         };
 
         let output = execute_deterministic_stage(
@@ -701,6 +709,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            key: None,
         };
 
         let output = execute_deterministic_stage(
@@ -751,6 +760,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            key: None,
         };
 
         let error = execute_deterministic_stage(
