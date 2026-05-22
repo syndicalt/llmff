@@ -23,7 +23,8 @@ source-build fallback for users who are outside the prebuilt artifact set.
   publishes checksums, and expands the package payload with
   `scripts/smoke-macos-pkg.sh`.
 - Windows: CI builds an unsigned x86_64 MSI and checksum on a Windows host.
-  Signing and a full installed-MSI smoke gate are still release-track gaps.
+  CI extracts and verifies the MSI payload with `scripts/smoke-windows-msi.sh`.
+  Authenticode signing is still a release-track gap.
 - Archives: CI builds `.tar.gz` archives for Linux and macOS and a `.zip`
   archive for Windows. `scripts/smoke-archive.sh` extracts each archive and
   runs the packaged binary.
@@ -37,10 +38,10 @@ Every packaged binary smoke gate exercises the same CLI surface:
 - `llmff inspect examples/json-repair.yaml --mock llmff:good`
 - one deterministic mock-backed `llmff run`
 
-The current gates cover raw archives, Debian packages, and macOS package
-payloads. Windows MSI packaging is built and checksummed in CI, but the project
-should not treat the MSI as broadly recommended until an installed-MSI smoke
-gate and code signing are in place.
+The current gates cover raw archives, Debian packages, macOS package payloads,
+and Windows MSI payloads. The project should not treat native installers as
+broadly recommended until signing and notarization are in place where the
+platform expects them.
 
 ## Source-Build Fallback
 
