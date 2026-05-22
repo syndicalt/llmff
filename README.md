@@ -50,6 +50,13 @@ Generate and validate Windows MSI packaging metadata:
 scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.1 --target x86_64-pc-windows-msvc --out-dir dist --emit-wxs-only
 ```
 
+Build a Windows MSI on a Windows host:
+
+```bash
+dotnet tool restore
+scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.1 --target x86_64-pc-windows-msvc --out-dir dist
+```
+
 Smoke test a staged Windows MSI payload without installing:
 
 ```bash

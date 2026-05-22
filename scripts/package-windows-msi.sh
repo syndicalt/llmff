@@ -6,9 +6,11 @@ usage() {
 usage:
   scripts/package-windows-msi.sh --binary <path> --version <semver> --target <triple> --out-dir <dir> [--emit-wxs-only]
 
-Creates a Windows MSI installer for llmff with WiX and writes a SHA-256
-checksum file next to it. Use --emit-wxs-only to validate the WiX source
-without requiring WiX on non-Windows development machines.
+Creates a Windows MSI installer for llmff with the repo-pinned WiX dotnet tool
+and writes a SHA-256 checksum file next to it. Use --emit-wxs-only to validate
+the WiX source without requiring WiX on non-Windows development machines.
+
+Run `dotnet tool restore` before building an MSI locally.
 USAGE
 }
 
@@ -135,18 +137,26 @@ case "$(uname -s)" in
     ;;
 esac
 
-if ! command -v wix >/dev/null 2>&1; then
-  printf 'error: wix is required to build Windows MSI installers\n' >&2
+if ! command -v dotnet >/dev/null 2>&1; then
+  printf 'error: dotnet is required to restore and run the pinned WiX tool\n' >&2
   exit 1
 fi
 
+(
+  cd "$repo_root"
+  dotnet tool restore >/dev/null
+)
+
 rm -f "$msi" "$checksum"
-wix build \
+(
+  cd "$repo_root"
+  dotnet wix build \
   -arch "$wix_arch" \
   -d "Version=$version" \
   -d "Binary=$(native_path "$binary")" \
   -out "$(native_path "$msi")" \
   "$(native_path "$template")"
+)
 
 if command -v sha256sum >/dev/null 2>&1; then
   (
