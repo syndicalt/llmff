@@ -12,12 +12,31 @@ pub fn execute_deterministic_stage(
     cwd: &Path,
 ) -> Result<StageStatus, LlmffError> {
     match spec.op.as_str() {
-        "system" => Ok(StageStatus::Success(
-            input.unwrap_or_else(|| Value::Text(String::new())),
-        )),
+        "system" => system(spec, input, cwd),
         "validate_json" => validate_json(spec, input, cwd),
         other => Err(LlmffError::UnknownStage(other.to_string())),
     }
+}
+
+fn system(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageStatus, LlmffError> {
+    let input = input.unwrap_or_else(|| Value::Text(String::new()));
+    let Some(system_path) = spec.path.as_ref() else {
+        return Ok(StageStatus::Success(input));
+    };
+    let system_text = std::fs::read_to_string(resolve_path(cwd, system_path)).map_err(|error| {
+        LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("failed to read system path `{system_path}`: {error}"),
+        }
+    })?;
+    let input_text = match input {
+        Value::Text(text) => text,
+        Value::Json(json) => json.to_string(),
+    };
+
+    Ok(StageStatus::Success(Value::Text(format!(
+        "{system_text}\n\n{input_text}"
+    ))))
 }
 
 fn validate_json(
@@ -210,5 +229,37 @@ mod tests {
         .to_string();
 
         assert!(error.contains("schema_path `missing.schema.json`"));
+    }
+
+    #[test]
+    fn system_stage_prepends_file_text() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("policy.md"), "Use terse JSON.").unwrap();
+        let spec = StageSpec {
+            id: "policy".to_string(),
+            op: "system".to_string(),
+            input: None,
+            from: Some("load_prompt".to_string()),
+            path: Some("policy.md".to_string()),
+            model: None,
+            temperature: None,
+            schema: None,
+            schema_path: None,
+            when: None,
+        };
+
+        let output = execute_deterministic_stage(
+            &spec,
+            Some(Value::Text("Return an object.".to_string())),
+            dir.path(),
+        )
+        .expect("system stage should run");
+
+        assert_eq!(
+            output,
+            StageStatus::Success(Value::Text(
+                "Use terse JSON.\n\nReturn an object.".to_string()
+            ))
+        );
     }
 }
