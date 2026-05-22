@@ -92,5 +92,6 @@ bash scripts/check-windows-msi-smoke-wiring.sh
 bash scripts/check-release-publication-wiring.sh
 bash scripts/check-release-signing-wiring.sh
 bash scripts/check-windows-signing-wiring.sh
+bash scripts/check-macos-signing-wiring.sh
 
 printf 'release preflight succeeded for %s\n' "$tag"

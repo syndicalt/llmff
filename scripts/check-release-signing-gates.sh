@@ -39,6 +39,8 @@ case "$platform" in
     ;;
   macos)
     require_env APPLE_DEVELOPER_ID_INSTALLER
+    require_env APPLE_INSTALLER_CERT_P12_BASE64
+    require_env APPLE_INSTALLER_CERT_PASSWORD
     require_env APPLE_ID
     require_env APPLE_TEAM_ID
     require_env APPLE_APP_SPECIFIC_PASSWORD

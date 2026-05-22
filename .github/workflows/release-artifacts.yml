@@ -67,6 +67,8 @@ jobs:
         shell: bash
         env:
           APPLE_DEVELOPER_ID_INSTALLER: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER }}
+          APPLE_INSTALLER_CERT_P12_BASE64: ${{ secrets.APPLE_INSTALLER_CERT_P12_BASE64 }}
+          APPLE_INSTALLER_CERT_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERT_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -169,6 +171,40 @@ jobs:
             --target "${{ matrix.target }}" \
             --out-dir dist
           test -f "dist/llmff-${version}-${{ matrix.target }}.pkg"
+          (cd dist && shasum -a 256 -c "llmff-${version}-${{ matrix.target }}.pkg.sha256")
+          scripts/smoke-macos-pkg.sh --pkg "dist/llmff-${version}-${{ matrix.target }}.pkg"
+
+      - name: Sign and notarize macOS installer
+        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.macos_pkg }}
+        shell: bash
+        env:
+          APPLE_DEVELOPER_ID_INSTALLER: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER }}
+          APPLE_INSTALLER_CERT_P12_BASE64: ${{ secrets.APPLE_INSTALLER_CERT_P12_BASE64 }}
+          APPLE_INSTALLER_CERT_PASSWORD: ${{ secrets.APPLE_INSTALLER_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          pkg="dist/llmff-${version}-${{ matrix.target }}.pkg"
+          scripts/sign-notarize-macos-pkg.sh \
+            --pkg "$pkg" \
+            --identity "$APPLE_DEVELOPER_ID_INSTALLER" \
+            --certificate-base64 "$APPLE_INSTALLER_CERT_P12_BASE64" \
+            --certificate-password "$APPLE_INSTALLER_CERT_PASSWORD" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --apple-password "$APPLE_APP_SPECIFIC_PASSWORD"
+          (
+            cd dist
+            shasum -a 256 "llmff-${version}-${{ matrix.target }}.pkg" >"llmff-${version}-${{ matrix.target }}.pkg.sha256"
+          )
+
+      - name: Smoke signed and notarized macOS installer
+        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.macos_pkg }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
           (cd dist && shasum -a 256 -c "llmff-${version}-${{ matrix.target }}.pkg.sha256")
           scripts/smoke-macos-pkg.sh --pkg "dist/llmff-${version}-${{ matrix.target }}.pkg"
 

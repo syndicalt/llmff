@@ -37,9 +37,8 @@ For release tags after this packaging slice, CI creates the GitHub Release when 
 Release-tag CI also runs signing and notarization release gates before native
 macOS or Windows installer publication. Windows release tags sign and verify
 the MSI with Authenticode before regenerating its checksum and smoke-testing
-the signed package. macOS release tags currently enforce credential presence
-before installer publication; package signing and notarization command wiring
-remain separate release work. Manual workflow dispatch remains available for
+the signed package. macOS release tags sign, notarize, staple, and smoke-test
+the `.pkg` before upload. Manual workflow dispatch remains available for
 unsigned artifact testing.
 
 Current packaged artifact targets and installer assumptions are documented in
