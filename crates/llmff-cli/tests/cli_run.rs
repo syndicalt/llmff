@@ -515,6 +515,60 @@ fn inline_graph_run_executes_cache_stage() {
 }
 
 #[test]
+fn inline_graph_run_executes_command_tool_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("tool-output.txt");
+    std::fs::write(&prompt, "tool stdin").unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args([
+            "run",
+            "-i",
+            prompt.to_str().unwrap(),
+            "-g",
+            "load | tool(command=/bin/cat) | write(tool-output.txt)",
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "tool stdin");
+}
+
+#[tokio::test]
+async fn inline_graph_run_executes_http_tool_stage() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/process"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("tool response"))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("tool-output.txt");
+    std::fs::write(&prompt, "tool body").unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args([
+            "run",
+            "-i",
+            prompt.to_str().unwrap(),
+            "-g",
+            &format!(
+                "load | tool(method=POST,url={}/process) | write(tool-output.txt)",
+                server.uri()
+            ),
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "tool response");
+}
+
+#[test]
 fn inline_graph_run_rejects_manifest_and_graph_together() {
     let dir = tempfile::tempdir().unwrap();
     let manifest = dir.path().join("pipeline.yaml");

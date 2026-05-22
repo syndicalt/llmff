@@ -136,7 +136,21 @@ llmff backends list --format json
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
-Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Manifests remain the format for branching graphs and version-controlled recipes.
+Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Inline `tool` supports `command`, `method`, `url`, and `header:<name>` parameters. Manifests remain the format for branching graphs and version-controlled recipes.
+
+Call a command tool from an inline graph:
+
+```bash
+llmff run -i question.txt \
+  -g 'load | tool(command=/bin/cat) | write(tool-output.txt)'
+```
+
+Call an HTTP tool from an inline graph:
+
+```bash
+llmff run -i question.txt \
+  -g 'load | tool(method=POST,url=http://127.0.0.1:8080/process,header:content-type=text/plain) | write(tool-output.txt)'
+```
 
 For development without installing, prefix commands with `cargo run -p llmff --`, for example:
 
