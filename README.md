@@ -133,6 +133,14 @@ llmff run -i question.txt \
   -g 'load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=1) | write(matches.json)'
 ```
 
+Use deterministic local embedding-style retrieval when lexical token overlap is
+too strict:
+
+```bash
+llmff run -i question.txt \
+  -g 'load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=1,strategy=embedding) | write(matches.json)'
+```
+
 Cache an inline pipeline value across runs:
 
 ```bash
@@ -189,7 +197,7 @@ llmff backends list --format json
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
-Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Inline `tool` supports `command`, `method`, `url`, and `header:<name>` parameters. Manifests remain the format for branching graphs and version-controlled recipes.
+Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Inline `retrieve` accepts `strategy=lexical` or `strategy=embedding`. Inline `tool` supports `command`, `method`, `url`, and `header:<name>` parameters. Manifests remain the format for branching graphs and version-controlled recipes.
 
 Call a command tool from an inline graph:
 
@@ -266,7 +274,7 @@ graph:
     top_k: 1
 ```
 
-`retrieve` renders its parent value as query text, tokenizes the query and each document, scores documents by matching unique query terms, sorts by score and path, and returns JSON with `query` and `matches`. Document paths are relative to the manifest unless absolute. `top_k` is optional and must be greater than zero when present.
+`retrieve` renders its parent value as query text and returns JSON with `query`, `strategy`, and `matches`. The default `strategy: lexical` tokenizes the query and each document, scores documents by matching unique query terms, then sorts by score and path. `strategy: embedding` uses deterministic local character n-gram vectors and cosine similarity so near-overlap text can rank even when whole tokens differ. Document paths are relative to the manifest unless absolute. `top_k` is optional and must be greater than zero when present.
 
 Cache stages persist and reuse successful parent values across runs:
 
@@ -456,5 +464,5 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 ## Limitations
 
 - Schema values are inline JSON strings in the current manifest format.
-- Embedding, reranking, multimodal values, and plugin loading are not implemented yet.
+- Remote embedding models, external vector indexes, multimodal values, and plugin loading are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

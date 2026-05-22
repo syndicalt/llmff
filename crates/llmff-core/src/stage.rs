@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use jsonschema::JSONSchema;
@@ -51,8 +51,12 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             name: "retrieve",
             kind: "retrieval",
             required_fields: &["from", "documents"],
-            optional_fields: &["top_k"],
-            capabilities: &["local-documents", "lexical-scoring"],
+            optional_fields: &["top_k", "strategy"],
+            capabilities: &[
+                "local-documents",
+                "lexical-scoring",
+                "local-embedding-scoring",
+            ],
         },
         StageMetadata {
             name: "infer",
@@ -263,7 +267,12 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
             stage_id: spec.id.clone(),
             message: "retrieve requires input".to_string(),
         })?;
+    let strategy = RetrieveStrategy::from_stage(spec)?;
     let query_terms = tokenize(&query);
+    let query_embedding = match strategy {
+        RetrieveStrategy::Lexical => BTreeMap::new(),
+        RetrieveStrategy::Embedding => hashed_embedding(&query),
+    };
     let mut matches = Vec::new();
 
     for document in &spec.documents {
@@ -274,11 +283,13 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
             }
         })?;
         let document_terms = tokenize(&text);
-        let score = query_terms
-            .iter()
-            .filter(|term| document_terms.contains(*term))
-            .count();
-        if score > 0 {
+        let score = match strategy {
+            RetrieveStrategy::Lexical => lexical_score(&query_terms, &document_terms),
+            RetrieveStrategy::Embedding => {
+                cosine_similarity(&query_embedding, &hashed_embedding(&text))
+            }
+        };
+        if score.rank > 0.0 {
             matches.push(RetrieveMatch {
                 path: document.clone(),
                 score,
@@ -290,7 +301,15 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
     matches.sort_by(|left, right| {
         right
             .score
-            .cmp(&left.score)
+            .rank
+            .partial_cmp(&left.score.rank)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                right
+                    .score
+                    .lexical_tiebreak
+                    .cmp(&left.score.lexical_tiebreak)
+            })
             .then_with(|| left.path.cmp(&right.path))
     });
     if let Some(top_k) = spec.top_k {
@@ -299,12 +318,13 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
 
     Ok(StageStatus::Success(Value::Json(serde_json::json!({
         "query": query,
+        "strategy": strategy.as_str(),
         "matches": matches
             .into_iter()
             .map(|retrieved| {
                 serde_json::json!({
                     "path": retrieved.path,
-                    "score": retrieved.score,
+                    "score": retrieved.score.value,
                     "text": retrieved.text,
                 })
             })
@@ -312,9 +332,121 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
     }))))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RetrieveStrategy {
+    Lexical,
+    Embedding,
+}
+
+impl RetrieveStrategy {
+    fn from_stage(spec: &StageSpec) -> Result<Self, LlmffError> {
+        match spec.strategy.as_deref().unwrap_or("lexical") {
+            "lexical" => Ok(Self::Lexical),
+            "embedding" => Ok(Self::Embedding),
+            strategy => Err(LlmffError::StageExecution {
+                stage_id: spec.id.clone(),
+                message: format!(
+                    "retrieve strategy must be lexical or embedding, got `{strategy}`"
+                ),
+            }),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Lexical => "lexical",
+            Self::Embedding => "embedding",
+        }
+    }
+}
+
+struct RetrieveScore {
+    rank: f64,
+    lexical_tiebreak: usize,
+    value: serde_json::Value,
+}
+
+fn lexical_score(
+    query_terms: &BTreeSet<String>,
+    document_terms: &BTreeSet<String>,
+) -> RetrieveScore {
+    let score = query_terms
+        .iter()
+        .filter(|term| document_terms.contains(*term))
+        .count();
+
+    RetrieveScore {
+        rank: score as f64,
+        lexical_tiebreak: score,
+        value: serde_json::json!(score),
+    }
+}
+
+fn embedding_score_value(score: f64) -> serde_json::Value {
+    serde_json::json!((score * 1_000_000.0).round() / 1_000_000.0)
+}
+
+fn hashed_embedding(source: &str) -> BTreeMap<String, f64> {
+    let normalized = source
+        .chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
+    let chars = normalized.chars().collect::<Vec<_>>();
+    let mut embedding = BTreeMap::new();
+
+    if chars.is_empty() {
+        return embedding;
+    }
+
+    if chars.len() < 3 {
+        *embedding.entry(normalized).or_insert(0.0) += 1.0;
+        return embedding;
+    }
+
+    for window in chars.windows(3) {
+        let gram = window.iter().collect::<String>();
+        *embedding.entry(gram).or_insert(0.0) += 1.0;
+    }
+
+    embedding
+}
+
+fn cosine_similarity(left: &BTreeMap<String, f64>, right: &BTreeMap<String, f64>) -> RetrieveScore {
+    let dot = left
+        .iter()
+        .filter_map(|(dimension, left_value)| {
+            right
+                .get(dimension)
+                .map(|right_value| left_value * right_value)
+        })
+        .sum::<f64>();
+    let left_norm = vector_norm(left);
+    let right_norm = vector_norm(right);
+    let score = if left_norm == 0.0 || right_norm == 0.0 {
+        0.0
+    } else {
+        dot / (left_norm * right_norm)
+    };
+
+    RetrieveScore {
+        rank: score,
+        lexical_tiebreak: 0,
+        value: embedding_score_value(score),
+    }
+}
+
+fn vector_norm(vector: &BTreeMap<String, f64>) -> f64 {
+    vector
+        .values()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt()
+}
+
 struct RetrieveMatch {
     path: String,
-    score: usize,
+    score: RetrieveScore,
     text: String,
 }
 
@@ -437,6 +569,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            strategy: None,
             key: None,
         };
 
@@ -480,6 +613,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            strategy: None,
             key: None,
         };
 
@@ -527,6 +661,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            strategy: None,
             key: None,
         };
 
@@ -571,6 +706,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            strategy: None,
             key: None,
         };
 
@@ -624,6 +760,7 @@ mod tests {
             headers: Default::default(),
             documents: vec!["docs/python.txt".to_string(), "docs/rust.txt".to_string()],
             top_k: Some(1),
+            strategy: None,
             key: None,
         };
 
@@ -645,6 +782,62 @@ mod tests {
             json["matches"][0]["text"],
             "Rust builds reliable graph pipelines."
         );
+    }
+
+    #[test]
+    fn retrieve_stage_supports_local_embedding_strategy() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("docs")).unwrap();
+        std::fs::write(
+            dir.path().join("docs/trust.txt"),
+            "Trust systems keep state.",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("docs/python.txt"),
+            "Python notebooks handle tables.",
+        )
+        .unwrap();
+        let spec = StageSpec {
+            id: "retrieve_context".to_string(),
+            op: "retrieve".to_string(),
+            input: None,
+            from: Some("load_prompt".to_string()),
+            path: None,
+            model: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            schema: None,
+            schema_path: None,
+            when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
+            documents: vec!["docs/python.txt".to_string(), "docs/trust.txt".to_string()],
+            top_k: Some(1),
+            strategy: Some("embedding".to_string()),
+            key: None,
+        };
+
+        let output =
+            execute_deterministic_stage(&spec, Some(Value::Text("rust".to_string())), dir.path())
+                .expect("embedding retrieve stage should run");
+
+        let StageStatus::Success(Value::Json(json)) = output else {
+            panic!("retrieve should return JSON");
+        };
+        assert_eq!(json["strategy"], "embedding");
+        assert_eq!(json["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(json["matches"][0]["path"], "docs/trust.txt");
+        assert!(json["matches"][0]["score"].as_f64().unwrap() > 0.0);
     }
 
     #[test]
@@ -676,6 +869,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            strategy: None,
             key: None,
         };
 
@@ -730,6 +924,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            strategy: None,
             key: None,
         };
 
@@ -784,6 +979,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            strategy: None,
             key: None,
         };
 
@@ -833,6 +1029,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            strategy: None,
             key: None,
         };
 
@@ -884,6 +1081,7 @@ mod tests {
             headers: Default::default(),
             documents: Vec::new(),
             top_k: None,
+            strategy: None,
             key: None,
         };
 
