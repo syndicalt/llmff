@@ -27,11 +27,13 @@ jobs:
             binary: target/release/llmff
             deb_arch: ""
             arch_pkgbuild: false
+            macos_pkg: true
           - os: macos-13
             target: x86_64-apple-darwin
             binary: target/release/llmff
             deb_arch: ""
             arch_pkgbuild: false
+            macos_pkg: true
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: target/release/llmff.exe
@@ -102,6 +104,23 @@ jobs:
           else
             (cd dist && shasum -a 256 -c "llmff-${version}-${{ matrix.target }}.msi.sha256")
           fi
+
+      - name: Package macOS installer
+        if: ${{ matrix.macos_pkg }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(cargo pkgid -p llmff | sed 's/.*@//')"
+          fi
+          scripts/package-macos-pkg.sh \
+            --binary "${{ matrix.binary }}" \
+            --version "$version" \
+            --target "${{ matrix.target }}" \
+            --out-dir dist
+          test -f "dist/llmff-${version}-${{ matrix.target }}.pkg"
+          (cd dist && shasum -a 256 -c "llmff-${version}-${{ matrix.target }}.pkg.sha256")
 
       - name: Package Debian installer
         if: ${{ matrix.deb_arch != '' }}
