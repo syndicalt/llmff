@@ -100,6 +100,8 @@ JSON inputs can be templated by object field and used by field-based routes. Inv
 
 `template` replaces `{{input}}` when the parent value is text. When the parent value is a JSON object, object fields are available by name, such as `{{name}}`.
 
+`system` with a `path` preserves chat roles for model calls: the file contents become a `system` message and the parent value becomes a `user` message. Text-only stages render messages conservatively as `role: content` lines when they need a string.
+
 Route stages choose between already-computed stage outputs:
 
 ```yaml
