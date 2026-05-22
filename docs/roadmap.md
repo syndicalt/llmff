@@ -35,6 +35,11 @@ First implementation slice:
 - `scripts/package-archive.sh` creates a compressed binary archive and adjacent SHA-256 checksum from an already-built `llmff` binary.
 - `.github/workflows/release-artifacts.yml` builds release binaries on tag pushes for Linux, macOS Apple Silicon, macOS Intel, and Windows, then uploads archive artifacts.
 
+Archive smoke implementation slice:
+
+- `scripts/smoke-archive.sh` extracts `.tar.gz` and `.zip` release archives without installing and verifies the packaged `llmff` binary with `--version`, `stages list`, `inspect`, and a deterministic mock-backed `run`.
+- `.github/workflows/release-artifacts.yml` runs the archive smoke gate for Linux, macOS Apple Silicon, macOS Intel, and Windows release archives.
+
 Second implementation slice:
 
 - `scripts/package-deb.sh` creates an Ubuntu/Debian `.deb` package and adjacent SHA-256 checksum from an already-built Linux `llmff` binary.

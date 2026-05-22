@@ -68,6 +68,11 @@ jobs:
             --version "$version" \
             --target "${{ matrix.target }}" \
             --out-dir dist
+          archive_ext="tar.gz"
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            archive_ext="zip"
+          fi
+          scripts/smoke-archive.sh --archive "dist/llmff-${version}-${{ matrix.target }}.${archive_ext}"
 
       - name: Package Debian installer
         if: ${{ matrix.deb_arch != '' }}
