@@ -170,6 +170,14 @@ llmff run -i question.txt \
   -g 'load | cache(path=.llmff/cache,key=prompt-v1) | write(cached-question.txt)'
 ```
 
+Name inline stages and reference them explicitly:
+
+```bash
+LLMFF_MOCK_GOOD_RESPONSE='ok' \
+llmff run -i question.txt \
+  -g 'load#prompt | template#render(prompt.tmpl) | infer#draft(from=render,model=mock:good) | write#save(from=draft,path=answer.txt)'
+```
+
 Inline `load` reads stdin when `-i/--input` is omitted:
 
 ```bash
@@ -260,7 +268,7 @@ Only returned fields are applied; omitted fields keep the stage or backend defau
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
-Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Inline `retrieve` and `rerank` accept `strategy=lexical` or `strategy=embedding`. Inline `tool` supports `command`, `method`, `url`, and `header:<name>` parameters. Manifests remain the format for branching graphs and version-controlled recipes.
+Inline graphs support `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. A stage can be named as `op#id`, and later stages can use `from=id` to reference it instead of the previous stage. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Inline `retrieve` and `rerank` accept `strategy=lexical` or `strategy=embedding`. Inline `tool` supports `command`, `method`, `url`, and `header:<name>` parameters. Manifests remain the canonical format for complex branching graphs and version-controlled recipes.
 
 Call a command tool from an inline graph:
 

@@ -1030,6 +1030,31 @@ fn inline_graph_run_executes_retrieve_stage() {
 }
 
 #[test]
+fn inline_graph_run_executes_named_from_references() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let template = dir.path().join("prompt.tmpl");
+    let output = dir.path().join("answer.txt");
+    std::fs::write(&prompt, "graph").unwrap();
+    std::fs::write(&template, "Question: {{ input }}").unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args([
+            "run",
+            "-i",
+            prompt.to_str().unwrap(),
+            "-g",
+            "load#prompt | template#render(prompt.tmpl) | infer#draft(from=render,model=mock:good) | write#save(from=draft,path=answer.txt)",
+        ])
+        .env("LLMFF_MOCK_GOOD_RESPONSE", "named graph ok")
+        .assert()
+        .success();
+
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "named graph ok");
+}
+
+#[test]
 fn inline_graph_run_executes_embedding_retrieve_strategy() {
     let dir = tempfile::tempdir().unwrap();
     let docs = dir.path().join("docs");
