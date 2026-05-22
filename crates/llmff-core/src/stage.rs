@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Write;
 use std::path::Path;
+use std::process::{Command, Stdio};
 
 use jsonschema::JSONSchema;
 use serde::Serialize;
@@ -51,8 +53,9 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             name: "retrieve",
             kind: "retrieval",
             required_fields: &["from", "documents"],
-            optional_fields: &["top_k", "strategy"],
+            optional_fields: &["top_k", "strategy", "command"],
             capabilities: &[
+                "command-retrieval",
                 "local-documents",
                 "lexical-scoring",
                 "local-embedding-scoring",
@@ -62,8 +65,9 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             name: "rerank",
             kind: "retrieval",
             required_fields: &["from"],
-            optional_fields: &["top_k", "strategy"],
+            optional_fields: &["top_k", "strategy", "command"],
             capabilities: &[
+                "command-reranking",
                 "retrieval-reranking",
                 "lexical-scoring",
                 "local-embedding-scoring",
@@ -161,7 +165,7 @@ pub fn execute_deterministic_stage(
         "system" => system(spec, input, cwd),
         "template" => template(spec, input, cwd),
         "retrieve" => retrieve(spec, input, cwd),
-        "rerank" => rerank(spec, input),
+        "rerank" => rerank(spec, input, cwd),
         "validate_json" => validate_json(spec, input, cwd),
         other => Err(LlmffError::UnknownStage(other.to_string())),
     }
@@ -311,10 +315,14 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
             message: "retrieve requires input".to_string(),
         })?;
     let strategy = RetrieveStrategy::from_stage(spec, "retrieve", RetrieveStrategy::Lexical)?;
+    if strategy == RetrieveStrategy::Command {
+        return command_retrieve(spec, cwd, query);
+    }
     let query_terms = tokenize(&query);
     let query_embedding = match strategy {
         RetrieveStrategy::Lexical => BTreeMap::new(),
         RetrieveStrategy::Embedding => hashed_embedding(&query),
+        RetrieveStrategy::Command => BTreeMap::new(),
     };
     let mut matches = Vec::new();
 
@@ -369,7 +377,7 @@ fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
     }))))
 }
 
-fn rerank(spec: &StageSpec, input: Option<Value>) -> Result<StageStatus, LlmffError> {
+fn rerank(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageStatus, LlmffError> {
     let input = input.ok_or_else(|| LlmffError::StageExecution {
         stage_id: spec.id.clone(),
         message: "rerank requires input".to_string(),
@@ -399,10 +407,20 @@ fn rerank(spec: &StageSpec, input: Option<Value>) -> Result<StageStatus, LlmffEr
             message: "rerank requires matches array".to_string(),
         })?;
     let strategy = RetrieveStrategy::from_stage(spec, "rerank", RetrieveStrategy::Embedding)?;
+    if strategy == RetrieveStrategy::Command {
+        if let Some(top_k) = spec.top_k {
+            root.insert(
+                "top_k".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(top_k)),
+            );
+        }
+        return execute_json_command(spec, cwd, serde_json::Value::Object(root), "rerank command");
+    }
     let query_terms = tokenize(&query);
     let query_embedding = match strategy {
         RetrieveStrategy::Lexical => BTreeMap::new(),
         RetrieveStrategy::Embedding => hashed_embedding(&query),
+        RetrieveStrategy::Command => BTreeMap::new(),
     };
     let mut reranked = Vec::new();
 
@@ -476,10 +494,124 @@ fn rerank(spec: &StageSpec, input: Option<Value>) -> Result<StageStatus, LlmffEr
     )))
 }
 
+fn command_retrieve(
+    spec: &StageSpec,
+    cwd: &Path,
+    query: String,
+) -> Result<StageStatus, LlmffError> {
+    let mut documents = Vec::new();
+    for document in &spec.documents {
+        let text = std::fs::read_to_string(resolve_path(cwd, document)).map_err(|error| {
+            LlmffError::StageExecution {
+                stage_id: spec.id.clone(),
+                message: format!("failed to read retrieve document `{document}`: {error}"),
+            }
+        })?;
+        documents.push(serde_json::json!({
+            "path": document,
+            "text": text,
+        }));
+    }
+
+    let mut request = serde_json::Map::new();
+    request.insert("query".to_string(), serde_json::Value::String(query));
+    request.insert("documents".to_string(), serde_json::Value::Array(documents));
+    if let Some(top_k) = spec.top_k {
+        request.insert(
+            "top_k".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(top_k)),
+        );
+    }
+
+    execute_json_command(
+        spec,
+        cwd,
+        serde_json::Value::Object(request),
+        "retrieve command",
+    )
+}
+
+fn execute_json_command(
+    spec: &StageSpec,
+    cwd: &Path,
+    request: serde_json::Value,
+    label: &str,
+) -> Result<StageStatus, LlmffError> {
+    let command = spec
+        .command
+        .as_ref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("{label} requires command"),
+        })?;
+    let program = command.first().ok_or_else(|| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message: format!("{label} cannot be empty"),
+    })?;
+    let encoded = serde_json::to_vec(&request).map_err(LlmffError::Json)?;
+    let mut child = Command::new(resolve_command_path(cwd, program))
+        .args(&command[1..])
+        .current_dir(cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("failed to start {label} `{program}`: {error}"),
+        })?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("failed to open {label} stdin"),
+        })?;
+    stdin
+        .write_all(&encoded)
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("failed to write {label} stdin: {error}"),
+        })?;
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("failed to wait for {label} `{program}`: {error}"),
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!(
+                "{label} exited with status {}: {}",
+                output.status,
+                stderr.trim()
+            ),
+        });
+    }
+
+    let response: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|error| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("{label} returned invalid JSON: {error}"),
+        })?;
+    if !response.is_object() {
+        return Err(LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: format!("{label} must return a JSON object"),
+        });
+    }
+    Ok(StageStatus::Success(Value::Json(response)))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RetrieveStrategy {
     Lexical,
     Embedding,
+    Command,
 }
 
 impl RetrieveStrategy {
@@ -491,10 +623,11 @@ impl RetrieveStrategy {
         match spec.strategy.as_deref().unwrap_or(default.as_str()) {
             "lexical" => Ok(Self::Lexical),
             "embedding" => Ok(Self::Embedding),
+            "command" => Ok(Self::Command),
             strategy => Err(LlmffError::StageExecution {
                 stage_id: spec.id.clone(),
                 message: format!(
-                    "{operation} strategy must be lexical or embedding, got `{strategy}`"
+                    "{operation} strategy must be lexical, embedding, or command, got `{strategy}`"
                 ),
             }),
         }
@@ -504,6 +637,7 @@ impl RetrieveStrategy {
         match self {
             Self::Lexical => "lexical",
             Self::Embedding => "embedding",
+            Self::Command => "command",
         }
     }
 }
@@ -517,6 +651,7 @@ fn score_text(
     match strategy {
         RetrieveStrategy::Lexical => lexical_score(query_terms, &tokenize(text)),
         RetrieveStrategy::Embedding => cosine_similarity(query_embedding, &hashed_embedding(text)),
+        RetrieveStrategy::Command => unreachable!("command strategy is executed externally"),
     }
 }
 
@@ -672,6 +807,15 @@ fn resolve_path(cwd: &Path, path: &str) -> std::path::PathBuf {
         path.to_path_buf()
     } else {
         cwd.join(path)
+    }
+}
+
+fn resolve_command_path(cwd: &Path, program: &str) -> std::path::PathBuf {
+    let path = Path::new(program);
+    if path.is_relative() && path.components().count() > 1 {
+        cwd.join(path)
+    } else {
+        path.to_path_buf()
     }
 }
 

@@ -536,8 +536,14 @@ impl Engine {
             }
             "retrieve" => {
                 require_stage_field(stage, stage.from.as_deref(), "retrieve requires from")?;
-                if stage.documents.is_empty() {
+                if stage.documents.is_empty() && !is_command_retrieval_strategy(stage) {
                     return Err(stage_validation_error(stage, "retrieve requires documents"));
+                }
+                if is_command_retrieval_strategy(stage) && stage.command.is_none() {
+                    return Err(stage_validation_error(
+                        stage,
+                        "retrieve command strategy requires command",
+                    ));
                 }
                 if let Some(0) = stage.top_k {
                     return Err(stage_validation_error(
@@ -550,6 +556,12 @@ impl Engine {
             }
             "rerank" => {
                 require_stage_field(stage, stage.from.as_deref(), "rerank requires from")?;
+                if is_command_retrieval_strategy(stage) && stage.command.is_none() {
+                    return Err(stage_validation_error(
+                        stage,
+                        "rerank command strategy requires command",
+                    ));
+                }
                 if let Some(0) = stage.top_k {
                     return Err(stage_validation_error(
                         stage,
@@ -1241,12 +1253,18 @@ fn validate_rerank_strategy(stage: &StageSpec) -> Result<(), LlmffError> {
 
 fn validate_retrieval_strategy(stage: &StageSpec, operation: &str) -> Result<(), LlmffError> {
     match stage.strategy.as_deref().unwrap_or("lexical") {
-        "lexical" | "embedding" => Ok(()),
+        "lexical" | "embedding" | "command" => Ok(()),
         strategy => Err(stage_validation_error(
             stage,
-            format!("{operation} strategy must be lexical or embedding, got `{strategy}`"),
+            format!(
+                "{operation} strategy must be lexical, embedding, or command, got `{strategy}`"
+            ),
         )),
     }
+}
+
+fn is_command_retrieval_strategy(stage: &StageSpec) -> bool {
+    stage.strategy.as_deref() == Some("command")
 }
 
 fn validate_when_condition(stage: &StageSpec) -> Result<(), LlmffError> {
@@ -2436,7 +2454,7 @@ graph:
 
         assert!(error
             .to_string()
-            .contains("retrieve strategy must be lexical or embedding"));
+            .contains("retrieve strategy must be lexical, embedding, or command"));
     }
 
     #[test]
@@ -2466,7 +2484,7 @@ graph:
 
         assert!(error
             .to_string()
-            .contains("rerank strategy must be lexical or embedding"));
+            .contains("rerank strategy must be lexical, embedding, or command"));
     }
 
     #[tokio::test]
