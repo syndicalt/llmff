@@ -7,7 +7,7 @@ This roadmap tracks major product capabilities that move `llmff` toward an FFmpe
 - Command-line-first pipeline runner.
 - YAML manifests and compact inline graphs.
 - Deterministic stages for loading, templating, system prompts, local lexical and embedding-style retrieval, local reranking, caching, routing, validation, repair, tools, and writes.
-- Mock, OpenAI-compatible, and Ollama backend adapters with portable sampling, JSON response-format, and stop-sequence controls.
+- Mock, OpenAI-compatible, and Ollama backend adapters with portable sampling, seed, JSON response-format, and stop-sequence controls.
 - Dry-run inspection, JSONL traces, streamed lifecycle events, trace summaries, and a GitHub install smoke gate.
 
 ## Packaged Installers

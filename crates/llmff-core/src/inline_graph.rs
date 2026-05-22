@@ -147,6 +147,11 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
                     inline_graph_error(format!("invalid max_tokens `{value}`: {error}"))
                 })?)
             }
+            "seed" => {
+                stage.seed = Some(value.parse::<u64>().map_err(|error| {
+                    inline_graph_error(format!("invalid seed `{value}`: {error}"))
+                })?)
+            }
             "response_format" => stage.response_format = Some(value),
             "stop" => {
                 stage.stop = parse_semicolon_list(&value, "stop", "sequence")?;
@@ -234,6 +239,7 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         temperature: None,
         top_p: None,
         max_tokens: None,
+        seed: None,
         response_format: None,
         stop: Vec::new(),
         schema: None,
@@ -267,7 +273,7 @@ mod tests {
     #[test]
     fn parses_linear_inline_graph() {
         let manifest = Manifest::from_inline_graph(
-            "load | infer(model=mock:good,temperature=0.2,top_p=0.9,max_tokens=256,response_format=json,stop=END;DONE) | write(-)",
+            "load | infer(model=mock:good,temperature=0.2,top_p=0.9,max_tokens=256,seed=12345,response_format=json,stop=END;DONE) | write(-)",
             Some("question.txt".to_string()),
         )
         .expect("inline graph should parse");
@@ -290,6 +296,7 @@ mod tests {
         assert_eq!(manifest.graph[1].temperature, Some(0.2));
         assert_eq!(manifest.graph[1].top_p, Some(0.9));
         assert_eq!(manifest.graph[1].max_tokens, Some(256));
+        assert_eq!(manifest.graph[1].seed, Some(12345));
         assert_eq!(manifest.graph[1].response_format.as_deref(), Some("json"));
         assert_eq!(manifest.graph[1].stop, vec!["END", "DONE"]);
 
