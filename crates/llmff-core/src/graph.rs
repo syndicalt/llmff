@@ -39,6 +39,7 @@ impl Graph {
 
             validate_route_targets(stage, &stage_ids)?;
             validate_tool_stage(stage)?;
+            validate_write_stage(stage)?;
         }
 
         for output in manifest.outputs.values() {
@@ -112,6 +113,20 @@ fn validate_tool_stage(stage: &StageSpec) -> Result<(), LlmffError> {
             "http tool requires method".to_string(),
         )),
         _ => Ok(()),
+    }
+}
+
+fn validate_write_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.op != "write" {
+        return Ok(());
+    }
+
+    if stage.path.is_some() {
+        Ok(())
+    } else {
+        Err(LlmffError::GraphValidation(
+            "write requires path".to_string(),
+        ))
     }
 }
 
@@ -327,5 +342,29 @@ outputs:
         let error = Graph::from_manifest(manifest).unwrap_err().to_string();
 
         assert!(error.contains("http tool requires method"));
+    }
+
+    #[test]
+    fn rejects_write_without_path() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: save
+    op: write
+    from: source
+outputs:
+  final:
+    from: save
+    path: ./answer.txt
+"#,
+        )
+        .unwrap();
+
+        let error = Graph::from_manifest(manifest).unwrap_err().to_string();
+
+        assert!(error.contains("write requires path"));
     }
 }

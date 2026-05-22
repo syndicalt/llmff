@@ -110,6 +110,18 @@ graph:
 
 HTTP tools require `method` and `url`. `POST`, `PUT`, and `PATCH` send the serialized parent value as the request body; response text becomes the stage output.
 
+Write stages persist a successful parent value from inside the graph and forward the same value:
+
+```yaml
+graph:
+  - id: save_answer
+    op: write
+    from: validate
+    path: ./answer.json
+```
+
+Top-level `outputs` remain supported for simple final outputs. Use `write` when the pipeline itself should express the write step, or when an intermediate value should be saved.
+
 ## Backend Notes
 
 The CLI keeps backend registration explicit. This keeps commands portable and FFmpeg-like: the command line describes the run, while environment variables are only used when you choose to read a secret by name.
