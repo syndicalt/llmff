@@ -24,6 +24,7 @@ impl Manifest {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct InputSpec {
     pub path: Option<String>,
+    pub format: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -114,6 +115,25 @@ graph:
             manifest.graph[0].schema_path.as_deref(),
             Some("./answer.schema.json")
         );
+    }
+
+    #[test]
+    fn parses_input_format() {
+        let yaml = r#"
+version: 1
+inputs:
+  payload:
+    path: ./payload.json
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+
+        assert_eq!(manifest.inputs["payload"].format.as_deref(), Some("json"));
     }
 
     #[test]

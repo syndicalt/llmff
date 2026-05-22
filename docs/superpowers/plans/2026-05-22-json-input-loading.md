@@ -25,7 +25,7 @@
 - Modify: `crates/llmff-core/src/engine.rs`
 - Modify: `crates/llmff-cli/tests/cli_run.rs`
 
-- [ ] **Step 1: Write failing manifest parsing test**
+- [x] **Step 1: Write failing manifest parsing test**
 
 Add this test to `crates/llmff-core/src/manifest.rs`:
 
@@ -50,7 +50,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run test to verify RED**
+- [x] **Step 2: Run test to verify RED**
 
 Run:
 
@@ -60,7 +60,7 @@ cargo test -p llmff-core manifest::tests::parses_input_format
 
 Expected: FAIL because `InputSpec` has no `format` field.
 
-- [ ] **Step 3: Implement minimal manifest field**
+- [x] **Step 3: Implement minimal manifest field**
 
 In `crates/llmff-core/src/manifest.rs`, change `InputSpec` to:
 
@@ -72,7 +72,7 @@ pub struct InputSpec {
 }
 ```
 
-- [ ] **Step 4: Run test to verify GREEN**
+- [x] **Step 4: Run test to verify GREEN**
 
 Run:
 
@@ -82,7 +82,7 @@ cargo test -p llmff-core manifest::tests::parses_input_format
 
 Expected: PASS.
 
-- [ ] **Step 5: Write failing validation tests**
+- [x] **Step 5: Write failing validation tests**
 
 Add this core test to `crates/llmff-core/src/engine.rs`:
 
@@ -152,7 +152,7 @@ graph:
 }
 ```
 
-- [ ] **Step 6: Run validation tests to verify RED**
+- [x] **Step 6: Run validation tests to verify RED**
 
 Run:
 
@@ -163,7 +163,7 @@ cargo test -p llmff --test cli_run inspect_rejects_unknown_input_format
 
 Expected: FAIL because unsupported input formats are currently accepted.
 
-- [ ] **Step 7: Implement input format validation**
+- [x] **Step 7: Implement input format validation**
 
 In `Engine::validate_manifest`, validate inputs before building the graph:
 
@@ -205,7 +205,7 @@ fn input_format(format: Option<&str>) -> Option<InputFormat> {
 }
 ```
 
-- [ ] **Step 8: Run validation tests to verify GREEN and commit**
+- [x] **Step 8: Run validation tests to verify GREEN and commit**
 
 Run:
 

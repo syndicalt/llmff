@@ -355,6 +355,40 @@ graph:
 }
 
 #[test]
+fn inspect_rejects_unknown_input_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let payload = dir.path().join("payload.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&payload, r#"{"kind":"simple"}"#).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: yaml
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+"#,
+            payload.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["inspect", manifest.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "input `payload` has unsupported format `yaml`",
+        ));
+}
+
+#[test]
 fn trace_command_summarizes_trace_jsonl() {
     let dir = tempfile::tempdir().unwrap();
     let trace = dir.path().join("trace.jsonl");

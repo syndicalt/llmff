@@ -55,6 +55,7 @@ impl Engine {
     }
 
     pub fn validate_manifest(&self, manifest: Manifest) -> Result<Graph, LlmffError> {
+        validate_input_formats(&manifest)?;
         let graph = Graph::from_manifest(manifest)?;
         for stage in graph.stages() {
             self.validate_stage(stage)?;
@@ -579,6 +580,33 @@ fn stage_validation_error(stage: &StageSpec, message: impl Into<String>) -> Llmf
     LlmffError::StageExecution {
         stage_id: stage.id.clone(),
         message: message.into(),
+    }
+}
+
+fn validate_input_formats(manifest: &Manifest) -> Result<(), LlmffError> {
+    for (id, input) in &manifest.inputs {
+        if input_format(input.format.as_deref()).is_none() {
+            let format = input.format.as_deref().unwrap_or_default();
+            return Err(LlmffError::GraphValidation(format!(
+                "input `{id}` has unsupported format `{format}`"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputFormat {
+    Text,
+    Json,
+}
+
+fn input_format(format: Option<&str>) -> Option<InputFormat> {
+    match format.unwrap_or("text") {
+        "text" => Some(InputFormat::Text),
+        "json" => Some(InputFormat::Json),
+        _ => None,
     }
 }
 
@@ -1155,6 +1183,32 @@ graph:
         assert!(error
             .to_string()
             .contains("stage `draft` failed: unknown when condition `maybe`"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_unknown_input_format() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: payload.json
+    format: yaml
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("unknown input format should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("input `payload` has unsupported format `yaml`"));
     }
 
     #[test]
