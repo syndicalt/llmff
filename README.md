@@ -35,6 +35,12 @@ Run the install smoke gate from a checkout:
 scripts/smoke-install.sh --path .
 ```
 
+Smoke test a generated Debian package without root:
+
+```bash
+scripts/smoke-deb.sh --deb dist/llmff_0.1.1_amd64.deb
+```
+
 Packaged installers for Windows, macOS, Ubuntu, Debian, and Arch Linux are on the roadmap; current releases install through Cargo from GitHub.
 
 Release tags also build compressed binary archives in CI as the first packaged-artifact slice. Ubuntu/Debian `.deb` packaging and Arch `PKGBUILD` metadata are wired for the Linux release job; macOS signed/notarized installers and Windows installers are still future roadmap items.

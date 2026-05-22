@@ -86,6 +86,7 @@ jobs:
           dpkg-deb -f "dist/llmff_${version}_${{ matrix.deb_arch }}.deb" Package Version Architecture
           dpkg-deb -c "dist/llmff_${version}_${{ matrix.deb_arch }}.deb" | grep '/usr/bin/llmff$'
           (cd dist && sha256sum -c "llmff_${version}_${{ matrix.deb_arch }}.deb.sha256")
+          scripts/smoke-deb.sh --deb "dist/llmff_${version}_${{ matrix.deb_arch }}.deb"
 
       - name: Generate Arch PKGBUILD
         if: ${{ matrix.arch_pkgbuild }}
