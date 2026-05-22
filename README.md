@@ -2,6 +2,33 @@
 
 `llmff` is an FFmpeg-shaped command-line and library tool for LLM inference pipelines. The MVP focuses on a typed pipeline graph, reproducible YAML manifests, backend adapters, local retrieval, JSON validation and repair, and JSONL traces.
 
+## Install
+
+Install from GitHub:
+
+```bash
+cargo install --git https://github.com/syndicalt/llmff llmff
+```
+
+For a local checkout:
+
+```bash
+cargo install --path crates/llmff-cli
+```
+
+Verify the installed binary:
+
+```bash
+llmff --version
+llmff stages list
+```
+
+Run the install smoke gate from a checkout:
+
+```bash
+scripts/smoke-install.sh --path .
+```
+
 ## Current Scope
 
 - `llmff run <manifest>` executes a pipeline manifest.
@@ -21,21 +48,21 @@ Run the JSON repair example with deterministic mock model responses:
 ```bash
 LLMFF_MOCK_BAD_RESPONSE='{"wrong":true}' \
 LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
-cargo run -p llmff -- run examples/json-repair.yaml --trace /tmp/llmff-trace.jsonl
+llmff run examples/json-repair.yaml --trace /tmp/llmff-trace.jsonl
 ```
 
 Run independent ready stages concurrently:
 
 ```bash
 LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
-cargo run -p llmff -- run --parallel pipeline.yaml
+llmff run --parallel pipeline.yaml
 ```
 
 Run a compact inline graph:
 
 ```bash
 LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
-cargo run -p llmff -- run -i examples/question.txt \
+llmff run -i examples/question.txt \
   -g 'load | infer(model=mock:good) | write(-)'
 ```
 
@@ -43,13 +70,13 @@ Inline `load` reads stdin when `-i/--input` is omitted:
 
 ```bash
 cat examples/question.txt | LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
-  cargo run -p llmff -- run -g 'load | infer(model=mock:good) | write(-)'
+  llmff run -g 'load | infer(model=mock:good) | write(-)'
 ```
 
 Inspect the manifest without running model calls:
 
 ```bash
-cargo run -p llmff -- inspect examples/json-repair.yaml
+llmff inspect examples/json-repair.yaml
 ```
 
 `inspect` catches type mismatches that are statically provable, such as field-based route stages whose source is known to be text rather than JSON.
@@ -57,7 +84,7 @@ cargo run -p llmff -- inspect examples/json-repair.yaml
 Inspect a manifest that references a registered backend alias:
 
 ```bash
-cargo run -p llmff -- inspect pipeline.yaml \
+llmff inspect pipeline.yaml \
   --backend openai=https://api.openai.com/v1 \
   --api-key-env openai=OPENAI_API_KEY
 ```
@@ -65,12 +92,18 @@ cargo run -p llmff -- inspect pipeline.yaml \
 List built-in stages:
 
 ```bash
-cargo run -p llmff -- stages list
+llmff stages list
 ```
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
 Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax. Manifests remain the format for branching graphs and version-controlled recipes.
+
+For development without installing, prefix commands with `cargo run -p llmff --`, for example:
+
+```bash
+cargo run -p llmff -- inspect examples/json-repair.yaml
+```
 
 Manifest stages may be written in any order. `llmff` validates references across the full graph and executes stages in dependency order. By default stages execute sequentially for deterministic local behavior; `run --parallel` executes independent ready stages concurrently.
 
@@ -230,7 +263,7 @@ Trace metadata intentionally avoids full prompt bodies, cached values, tool stdi
 Summarize a trace file:
 
 ```bash
-cargo run -p llmff -- trace /tmp/llmff-trace.jsonl
+llmff trace /tmp/llmff-trace.jsonl
 ```
 
 The trace summary prints run status, stage status, duration, and safe metadata only. Total usage is summarized as `usage=<total>`.

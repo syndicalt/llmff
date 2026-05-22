@@ -156,7 +156,7 @@ git commit -m "test: add install smoke gate"
 
 ## Task 2: Install Docs and Metadata
 
-- [ ] **Step 1: Write failing metadata check**
+- [x] **Step 1: Write failing metadata check**
 
 Run:
 
@@ -166,7 +166,7 @@ grep -q 'https://github.com/syndicalt/llmff' Cargo.toml
 
 Expected: FAIL because the workspace repository metadata uses the old owner.
 
-- [ ] **Step 2: Update metadata and docs**
+- [x] **Step 2: Update metadata and docs**
 
 Change `Cargo.toml`:
 
@@ -203,7 +203,7 @@ Convert user-facing examples from `cargo run -p llmff -- ...` to `llmff ...`, an
 
 Create `docs/release-readiness.md` with the checklist from the design.
 
-- [ ] **Step 3: Run docs verification and commit**
+- [x] **Step 3: Run docs verification and commit**
 
 Run:
 
@@ -223,7 +223,7 @@ git commit -m "docs: document GitHub install path"
 
 ## Task 3: Final Verification and Merge
 
-- [ ] **Step 1: Run full verification**
+- [x] **Step 1: Run full verification**
 
 Run:
 
