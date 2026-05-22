@@ -2,12 +2,15 @@ use async_trait::async_trait;
 use futures::{stream, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::process::{Command, Stdio};
 
 use crate::error::LlmffError;
 use crate::value::Message;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct InferRequest {
     pub model: String,
     pub messages: Vec<Message>,
@@ -35,11 +38,97 @@ pub struct InferStreamChunk {
     pub usage: Option<UsageMetadata>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct UsageMetadata {
     pub prompt_tokens: Option<u64>,
     pub completion_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommandBackend {
+    alias: String,
+    entrypoint: PathBuf,
+}
+
+impl CommandBackend {
+    pub fn new(alias: impl Into<String>, entrypoint: impl Into<PathBuf>) -> Self {
+        Self {
+            alias: alias.into(),
+            entrypoint: entrypoint.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl Backend for CommandBackend {
+    async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
+        let encoded = serde_json::to_vec(&request).map_err(LlmffError::Json)?;
+        let mut child = Command::new(resolve_command_path(&self.entrypoint))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| {
+                LlmffError::Backend(format!(
+                    "failed to start plugin backend `{}`: {error}",
+                    self.alias
+                ))
+            })?;
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            LlmffError::Backend(format!(
+                "failed to open plugin backend `{}` stdin",
+                self.alias
+            ))
+        })?;
+        stdin.write_all(&encoded).map_err(|error| {
+            LlmffError::Backend(format!(
+                "failed to write plugin backend `{}` request: {error}",
+                self.alias
+            ))
+        })?;
+        drop(stdin);
+
+        let output = child.wait_with_output().map_err(|error| {
+            LlmffError::Backend(format!(
+                "failed to wait for plugin backend `{}`: {error}",
+                self.alias
+            ))
+        })?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(LlmffError::Backend(format!(
+                "plugin backend `{}` exited with status {}: {}",
+                self.alias,
+                output.status,
+                stderr.trim()
+            )));
+        }
+
+        let response: CommandBackendResponse =
+            serde_json::from_slice(&output.stdout).map_err(|error| {
+                LlmffError::Backend(format!(
+                    "plugin backend `{}` returned invalid response JSON: {error}",
+                    self.alias
+                ))
+            })?;
+
+        Ok(InferResponse {
+            model: request.model,
+            text: response.text,
+            usage: response.usage,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CommandBackendResponse {
+    text: String,
+    usage: Option<UsageMetadata>,
+}
+
+fn resolve_command_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
