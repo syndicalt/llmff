@@ -1195,6 +1195,108 @@ outputs:
 }
 
 #[test]
+fn run_applies_plugin_sampler_before_plugin_backend() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join("plugins");
+    let plugin = plugin_dir.join("sampling-plugin");
+    let bin = plugin.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: sampling-plugin
+version: 0.1.0
+capabilities:
+  - kind: sampler
+    name: safe-small
+    entrypoint: ./bin/sampler
+  - kind: backend
+    name: local-check
+    entrypoint: ./bin/backend
+"#,
+    )
+    .unwrap();
+    let sampler = bin.join("sampler");
+    std::fs::write(
+        &sampler,
+        "#!/bin/sh\ncat >/dev/null\nprintf '{\"temperature\":0.1,\"max_tokens\":5,\"stop\":[\"DONE\"]}'\n",
+    )
+    .unwrap();
+    let backend = bin.join("backend");
+    std::fs::write(
+        &backend,
+        r#"#!/bin/sh
+request=$(cat)
+case "$request" in
+  *'"temperature":0.1'*'"max_tokens":5'*'"stop":["DONE"]'*)
+    printf '{"text":"sampler applied"}'
+    ;;
+  *)
+    printf '%s\n' "$request" >&2
+    exit 9
+    ;;
+esac
+"#,
+    )
+    .unwrap();
+    let mut sampler_permissions = std::fs::metadata(&sampler).unwrap().permissions();
+    let mut backend_permissions = std::fs::metadata(&backend).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        sampler_permissions.set_mode(0o755);
+        backend_permissions.set_mode(0o755);
+    }
+    std::fs::set_permissions(&sampler, sampler_permissions).unwrap();
+    std::fs::set_permissions(&backend, backend_permissions).unwrap();
+
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "ask sampled backend").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: local-check:test-model
+    sampler: safe-small
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args([
+            "run",
+            manifest.to_str().unwrap(),
+            "--plugin-dir",
+            plugin_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "sampler applied");
+}
+
+#[test]
 fn inline_graph_run_rejects_manifest_and_graph_together() {
     let dir = tempfile::tempdir().unwrap();
     let manifest = dir.path().join("pipeline.yaml");
@@ -1325,6 +1427,68 @@ graph:
     op: infer
     from: load_prompt
     model: local-echo:test-model
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args([
+        "inspect",
+        manifest.to_str().unwrap(),
+        "--plugin-dir",
+        plugin_dir.to_str().unwrap(),
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("ok"));
+}
+
+#[test]
+fn inspect_accepts_plugin_sampler_with_plugin_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin_dir = dir.path().join("plugins");
+    let plugin = plugin_dir.join("sampling-plugin");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: sampling-plugin
+version: 0.1.0
+capabilities:
+  - kind: sampler
+    name: safe-small
+    entrypoint: /bin/false
+"#,
+    )
+    .unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "ask sampled backend").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+    sampler: safe-small
 outputs:
   final:
     from: draft

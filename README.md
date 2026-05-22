@@ -241,6 +241,14 @@ Plugin stage capabilities run as stdin/stdout command stages with `op: plugin:<c
 {"text":"model output","usage":{"prompt_tokens":12,"completion_tokens":8,"total_tokens":20}}
 ```
 
+Plugin sampler capabilities can be attached to `infer` and `repair` stages with `sampler: <capability-name>`. Sampler commands receive the serialized inference request on stdin and return JSON sampling overrides on stdout:
+
+```json
+{"temperature":0.1,"top_p":0.9,"max_tokens":256,"seed":12345,"response_format":"json","stop":["DONE"]}
+```
+
+Only returned fields are applied; omitted fields keep the stage or backend defaults.
+
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
 Inline graphs support linear `op`, `op(value)`, and `op(key=value)` stage syntax for `run` and `inspect`. Use semicolons inside the `documents` value for inline `retrieve`, such as `documents=docs/a.txt;docs/b.txt`. Inline `retrieve` and `rerank` accept `strategy=lexical` or `strategy=embedding`. Inline `tool` supports `command`, `method`, `url`, and `header:<name>` parameters. Manifests remain the format for branching graphs and version-controlled recipes.
@@ -518,6 +526,6 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 
 - Schema values are inline JSON strings in the current manifest format.
 - `llmff run --stream-stage <infer-stage-id>` streams one model stage's token deltas to stdout. Streaming arbitrary stage payloads is not implemented yet.
-- Plugin manifests can be discovered and listed, and plugin stages, backend commands, and tool transports can run through stdin/stdout plugin entrypoints. Plugin samplers are not wired into pipeline runtime yet.
+- Plugin manifests can be discovered and listed, and plugin stages, backend commands, tool transports, and samplers can run through stdin/stdout plugin entrypoints.
 - Remote embedding models, external vector indexes, and multimodal values are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

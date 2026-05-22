@@ -15,7 +15,8 @@ use crate::error::LlmffError;
 use crate::graph::{stage_dependencies, Graph};
 use crate::manifest::{Manifest, StageSpec};
 use crate::plugin::{
-    discover_plugin_stages, discover_plugin_tool_transports, PluginStage, PluginToolTransport,
+    discover_plugin_samplers, discover_plugin_stages, discover_plugin_tool_transports,
+    PluginSampler, PluginStage, PluginToolTransport,
 };
 use crate::stage::execute_deterministic_stage;
 use crate::trace::{TraceEvent, TraceWriter};
@@ -115,7 +116,7 @@ impl Engine {
     }
 
     pub fn validate_manifest(&self, manifest: Manifest) -> Result<Graph, LlmffError> {
-        self.validate_manifest_with_plugins(manifest, &BTreeMap::new())
+        self.validate_manifest_with_plugins(manifest, &BTreeMap::new(), &BTreeMap::new())
     }
 
     pub fn validate_manifest_with_plugin_dirs(
@@ -124,18 +125,20 @@ impl Engine {
         plugin_dirs: &[PathBuf],
     ) -> Result<Graph, LlmffError> {
         let plugin_stages = load_plugin_stages(plugin_dirs)?;
-        self.validate_manifest_with_plugins(manifest, &plugin_stages)
+        let plugin_samplers = load_plugin_samplers(plugin_dirs)?;
+        self.validate_manifest_with_plugins(manifest, &plugin_stages, &plugin_samplers)
     }
 
     fn validate_manifest_with_plugins(
         &self,
         manifest: Manifest,
         plugin_stages: &BTreeMap<String, PluginStage>,
+        plugin_samplers: &BTreeMap<String, PluginSampler>,
     ) -> Result<Graph, LlmffError> {
         validate_input_formats(&manifest)?;
         let graph = Graph::from_manifest(manifest.clone())?;
         for stage in graph.stages() {
-            self.validate_stage(stage, plugin_stages)?;
+            self.validate_stage(stage, plugin_stages, plugin_samplers)?;
         }
         validate_stage_types(&graph, &manifest)?;
 
@@ -159,7 +162,12 @@ impl Engine {
     ) -> Result<RunReport, LlmffError> {
         let plugin_tool_transports = load_plugin_tool_transports(&options.plugin_dirs)?;
         let plugin_stages = load_plugin_stages(&options.plugin_dirs)?;
-        let graph = self.validate_manifest_with_plugins(manifest.clone(), &plugin_stages)?;
+        let plugin_samplers = load_plugin_samplers(&options.plugin_dirs)?;
+        let graph = self.validate_manifest_with_plugins(
+            manifest.clone(),
+            &plugin_stages,
+            &plugin_samplers,
+        )?;
         if options.stream_stage.is_some() && options.scheduler == SchedulerMode::Parallel {
             return Err(LlmffError::Config(
                 "stream-stage cannot be used with the parallel scheduler".to_string(),
@@ -205,6 +213,7 @@ impl Engine {
                     &options.run_id,
                     &plugin_tool_transports,
                     &plugin_stages,
+                    &plugin_samplers,
                     stream_writer.as_mut(),
                 )
                 .await?;
@@ -219,6 +228,7 @@ impl Engine {
                     &options.run_id,
                     &plugin_tool_transports,
                     &plugin_stages,
+                    &plugin_samplers,
                 )
                 .await?;
             }
@@ -290,6 +300,7 @@ impl Engine {
         run_id: &str,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
         plugin_stages: &BTreeMap<String, PluginStage>,
+        plugin_samplers: &BTreeMap<String, PluginSampler>,
         mut stream_writer: Option<&mut StageStreamWriter>,
     ) -> Result<(), LlmffError> {
         for stage in graph.stages() {
@@ -302,6 +313,7 @@ impl Engine {
                     cwd,
                     plugin_tool_transports,
                     plugin_stages,
+                    plugin_samplers,
                     stream_writer.as_deref_mut(),
                 )
                 .await?;
@@ -321,6 +333,7 @@ impl Engine {
         run_id: &str,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
         plugin_stages: &BTreeMap<String, PluginStage>,
+        plugin_samplers: &BTreeMap<String, PluginSampler>,
     ) -> Result<(), LlmffError> {
         let mut pending = graph.stages().iter().collect::<Vec<_>>();
 
@@ -358,6 +371,7 @@ impl Engine {
                     cwd,
                     plugin_tool_transports,
                     plugin_stages,
+                    plugin_samplers,
                     None,
                 )
             }))
@@ -452,11 +466,13 @@ impl Engine {
         &self,
         stage: &StageSpec,
         plugin_stages: &BTreeMap<String, PluginStage>,
+        plugin_samplers: &BTreeMap<String, PluginSampler>,
     ) -> Result<(), LlmffError> {
         validate_when_condition(stage)?;
         validate_sampling_parameters(stage)?;
 
         if let Some(plugin_stage_name) = plugin_stage_name(&stage.op) {
+            reject_sampler_on_non_model_stage(stage)?;
             require_stage_field(stage, stage.from.as_deref(), "plugin stage requires from")?;
             return if plugin_stages.contains_key(plugin_stage_name) {
                 Ok(())
@@ -468,6 +484,10 @@ impl Engine {
             };
         }
 
+        if !matches!(stage.op.as_str(), "infer" | "repair") {
+            reject_sampler_on_non_model_stage(stage)?;
+        }
+
         match stage.op.as_str() {
             "load" => {
                 require_stage_field(stage, stage.input.as_deref(), "load requires input")?;
@@ -475,6 +495,7 @@ impl Engine {
             }
             "infer" => {
                 require_stage_field(stage, stage.from.as_deref(), "infer requires from")?;
+                validate_sampler_reference(stage, plugin_samplers)?;
                 let model =
                     require_stage_field(stage, stage.model.as_deref(), "infer requires model")?;
                 self.backend_for_model(model).map(|_| ())
@@ -529,6 +550,7 @@ impl Engine {
             }
             "repair" => {
                 require_stage_field(stage, stage.from.as_deref(), "repair requires from")?;
+                validate_sampler_reference(stage, plugin_samplers)?;
                 let model =
                     require_stage_field(stage, stage.model.as_deref(), "repair requires model")?;
                 self.backend_for_model(model).map(|_| ())
@@ -568,6 +590,7 @@ impl Engine {
         cwd: &Path,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
         plugin_stages: &BTreeMap<String, PluginStage>,
+        plugin_samplers: &BTreeMap<String, PluginSampler>,
         stream_writer: Option<&mut StageStreamWriter>,
     ) -> Result<StageOutcome, LlmffError> {
         if !should_execute_stage(stage, statuses)? {
@@ -578,7 +601,10 @@ impl Engine {
             "load" => self
                 .execute_load(manifest, stage, cwd)
                 .map(StageOutcome::without_usage),
-            "infer" => self.execute_infer(stage, statuses, stream_writer).await,
+            "infer" => {
+                self.execute_infer(stage, statuses, plugin_samplers, stream_writer)
+                    .await
+            }
             "validate_json" | "system" | "template" | "retrieve" | "rerank" => {
                 let input = stage
                     .from
@@ -588,7 +614,7 @@ impl Engine {
                 execute_deterministic_stage(stage, input, cwd).map(StageOutcome::without_usage)
             }
             "cache" => self.execute_cache(stage, statuses, cwd),
-            "repair" => self.execute_repair(stage, statuses).await,
+            "repair" => self.execute_repair(stage, statuses, plugin_samplers).await,
             "route" => self
                 .execute_route(stage, statuses)
                 .map(StageOutcome::without_usage),
@@ -652,12 +678,13 @@ impl Engine {
         &self,
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
+        plugin_samplers: &BTreeMap<String, PluginSampler>,
         stream_writer: Option<&mut StageStreamWriter>,
     ) -> Result<StageOutcome, LlmffError> {
         let messages = parent_messages(stage, statuses)?;
         let model = required_model(stage)?;
         let resolved = self.backend_for_model(model)?;
-        let request = InferRequest {
+        let mut request = InferRequest {
             model: resolved.provider_model.to_string(),
             messages,
             temperature: stage.temperature,
@@ -667,6 +694,7 @@ impl Engine {
             response_format: stage.response_format.clone(),
             stop: stage.stop.clone(),
         };
+        apply_plugin_sampler(stage, plugin_samplers, &mut request)?;
 
         if let Some(writer) = stream_writer {
             if writer.stage_id == stage.id {
@@ -706,6 +734,7 @@ impl Engine {
         &self,
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
+        plugin_samplers: &BTreeMap<String, PluginSampler>,
     ) -> Result<StageOutcome, LlmffError> {
         let parent = stage
             .from
@@ -724,25 +753,25 @@ impl Engine {
             StageStatus::Invalid { value, errors } => {
                 let model = required_model(stage)?;
                 let resolved = self.backend_for_model(model)?;
-                let response = resolved
-                    .infer(InferRequest {
-                        model: resolved.provider_model.to_string(),
-                        messages: vec![Message {
-                            role: "user".to_string(),
-                            content: format!(
-                                "Repair this output so it satisfies validation errors.\nErrors:\n{}\nOutput:\n{}",
-                                errors.join("\n"),
-                                serialize_value(value)?
-                            ),
-                        }],
-                        temperature: stage.temperature,
-                        top_p: stage.top_p,
-                        max_tokens: stage.max_tokens,
-                        seed: stage.seed,
-                        response_format: stage.response_format.clone(),
-                        stop: stage.stop.clone(),
-                    })
-                    .await?;
+                let mut request = InferRequest {
+                    model: resolved.provider_model.to_string(),
+                    messages: vec![Message {
+                        role: "user".to_string(),
+                        content: format!(
+                            "Repair this output so it satisfies validation errors.\nErrors:\n{}\nOutput:\n{}",
+                            errors.join("\n"),
+                            serialize_value(value)?
+                        ),
+                    }],
+                    temperature: stage.temperature,
+                    top_p: stage.top_p,
+                    max_tokens: stage.max_tokens,
+                    seed: stage.seed,
+                    response_format: stage.response_format.clone(),
+                    stop: stage.stop.clone(),
+                };
+                apply_plugin_sampler(stage, plugin_samplers, &mut request)?;
+                let response = resolved.infer(request).await?;
 
                 Ok(StageOutcome::with_usage(
                     StageStatus::Success(Value::Text(response.text)),
@@ -1160,6 +1189,33 @@ fn validate_sampling_parameters(stage: &StageSpec) -> Result<(), LlmffError> {
     Ok(())
 }
 
+fn validate_sampler_reference(
+    stage: &StageSpec,
+    plugin_samplers: &BTreeMap<String, PluginSampler>,
+) -> Result<(), LlmffError> {
+    let Some(sampler) = stage.sampler.as_deref() else {
+        return Ok(());
+    };
+    if plugin_samplers.contains_key(sampler) {
+        Ok(())
+    } else {
+        Err(stage_validation_error(
+            stage,
+            format!("unknown plugin sampler `{sampler}`"),
+        ))
+    }
+}
+
+fn reject_sampler_on_non_model_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.sampler.is_some() {
+        return Err(stage_validation_error(
+            stage,
+            "sampler is only supported on infer and repair stages",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_retrieve_strategy(stage: &StageSpec) -> Result<(), LlmffError> {
     validate_retrieval_strategy(stage, "retrieve")
 }
@@ -1433,6 +1489,172 @@ struct ResolvedBackendMetadata {
     provider_model: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct SamplerOverrides {
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    max_tokens: Option<u32>,
+    seed: Option<u64>,
+    response_format: Option<String>,
+    stop: Option<Vec<String>>,
+}
+
+fn apply_plugin_sampler(
+    stage: &StageSpec,
+    plugin_samplers: &BTreeMap<String, PluginSampler>,
+    request: &mut InferRequest,
+) -> Result<(), LlmffError> {
+    let Some(sampler_name) = stage.sampler.as_deref() else {
+        return Ok(());
+    };
+    let sampler = plugin_samplers
+        .get(sampler_name)
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("unknown plugin sampler `{sampler_name}`"),
+        })?;
+    let encoded = serde_json::to_vec(request).map_err(LlmffError::Json)?;
+    let mut child = Command::new(&sampler.entrypoint)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("failed to start plugin sampler `{sampler_name}`: {error}"),
+        })?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("failed to open plugin sampler `{sampler_name}` stdin"),
+        })?;
+    stdin
+        .write_all(&encoded)
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("failed to write plugin sampler `{sampler_name}` request: {error}"),
+        })?;
+    drop(stdin);
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("failed to wait for plugin sampler `{sampler_name}`: {error}"),
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!(
+                "plugin sampler `{sampler_name}` exited with status {}: {}",
+                output.status,
+                stderr.trim()
+            ),
+        });
+    }
+
+    let overrides: SamplerOverrides =
+        serde_json::from_slice(&output.stdout).map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("plugin sampler `{sampler_name}` returned invalid JSON: {error}"),
+        })?;
+    validate_sampler_overrides(stage, sampler_name, &overrides)?;
+    apply_sampler_overrides(request, overrides);
+    Ok(())
+}
+
+fn validate_sampler_overrides(
+    stage: &StageSpec,
+    sampler_name: &str,
+    overrides: &SamplerOverrides,
+) -> Result<(), LlmffError> {
+    if overrides
+        .temperature
+        .is_some_and(|temperature| temperature < 0.0)
+    {
+        return Err(plugin_sampler_override_error(
+            stage,
+            sampler_name,
+            "temperature must be greater than or equal to 0",
+        ));
+    }
+    if overrides
+        .top_p
+        .is_some_and(|top_p| !(0.0..=1.0).contains(&top_p))
+    {
+        return Err(plugin_sampler_override_error(
+            stage,
+            sampler_name,
+            "top_p must be between 0 and 1",
+        ));
+    }
+    if overrides.max_tokens == Some(0) {
+        return Err(plugin_sampler_override_error(
+            stage,
+            sampler_name,
+            "max_tokens must be greater than 0",
+        ));
+    }
+    if overrides
+        .response_format
+        .as_deref()
+        .is_some_and(|response_format| response_format != "json")
+    {
+        return Err(plugin_sampler_override_error(
+            stage,
+            sampler_name,
+            "response_format must be json",
+        ));
+    }
+    if overrides
+        .stop
+        .as_ref()
+        .is_some_and(|stop| stop.iter().any(|sequence| sequence.is_empty()))
+    {
+        return Err(plugin_sampler_override_error(
+            stage,
+            sampler_name,
+            "stop sequences cannot be empty",
+        ));
+    }
+    Ok(())
+}
+
+fn plugin_sampler_override_error(
+    stage: &StageSpec,
+    sampler_name: &str,
+    message: &str,
+) -> LlmffError {
+    LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: format!("plugin sampler `{sampler_name}` returned invalid overrides: {message}"),
+    }
+}
+
+fn apply_sampler_overrides(request: &mut InferRequest, overrides: SamplerOverrides) {
+    if let Some(temperature) = overrides.temperature {
+        request.temperature = Some(temperature);
+    }
+    if let Some(top_p) = overrides.top_p {
+        request.top_p = Some(top_p);
+    }
+    if let Some(max_tokens) = overrides.max_tokens {
+        request.max_tokens = Some(max_tokens);
+    }
+    if let Some(seed) = overrides.seed {
+        request.seed = Some(seed);
+    }
+    if let Some(response_format) = overrides.response_format {
+        request.response_format = Some(response_format);
+    }
+    if let Some(stop) = overrides.stop {
+        request.stop = stop;
+    }
+}
+
 struct StageStreamWriter {
     stage_id: String,
     writer: BufWriter<Box<dyn Write + Send>>,
@@ -1531,6 +1753,24 @@ fn load_plugin_stages(
         }
     }
     Ok(stages)
+}
+
+fn load_plugin_samplers(
+    plugin_dirs: &[PathBuf],
+) -> Result<BTreeMap<String, PluginSampler>, LlmffError> {
+    let mut samplers = BTreeMap::new();
+    for plugin_dir in plugin_dirs {
+        for sampler in discover_plugin_samplers(plugin_dir)? {
+            if samplers.contains_key(&sampler.name) {
+                return Err(LlmffError::Config(format!(
+                    "duplicate plugin sampler `{}`",
+                    sampler.name
+                )));
+            }
+            samplers.insert(sampler.name.clone(), sampler);
+        }
+    }
+    Ok(samplers)
 }
 
 fn execute_command_tool(
