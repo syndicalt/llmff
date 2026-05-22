@@ -58,23 +58,25 @@ Run the focused backend tests and commit `feat: send chat messages to backends`.
 
 ## Task 3: Engine Propagation and Compatibility
 
-- [ ] **Step 1: Write failing engine test**
+- [x] **Step 1: Write engine coverage test**
 
 Add a backend test double proving `infer` receives two messages after a `system` stage.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run focused engine test**
 
 Run `cargo test -p llmff-core engine::tests::infer_receives_system_and_user_messages`.
 
-- [ ] **Step 3: Implement engine message conversion**
+Expected: PASS because engine conversion was already required by the backend request-contract change.
+
+- [x] **Step 3: Implement engine message conversion**
 
 Add helpers that convert `Text`, `Json`, or `Messages` parent values into backend messages. Update `infer`, `repair`, template/tool/write/validation text rendering only where needed.
 
-- [ ] **Step 4: Run GREEN, document, and verify**
+- [x] **Step 4: Run GREEN, document, and verify**
 
 Run focused engine test, `cargo fmt --all --check`, `cargo test --workspace`, and `cargo run -p llmff -- inspect examples/json-repair.yaml`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit `docs: document chat message preservation`.
 

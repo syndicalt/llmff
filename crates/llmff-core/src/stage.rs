@@ -135,7 +135,9 @@ fn validate_json(
     let instance = match &value {
         Value::Json(json) => json.clone(),
         Value::Text(text) => parse_json_stage_input(spec, text)?,
-        Value::Messages(messages) => parse_json_stage_input(spec, &render_messages_as_text(messages))?,
+        Value::Messages(messages) => {
+            parse_json_stage_input(spec, &render_messages_as_text(messages))?
+        }
     };
     let compiled =
         JSONSchema::compile(&schema_json).map_err(|error| LlmffError::StageExecution {
@@ -154,10 +156,7 @@ fn validate_json(
     }
 }
 
-fn parse_json_stage_input(
-    spec: &StageSpec,
-    source: &str,
-) -> Result<serde_json::Value, LlmffError> {
+fn parse_json_stage_input(spec: &StageSpec, source: &str) -> Result<serde_json::Value, LlmffError> {
     serde_json::from_str(source).map_err(|error| LlmffError::StageExecution {
         stage_id: spec.id.clone(),
         message: format!("input is not valid JSON: {error}"),

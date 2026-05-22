@@ -1244,7 +1244,7 @@ fn status_name(status: &StageStatus) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use tempfile::tempdir;
 
@@ -1268,6 +1268,25 @@ mod tests {
                 model: request.model,
                 text: self.text.clone(),
                 usage: Some(self.usage.clone()),
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct RecordingBackend {
+        model: String,
+        messages: Arc<Mutex<Vec<Message>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl Backend for RecordingBackend {
+        async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
+            assert_eq!(request.model, self.model);
+            *self.messages.lock().unwrap() = request.messages;
+            Ok(InferResponse {
+                model: request.model,
+                text: "ok".to_string(),
+                usage: None,
             })
         }
     }
@@ -2303,6 +2322,69 @@ outputs:
         assert_eq!(
             std::fs::read_to_string(output_path).unwrap(),
             "template worked"
+        );
+    }
+
+    #[tokio::test]
+    async fn infer_receives_system_and_user_messages() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let policy_path = dir.path().join("policy.md");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, "Return an answer.").unwrap();
+        std::fs::write(&policy_path, "Use terse JSON.").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: apply_policy
+    op: system
+    from: load_prompt
+    path: {}
+  - id: draft
+    op: infer
+    from: apply_policy
+    model: recording:test-model
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt_path.display(),
+            policy_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let engine = Engine::new().with_backend(
+            "recording",
+            Arc::new(RecordingBackend {
+                model: "test-model".to_string(),
+                messages: Arc::clone(&messages),
+            }),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(
+            *messages.lock().unwrap(),
+            vec![
+                Message {
+                    role: "system".to_string(),
+                    content: "Use terse JSON.".to_string(),
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: "Return an answer.".to_string(),
+                },
+            ]
         );
     }
 
