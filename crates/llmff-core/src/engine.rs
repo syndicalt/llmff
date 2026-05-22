@@ -204,6 +204,8 @@ impl Engine {
     }
 
     fn validate_stage(&self, stage: &StageSpec) -> Result<(), LlmffError> {
+        validate_when_condition(stage)?;
+
         match stage.op.as_str() {
             "load" => {
                 require_stage_field(stage, stage.input.as_deref(), "load requires input")?;
@@ -274,6 +276,10 @@ impl Engine {
         statuses: &BTreeMap<String, StageStatus>,
         cwd: &Path,
     ) -> Result<StageStatus, LlmffError> {
+        if !should_execute_stage(stage, statuses)? {
+            return Ok(StageStatus::Skipped);
+        }
+
         match stage.op.as_str() {
             "load" => self.execute_load(manifest, stage, cwd),
             "infer" => self.execute_infer(stage, statuses).await,
@@ -573,6 +579,57 @@ fn stage_validation_error(stage: &StageSpec, message: impl Into<String>) -> Llmf
     LlmffError::StageExecution {
         stage_id: stage.id.clone(),
         message: message.into(),
+    }
+}
+
+fn validate_when_condition(stage: &StageSpec) -> Result<(), LlmffError> {
+    let Some(condition) = stage.when.as_deref() else {
+        return Ok(());
+    };
+
+    match condition {
+        "success" | "invalid" | "skipped" => {
+            if stage.from.is_none() {
+                return Err(stage_validation_error(stage, "when requires from"));
+            }
+            Ok(())
+        }
+        other => Err(stage_validation_error(
+            stage,
+            format!("unknown when condition `{other}`"),
+        )),
+    }
+}
+
+fn should_execute_stage(
+    stage: &StageSpec,
+    statuses: &BTreeMap<String, StageStatus>,
+) -> Result<bool, LlmffError> {
+    let Some(condition) = stage.when.as_deref() else {
+        return Ok(true);
+    };
+    let parent_id = stage
+        .from
+        .as_ref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "when requires parent stage".to_string(),
+        })?;
+    let parent = statuses
+        .get(parent_id)
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("unknown parent stage `{parent_id}`"),
+        })?;
+
+    match condition {
+        "success" => Ok(matches!(parent, StageStatus::Success(_))),
+        "invalid" => Ok(matches!(parent, StageStatus::Invalid { .. })),
+        "skipped" => Ok(matches!(parent, StageStatus::Skipped)),
+        other => Err(stage_validation_error(
+            stage,
+            format!("unknown when condition `{other}`"),
+        )),
     }
 }
 
@@ -1070,6 +1127,37 @@ graph:
     }
 
     #[test]
+    fn validate_manifest_rejects_unknown_when_condition() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    when: maybe
+    model: mock:good
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .with_backend("mock:good", Arc::new(MockBackend::new("mock:good", "ok")))
+            .validate_manifest(manifest)
+            .expect_err("unknown when condition should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("stage `draft` failed: unknown when condition `maybe`"));
+    }
+
+    #[test]
     fn validate_manifest_rejects_field_route_from_text_source() {
         let manifest = Manifest::from_yaml_str(
             r#"
@@ -1244,6 +1332,134 @@ outputs:
     }
 
     #[tokio::test]
+    async fn when_invalid_skips_stage_on_success_parent() {
+        let dir = tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.json");
+        std::fs::write(&prompt_path, "Return an answer object").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+  - id: validate
+    op: validate_json
+    from: draft
+    schema: '{{"type":"object","required":["answer"]}}'
+  - id: repair
+    op: repair
+    from: validate
+    when: invalid
+    model: mock:repair
+outputs:
+  final:
+    from: repair
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let engine = Engine::new()
+            .with_backend(
+                "mock:good",
+                Arc::new(MockBackend::new("mock:good", r#"{"answer":"ok"}"#)),
+            )
+            .with_backend(
+                "mock:repair",
+                Arc::new(MockBackend::new("mock:repair", r#"{"answer":"repaired"}"#)),
+            );
+
+        let error = engine
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect_err("output from skipped repair stage should fail");
+
+        assert!(error
+            .to_string()
+            .contains("stage `repair` failed: output references skipped stage"));
+        assert!(!output_path.exists());
+    }
+
+    #[tokio::test]
+    async fn when_skipped_runs_stage_on_skipped_parent() {
+        let dir = tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let notice_path = dir.path().join("skipped.tmpl");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, "Return an answer object").unwrap();
+        std::fs::write(&notice_path, "repair skipped").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+  - id: validate
+    op: validate_json
+    from: draft
+    schema: '{{"type":"object","required":["answer"]}}'
+  - id: repair
+    op: repair
+    from: validate
+    when: invalid
+    model: mock:repair
+  - id: skipped_notice
+    op: template
+    from: repair
+    when: skipped
+    path: {}
+outputs:
+  final:
+    from: skipped_notice
+    path: {}
+"#,
+            prompt_path.display(),
+            notice_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let engine = Engine::new()
+            .with_backend(
+                "mock:good",
+                Arc::new(MockBackend::new("mock:good", r#"{"answer":"ok"}"#)),
+            )
+            .with_backend(
+                "mock:repair",
+                Arc::new(MockBackend::new("mock:repair", r#"{"answer":"repaired"}"#)),
+            );
+
+        let report = engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(report.final_status, RunStatus::Succeeded);
+        assert_eq!(
+            std::fs::read_to_string(output_path).unwrap(),
+            "repair skipped"
+        );
+    }
+
+    #[tokio::test]
     async fn writes_trace_events_for_pipeline_run() {
         let dir = tempfile::tempdir().unwrap();
         let prompt_path = dir.path().join("question.txt");
@@ -1335,6 +1551,80 @@ outputs:
             .find(|event| event["event"] == "stage_finished")
             .expect("stage_finished event should exist");
         assert!(stage_finished["duration_ms"].is_u64());
+    }
+
+    #[tokio::test]
+    async fn trace_events_include_skipped_when_stage_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.json");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "Return an answer object").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+  - id: validate
+    op: validate_json
+    from: draft
+    schema: '{{"type":"object","required":["answer"]}}'
+  - id: repair
+    op: repair
+    from: validate
+    when: invalid
+    model: mock:repair
+  - id: choose_final
+    op: route
+    from: validate
+    on_success: validate
+    on_invalid: repair
+outputs:
+  final:
+    from: choose_final
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let engine = Engine::new()
+            .with_backend(
+                "mock:good",
+                Arc::new(MockBackend::new("mock:good", r#"{"answer":"ok"}"#)),
+            )
+            .with_backend(
+                "mock:repair",
+                Arc::new(MockBackend::new("mock:repair", r#"{"answer":"repaired"}"#)),
+            );
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "trace-test".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let repair_finished = trace_stage_finished(&events, "repair");
+
+        assert_eq!(repair_finished["status"], "skipped");
     }
 
     #[tokio::test]
