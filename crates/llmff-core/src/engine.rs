@@ -163,7 +163,7 @@ impl Engine {
         match stage.op.as_str() {
             "load" => self.execute_load(manifest, stage, cwd),
             "infer" => self.execute_infer(stage, statuses).await,
-            "validate_json" | "system" => {
+            "validate_json" | "system" | "template" => {
                 let input = stage
                     .from
                     .as_ref()
@@ -558,6 +558,57 @@ outputs:
         assert_eq!(
             std::fs::read_to_string(output_path).unwrap(),
             "hello from alias"
+        );
+    }
+
+    #[tokio::test]
+    async fn runs_template_stage_before_infer() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let template_path = dir.path().join("prompt.tmpl");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, "Return JSON.").unwrap();
+        std::fs::write(&template_path, "Request: {{input}}").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: render_prompt
+    op: template
+    from: load_prompt
+    path: {}
+  - id: draft
+    op: infer
+    from: render_prompt
+    model: mock:json
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt_path.display(),
+            template_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", "template worked")),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(output_path).unwrap(),
+            "template worked"
         );
     }
 }
