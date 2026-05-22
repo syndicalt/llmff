@@ -9,6 +9,8 @@ pub struct InferRequest {
     pub model: String,
     pub prompt: String,
     pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub max_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -75,7 +77,7 @@ impl OpenAiCompatibleBackend {
 impl Backend for OpenAiCompatibleBackend {
     async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
         let url = format!("{}/v1/chat/completions", self.base_url);
-        let body = json!({
+        let mut body = json!({
             "model": request.model,
             "messages": [
                 {
@@ -83,8 +85,16 @@ impl Backend for OpenAiCompatibleBackend {
                     "content": request.prompt
                 }
             ],
-            "temperature": request.temperature,
         });
+        if let Some(temperature) = request.temperature {
+            body["temperature"] = json!(temperature);
+        }
+        if let Some(top_p) = request.top_p {
+            body["top_p"] = json!(top_p);
+        }
+        if let Some(max_tokens) = request.max_tokens {
+            body["max_tokens"] = json!(max_tokens);
+        }
         let mut http_request = self.client.post(url).json(&body);
         if !self.api_key.is_empty() {
             http_request = http_request.bearer_auth(&self.api_key);
@@ -184,8 +194,18 @@ fn ollama_chat_request_body(request: &InferRequest) -> serde_json::Value {
         "stream": false,
     });
 
+    let mut options = serde_json::Map::new();
     if let Some(temperature) = request.temperature {
-        body["options"] = json!({ "temperature": temperature });
+        options.insert("temperature".to_string(), json!(temperature));
+    }
+    if let Some(top_p) = request.top_p {
+        options.insert("top_p".to_string(), json!(top_p));
+    }
+    if let Some(max_tokens) = request.max_tokens {
+        options.insert("num_predict".to_string(), json!(max_tokens));
+    }
+    if !options.is_empty() {
+        body["options"] = serde_json::Value::Object(options);
     }
 
     body
@@ -228,6 +248,8 @@ mod tests {
                 model: "mock:json".to_string(),
                 prompt: "Return JSON".to_string(),
                 temperature: Some(0.2),
+                top_p: None,
+                max_tokens: None,
             })
             .await
             .expect("mock backend should respond");
@@ -262,12 +284,19 @@ mod tests {
                 model: "test-model".to_string(),
                 prompt: "Say hello".to_string(),
                 temperature: Some(0.0),
+                top_p: Some(0.9),
+                max_tokens: Some(256),
             })
             .await
             .unwrap();
 
         assert_eq!(response.model, "test-model");
         assert_eq!(response.text, "hello from backend");
+
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = requests[0].body_json().unwrap();
+        assert!((body["top_p"].as_f64().unwrap() - 0.9).abs() < 0.000_001);
+        assert_eq!(body["max_tokens"], 256);
     }
 
     #[tokio::test]
@@ -295,6 +324,8 @@ mod tests {
                 model: "llama3.1".to_string(),
                 prompt: "Say hello".to_string(),
                 temperature: Some(0.2),
+                top_p: Some(0.8),
+                max_tokens: Some(128),
             })
             .await
             .unwrap();
@@ -309,5 +340,7 @@ mod tests {
         assert_eq!(body["messages"][0]["content"], "Say hello");
         assert_eq!(body["stream"], false);
         assert!((body["options"]["temperature"].as_f64().unwrap() - 0.2).abs() < 0.000_001);
+        assert!((body["options"]["top_p"].as_f64().unwrap() - 0.8).abs() < 0.000_001);
+        assert_eq!(body["options"]["num_predict"], 128);
     }
 }

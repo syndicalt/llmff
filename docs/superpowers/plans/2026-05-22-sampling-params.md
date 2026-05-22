@@ -226,7 +226,7 @@ git commit -m "feat: validate sampling parameters"
 - Modify: `crates/llmff-core/src/backend.rs`
 - Modify: `crates/llmff-core/src/engine.rs`
 
-- [ ] **Step 1: Write failing backend tests**
+- [x] **Step 1: Write failing backend tests**
 
 Update `openai_compatible_backend_reads_chat_completion_content` in `crates/llmff-core/src/backend.rs` so the request includes:
 
@@ -256,7 +256,7 @@ assert_eq!(body["options"]["top_p"], 0.8);
 assert_eq!(body["options"]["num_predict"], 128);
 ```
 
-- [ ] **Step 2: Run backend tests to verify RED**
+- [x] **Step 2: Run backend tests to verify RED**
 
 Run:
 
@@ -266,7 +266,7 @@ cargo test -p llmff-core backend::tests::openai_compatible_backend_reads_chat_co
 
 Expected: FAIL because `InferRequest` does not carry these fields.
 
-- [ ] **Step 3: Extend `InferRequest`**
+- [x] **Step 3: Extend `InferRequest`**
 
 In `crates/llmff-core/src/backend.rs`, add:
 
@@ -277,7 +277,7 @@ pub max_tokens: Option<u32>,
 
 Update all `InferRequest` construction sites in tests and engine code with the new fields.
 
-- [ ] **Step 4: Map OpenAI-compatible request body**
+- [x] **Step 4: Map OpenAI-compatible request body**
 
 Replace the current fixed JSON construction with a mutable object:
 
@@ -302,7 +302,7 @@ if let Some(max_tokens) = request.max_tokens {
 }
 ```
 
-- [ ] **Step 5: Map Ollama request body**
+- [x] **Step 5: Map Ollama request body**
 
 In `ollama_chat_request_body`, build an `options` object with present values:
 
@@ -322,7 +322,7 @@ if !options.is_empty() {
 }
 ```
 
-- [ ] **Step 6: Pass stage params from engine**
+- [x] **Step 6: Pass stage params from engine**
 
 In `execute_infer` and `execute_repair`, add:
 
@@ -331,7 +331,7 @@ top_p: stage.top_p,
 max_tokens: stage.max_tokens,
 ```
 
-- [ ] **Step 7: Run backend tests to verify GREEN and commit**
+- [x] **Step 7: Run backend tests to verify GREEN and commit**
 
 Run:
 

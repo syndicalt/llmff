@@ -346,6 +346,8 @@ impl Engine {
                 model: resolved.provider_model.to_string(),
                 prompt,
                 temperature: stage.temperature,
+                top_p: stage.top_p,
+                max_tokens: stage.max_tokens,
             })
             .await?;
 
@@ -381,6 +383,8 @@ impl Engine {
                             serialize_value(value)?
                         ),
                         temperature: stage.temperature,
+                        top_p: stage.top_p,
+                        max_tokens: stage.max_tokens,
                     })
                     .await?;
 
