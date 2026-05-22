@@ -15,6 +15,7 @@ pub fn execute_deterministic_stage(
     match spec.op.as_str() {
         "system" => system(spec, input, cwd),
         "template" => template(spec, input, cwd),
+        "retrieve" => retrieve(spec, input, cwd),
         "validate_json" => validate_json(spec, input, cwd),
         other => Err(LlmffError::UnknownStage(other.to_string())),
     }
@@ -154,6 +155,84 @@ fn validate_json(
         None => Ok(StageStatus::Success(Value::Json(instance))),
         Some(errors) => Ok(StageStatus::Invalid { value, errors }),
     }
+}
+
+fn retrieve(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageStatus, LlmffError> {
+    let query = input
+        .map(render_value_as_text)
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: "retrieve requires input".to_string(),
+        })?;
+    let query_terms = tokenize(&query);
+    let mut matches = Vec::new();
+
+    for document in &spec.documents {
+        let text = std::fs::read_to_string(resolve_path(cwd, document)).map_err(|error| {
+            LlmffError::StageExecution {
+                stage_id: spec.id.clone(),
+                message: format!("failed to read retrieve document `{document}`: {error}"),
+            }
+        })?;
+        let document_terms = tokenize(&text);
+        let score = query_terms
+            .iter()
+            .filter(|term| document_terms.contains(*term))
+            .count();
+        if score > 0 {
+            matches.push(RetrieveMatch {
+                path: document.clone(),
+                score,
+                text,
+            });
+        }
+    }
+
+    matches.sort_by(|left, right| {
+        right
+            .score
+            .cmp(&left.score)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    if let Some(top_k) = spec.top_k {
+        matches.truncate(top_k);
+    }
+
+    Ok(StageStatus::Success(Value::Json(serde_json::json!({
+        "query": query,
+        "matches": matches
+            .into_iter()
+            .map(|retrieved| {
+                serde_json::json!({
+                    "path": retrieved.path,
+                    "score": retrieved.score,
+                    "text": retrieved.text,
+                })
+            })
+            .collect::<Vec<_>>(),
+    }))))
+}
+
+struct RetrieveMatch {
+    path: String,
+    score: usize,
+    text: String,
+}
+
+fn render_value_as_text(value: Value) -> String {
+    match value {
+        Value::Text(text) => text,
+        Value::Messages(messages) => render_messages_as_text(&messages),
+        Value::Json(json) => json.to_string(),
+    }
+}
+
+fn tokenize(source: &str) -> std::collections::BTreeSet<String> {
+    source
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(str::to_lowercase)
+        .collect()
 }
 
 fn parse_json_stage_input(spec: &StageSpec, source: &str) -> Result<serde_json::Value, LlmffError> {
@@ -376,6 +455,67 @@ mod tests {
         .to_string();
 
         assert!(error.contains("schema_path `missing.schema.json`"));
+    }
+
+    #[test]
+    fn retrieve_stage_returns_top_lexical_matches() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("docs")).unwrap();
+        std::fs::write(
+            dir.path().join("docs/rust.txt"),
+            "Rust builds reliable graph pipelines.",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("docs/python.txt"),
+            "Python scripts are useful for quick notebooks.",
+        )
+        .unwrap();
+        let spec = StageSpec {
+            id: "retrieve_context".to_string(),
+            op: "retrieve".to_string(),
+            input: None,
+            from: Some("load_prompt".to_string()),
+            path: None,
+            model: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            schema: None,
+            schema_path: None,
+            when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
+            documents: vec!["docs/python.txt".to_string(), "docs/rust.txt".to_string()],
+            top_k: Some(1),
+        };
+
+        let output = execute_deterministic_stage(
+            &spec,
+            Some(Value::Text("rust graph".to_string())),
+            dir.path(),
+        )
+        .expect("retrieve stage should run");
+
+        let StageStatus::Success(Value::Json(json)) = output else {
+            panic!("retrieve should return JSON");
+        };
+        assert_eq!(json["query"], "rust graph");
+        assert_eq!(json["matches"].as_array().unwrap().len(), 1);
+        assert_eq!(json["matches"][0]["path"], "docs/rust.txt");
+        assert_eq!(json["matches"][0]["score"], 2);
+        assert_eq!(
+            json["matches"][0]["text"],
+            "Rust builds reliable graph pipelines."
+        );
     }
 
     #[test]

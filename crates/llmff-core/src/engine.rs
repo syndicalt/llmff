@@ -390,6 +390,19 @@ impl Engine {
                 require_stage_field(stage, stage.path.as_deref(), "template requires path")?;
                 Ok(())
             }
+            "retrieve" => {
+                require_stage_field(stage, stage.from.as_deref(), "retrieve requires from")?;
+                if stage.documents.is_empty() {
+                    return Err(stage_validation_error(stage, "retrieve requires documents"));
+                }
+                if let Some(0) = stage.top_k {
+                    return Err(stage_validation_error(
+                        stage,
+                        "retrieve top_k must be greater than 0",
+                    ));
+                }
+                Ok(())
+            }
             "repair" => {
                 require_stage_field(stage, stage.from.as_deref(), "repair requires from")?;
                 let model =
@@ -439,7 +452,7 @@ impl Engine {
                 .execute_load(manifest, stage, cwd)
                 .map(StageOutcome::without_usage),
             "infer" => self.execute_infer(stage, statuses).await,
-            "validate_json" | "system" | "template" => {
+            "validate_json" | "system" | "template" | "retrieve" => {
                 let input = stage
                     .from
                     .as_ref()
@@ -972,7 +985,7 @@ fn infer_stage_value_kind(
                 InputFormat::Json => StageValueKind::Json,
             })
             .unwrap_or(StageValueKind::Text),
-        "validate_json" => StageValueKind::Json,
+        "validate_json" | "retrieve" => StageValueKind::Json,
         "write" => stage
             .from
             .as_ref()
@@ -1515,6 +1528,56 @@ graph:
         assert!(error
             .to_string()
             .contains("no backend configured for `openai:gpt-test`"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_retrieve_without_parent() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: retrieve_context
+    op: retrieve
+    documents: [docs/rust.txt]
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("retrieve without parent should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("stage `retrieve_context` failed: retrieve requires from"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_retrieve_without_documents() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: retrieve_context
+    op: retrieve
+    from: load_prompt
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("retrieve without documents should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("stage `retrieve_context` failed: retrieve requires documents"));
     }
 
     #[test]

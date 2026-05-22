@@ -44,25 +44,25 @@ Commit `feat: parse retrieve stage fields`.
 
 ## Task 2: Retrieve Execution and Validation
 
-- [ ] **Step 1: Write failing stage retrieval test**
+- [x] **Step 1: Write failing stage retrieval test**
 
 Add `retrieve_stage_returns_top_lexical_matches` in `stage.rs`. It should create two documents, query for `rust graph`, set `top_k: 1`, and expect one JSON match for the Rust graph document.
 
-- [ ] **Step 2: Write failing engine validation tests**
+- [x] **Step 2: Write failing engine validation tests**
 
 Add tests rejecting `retrieve` without `from` and without `documents`.
 
-- [ ] **Step 3: Run RED**
+- [x] **Step 3: Run RED**
 
 Run `cargo test -p llmff-core retrieve`.
 
 Expected: FAIL because `retrieve` is unknown and validation does not know its fields.
 
-- [ ] **Step 4: Implement retrieve**
+- [x] **Step 4: Implement retrieve**
 
 Add retrieve dispatch to deterministic stages. Implement lexical tokenization, scoring, stable sorting, `top_k`, and JSON output. Add engine validation and JSON type inference.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 Run `cargo test -p llmff-core retrieve`.
 
