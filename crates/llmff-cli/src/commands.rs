@@ -23,7 +23,11 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     Run {
-        manifest: PathBuf,
+        manifest: Option<PathBuf>,
+        #[arg(short = 'i', long = "input")]
+        input: Option<PathBuf>,
+        #[arg(short = 'g', long = "graph")]
+        graph: Option<String>,
         #[arg(long)]
         trace: Option<PathBuf>,
         #[arg(long = "backend")]
@@ -60,11 +64,13 @@ pub async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Run {
             manifest,
+            input,
+            graph,
             trace,
             backend,
             api_key_env,
             api_key,
-        } => run_manifest(&manifest, trace, backend, api_key_env, api_key).await?,
+        } => run_pipeline(manifest, input, graph, trace, backend, api_key_env, api_key).await?,
         Command::Inspect { manifest } => {
             let source = std::fs::read_to_string(&manifest)?;
             let manifest = Manifest::from_yaml_str(&source)?;
@@ -96,16 +102,16 @@ pub async fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-async fn run_manifest(
-    manifest_path: &Path,
+async fn run_pipeline(
+    manifest_path: Option<PathBuf>,
+    input_path: Option<PathBuf>,
+    inline_graph: Option<String>,
     trace: Option<PathBuf>,
     backend: Vec<String>,
     api_key_env: Vec<String>,
     api_key: Vec<String>,
 ) -> Result<()> {
-    let source = std::fs::read_to_string(manifest_path)?;
-    let manifest = Manifest::from_yaml_str(&source)?;
-    let cwd = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    let (manifest, cwd) = load_run_manifest(manifest_path, input_path, inline_graph)?;
     let bad = std::env::var("LLMFF_MOCK_BAD_RESPONSE").unwrap_or_else(|_| "{}".to_string());
     let good = std::env::var("LLMFF_MOCK_GOOD_RESPONSE").unwrap_or_else(|_| bad.clone());
     let mut engine = Engine::new()
@@ -138,10 +144,35 @@ async fn run_manifest(
     };
 
     engine
-        .run_manifest_with_options(manifest, cwd, options)
+        .run_manifest_with_options(manifest, &cwd, options)
         .await?;
 
     Ok(())
+}
+
+fn load_run_manifest(
+    manifest_path: Option<PathBuf>,
+    input_path: Option<PathBuf>,
+    inline_graph: Option<String>,
+) -> Result<(Manifest, PathBuf)> {
+    match (manifest_path, inline_graph) {
+        (Some(_), Some(_)) => anyhow::bail!("provide either manifest or --graph, not both"),
+        (None, None) => anyhow::bail!("provide either manifest or --graph"),
+        (Some(path), None) => {
+            let source = std::fs::read_to_string(&path)?;
+            let manifest = Manifest::from_yaml_str(&source)?;
+            let cwd = path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf();
+            Ok((manifest, cwd))
+        }
+        (None, Some(graph)) => {
+            let input = input_path.map(|path| path.to_string_lossy().to_string());
+            let manifest = Manifest::from_inline_graph(&graph, input)?;
+            Ok((manifest, std::env::current_dir()?))
+        }
+    }
 }
 
 fn parse_alias_value(source: &str) -> Result<AliasValue> {

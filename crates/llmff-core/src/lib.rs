@@ -2,6 +2,7 @@ pub mod backend;
 pub mod engine;
 pub mod error;
 pub mod graph;
+pub mod inline_graph;
 pub mod manifest;
 pub mod stage;
 pub mod trace;
