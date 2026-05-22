@@ -5,6 +5,9 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
 use crate::backend::{Backend, InferRequest, UsageMetadata};
 use crate::error::LlmffError;
 use crate::graph::{stage_dependencies, Graph};
@@ -403,6 +406,10 @@ impl Engine {
                 }
                 Ok(())
             }
+            "cache" => {
+                require_stage_field(stage, stage.from.as_deref(), "cache requires from")?;
+                Ok(())
+            }
             "repair" => {
                 require_stage_field(stage, stage.from.as_deref(), "repair requires from")?;
                 let model =
@@ -460,6 +467,9 @@ impl Engine {
                     .and_then(success_value);
                 execute_deterministic_stage(stage, input, cwd).map(StageOutcome::without_usage)
             }
+            "cache" => self
+                .execute_cache(stage, statuses, cwd)
+                .map(StageOutcome::without_usage),
             "repair" => self.execute_repair(stage, statuses).await,
             "route" => self
                 .execute_route(stage, statuses)
@@ -678,6 +688,62 @@ impl Engine {
             })?;
 
         write_output(cwd, path, &serialize_value(value)?)?;
+
+        Ok(StageStatus::Success(value.clone()))
+    }
+
+    fn execute_cache(
+        &self,
+        stage: &StageSpec,
+        statuses: &BTreeMap<String, StageStatus>,
+        cwd: &Path,
+    ) -> Result<StageStatus, LlmffError> {
+        let value = parent_success_value(stage, statuses)?;
+        let cache_dir = resolve_path(cwd, stage.path.as_deref().unwrap_or(".llmff/cache"));
+        let cache_file = cache_dir.join(format!("{}.json", cache_digest(stage, value)?));
+
+        if cache_file.exists() {
+            let source = std::fs::read_to_string(&cache_file).map_err(|error| {
+                LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: format!(
+                        "failed to read cache file `{}`: {error}",
+                        cache_file.display()
+                    ),
+                }
+            })?;
+            let record: CacheRecord =
+                serde_json::from_str(&source).map_err(|error| LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: format!("invalid cache file `{}`: {error}", cache_file.display()),
+                })?;
+            if record.version != CACHE_RECORD_VERSION {
+                return Err(LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: format!(
+                        "unsupported cache file `{}` version {}",
+                        cache_file.display(),
+                        record.version
+                    ),
+                });
+            }
+
+            return Ok(StageStatus::Success(record.value));
+        }
+
+        std::fs::create_dir_all(&cache_dir).map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!(
+                "failed to create cache directory `{}`: {error}",
+                cache_dir.display()
+            ),
+        })?;
+        let record = CacheRecord {
+            version: CACHE_RECORD_VERSION,
+            value: value.clone(),
+        };
+        let encoded = serde_json::to_vec_pretty(&record).map_err(LlmffError::Json)?;
+        write_cache_file(stage, &cache_file, &encoded)?;
 
         Ok(StageStatus::Success(value.clone()))
     }
@@ -913,6 +979,98 @@ fn should_execute_stage(
     }
 }
 
+const CACHE_RECORD_VERSION: u32 = 1;
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CacheRecord {
+    version: u32,
+    value: Value,
+}
+
+fn parent_success_value<'a>(
+    stage: &StageSpec,
+    statuses: &'a BTreeMap<String, StageStatus>,
+) -> Result<&'a Value, LlmffError> {
+    let parent = stage
+        .from
+        .as_ref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "cache requires parent stage".to_string(),
+        })?;
+    let status = statuses
+        .get(parent)
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("unknown parent stage `{parent}`"),
+        })?;
+
+    match status {
+        StageStatus::Success(value) => Ok(value),
+        StageStatus::Invalid { errors, .. } => Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("parent stage is invalid: {}", errors.join("; ")),
+        }),
+        StageStatus::Skipped => Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "parent stage was skipped".to_string(),
+        }),
+    }
+}
+
+fn cache_digest(stage: &StageSpec, value: &Value) -> Result<String, LlmffError> {
+    let preimage = if let Some(key) = &stage.key {
+        serde_json::json!({
+            "version": CACHE_RECORD_VERSION,
+            "stage_id": stage.id,
+            "key": key,
+        })
+    } else {
+        serde_json::json!({
+            "version": CACHE_RECORD_VERSION,
+            "stage_id": stage.id,
+            "key": stage.id,
+            "value": value,
+        })
+    };
+    let encoded = serde_json::to_vec(&preimage).map_err(LlmffError::Json)?;
+    let digest = Sha256::digest(encoded);
+
+    Ok(digest
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>())
+}
+
+fn write_cache_file(
+    stage: &StageSpec,
+    cache_file: &Path,
+    encoded: &[u8],
+) -> Result<(), LlmffError> {
+    let tmp_file = cache_file.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        timestamp_ms()
+    ));
+    std::fs::write(&tmp_file, encoded).map_err(|error| LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: format!(
+            "failed to write cache file `{}`: {error}",
+            tmp_file.display()
+        ),
+    })?;
+    std::fs::rename(&tmp_file, cache_file).map_err(|error| LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: format!(
+            "failed to move cache file `{}` into `{}`: {error}",
+            tmp_file.display(),
+            cache_file.display()
+        ),
+    })?;
+
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StageValueKind {
     Any,
@@ -986,7 +1144,7 @@ fn infer_stage_value_kind(
             })
             .unwrap_or(StageValueKind::Text),
         "validate_json" | "retrieve" => StageValueKind::Json,
-        "write" => stage
+        "write" | "cache" => stage
             .from
             .as_ref()
             .and_then(|parent| kinds.get(parent))
@@ -1578,6 +1736,50 @@ graph:
         assert!(error
             .to_string()
             .contains("stage `retrieve_context` failed: retrieve requires documents"));
+    }
+
+    #[tokio::test]
+    async fn cache_stage_writes_and_reuses_success_value() {
+        let dir = tempdir().unwrap();
+        let manifest = cache_manifest("answer-v1");
+        let prompt_path = dir.path().join("prompt.txt");
+        let output_path = dir.path().join("answer.txt");
+        let engine = Engine::new();
+
+        std::fs::write(&prompt_path, "first").unwrap();
+        engine
+            .run_manifest(manifest.clone(), dir.path())
+            .await
+            .expect("first run should populate cache");
+        assert_eq!(std::fs::read_to_string(&output_path).unwrap(), "first");
+
+        std::fs::write(&prompt_path, "second").unwrap();
+        engine
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect("second run should read cache");
+        assert_eq!(std::fs::read_to_string(&output_path).unwrap(), "first");
+    }
+
+    #[test]
+    fn validate_manifest_rejects_cache_without_parent() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: cached
+    op: cache
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("cache without parent should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("stage `cached` failed: cache requires from"));
     }
 
     #[test]
@@ -3086,5 +3288,30 @@ outputs:
             std::fs::read_to_string(&output_path).unwrap(),
             r#"{"answer":"ok"}"#
         );
+    }
+
+    fn cache_manifest(key: &str) -> Manifest {
+        Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: cached
+    op: cache
+    from: load_prompt
+    path: .llmff/cache
+    key: {key}
+outputs:
+  final:
+    from: cached
+    path: answer.txt
+"#,
+        ))
+        .expect("manifest should parse")
     }
 }

@@ -27,11 +27,19 @@ The stage accepts only successful parent values. Invalid and skipped parents fai
 
 ## Cache Key and Stored Data
 
-The cache key is stable across runs for the same stage configuration and parent value. It is derived from canonical JSON containing:
+The cache key is stable across runs for the same stage configuration and cache namespace. When `key` is present, the key is explicit and does not include the parent value; this lets a manifest author intentionally reuse the cached value behind a semantic name such as `prompt-v1`. When `key` is omitted, the parent value participates in the digest so the default behavior is content-addressed.
+
+For explicit keys, the digest preimage contains:
 
 - cache format version
 - stage id
 - cache key namespace
+
+For implicit keys, the digest preimage contains:
+
+- cache format version
+- stage id
+- stage id as the namespace
 - parent value
 
 The first implementation intentionally does not include wall-clock time, environment variables, output paths, or trace paths in the key. The cache file name is the lowercase hexadecimal SHA-256 digest with `.json` extension.

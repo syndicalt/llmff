@@ -88,7 +88,7 @@ git commit -m "feat: parse cache stage fields"
 
 ## Task 2: Core Cache Execution
 
-- [ ] **Step 1: Write failing validation and execution tests**
+- [x] **Step 1: Write failing validation and execution tests**
 
 Add tests in `crates/llmff-core/src/engine.rs`:
 
@@ -168,7 +168,7 @@ outputs:
 
 Before each run in the test, write `prompt.txt` with `text`.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -178,7 +178,7 @@ cargo test -p llmff-core cache_stage validate_manifest_rejects_cache_without_par
 
 Expected: FAIL because `cache` is unknown.
 
-- [ ] **Step 3: Implement cache execution**
+- [x] **Step 3: Implement cache execution**
 
 In `engine.rs`:
 
@@ -191,7 +191,7 @@ In `engine.rs`:
 - Return `StageOutcome` with `cache_hit: Some(true | false)`.
 - Infer cache output kind from its parent.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run:
 
