@@ -169,7 +169,6 @@ case "${kernel}:${machine}" in
     ;;
   MINGW*:* | MSYS*:* | CYGWIN*:*)
     scripts/smoke-archive.sh --archive "$download_dir/llmff-${version}-x86_64-pc-windows-msvc.zip"
-    scripts/smoke-windows-msi.sh --msi "$download_dir/llmff-${version}-x86_64-pc-windows-msvc.msi"
     ;;
   *)
     printf 'warning: no host smoke path for %s/%s; checksum verification completed\n' "$kernel" "$machine" >&2

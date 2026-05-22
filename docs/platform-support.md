@@ -24,9 +24,9 @@ source-build fallback for users who are outside the prebuilt artifact set.
   `scripts/smoke-macos-pkg.sh`. Apple Developer ID signing and notarization are
   deferred until paid Apple Developer Program credentials are available.
 - Windows: CI builds an unsigned `.zip` archive and unsigned x86_64 MSI on a
-  Windows host, publishes adjacent SHA-256 checksums, and extracts the MSI
-  payload with `scripts/smoke-windows-msi.sh`. Authenticode signing is deferred
-  until a trusted code-signing certificate is available.
+  Windows host, publishes adjacent SHA-256 checksums, and validates the staged
+  MSI payload with `scripts/smoke-windows-msi.sh`. Authenticode signing is
+  deferred until a trusted code-signing certificate is available.
 - Archives: CI builds `.tar.gz` archives for Linux and macOS and a `.zip`
   archive for Windows. `scripts/smoke-archive.sh` extracts each archive and
   runs the packaged binary.
