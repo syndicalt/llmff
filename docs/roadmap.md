@@ -57,6 +57,13 @@ First implementation slice:
 - `llmff-core` owns a typed list of built-in backend families, registration flags, mock model aliases, and capability flags.
 - `llmff backends list --format json` exposes that metadata for scripts and wrappers while preserving the existing text output for humans.
 
+## Inline Graph Expressiveness
+
+First implementation slice:
+
+- Inline graphs support command and HTTP tool stages with `command`, `method`, `url`, and `header:<name>` parameters.
+- Command tool argv values use semicolon separators inside the `command` parameter, matching the existing inline convention for list-like values.
+
 ## Future Capability Tracks
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.

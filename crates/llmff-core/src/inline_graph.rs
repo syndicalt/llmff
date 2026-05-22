@@ -151,6 +151,11 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
             "schema_path" => stage.schema_path = Some(value),
             "path" => stage.path = Some(value),
             "key" => stage.key = Some(value),
+            "command" => {
+                stage.command = Some(parse_command(&value)?);
+            }
+            "method" => stage.method = Some(value),
+            "url" => stage.url = Some(value),
             "documents" => {
                 stage.documents = parse_documents(&value)?;
             }
@@ -160,14 +165,37 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
                 })?)
             }
             other => {
-                return Err(inline_graph_error(format!(
-                    "unknown inline graph parameter `{other}`"
-                )));
+                if let Some(name) = other.strip_prefix("header:") {
+                    if name.is_empty() {
+                        return Err(inline_graph_error("inline header name cannot be empty"));
+                    }
+                    stage.headers.insert(name.to_string(), value);
+                } else {
+                    return Err(inline_graph_error(format!(
+                        "unknown inline graph parameter `{other}`"
+                    )));
+                }
             }
         }
     }
 
     Ok(())
+}
+
+fn parse_command(source: &str) -> Result<Vec<String>, LlmffError> {
+    let command = source
+        .split(';')
+        .map(str::trim)
+        .filter(|arg| !arg.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if command.is_empty() {
+        return Err(inline_graph_error(
+            "command must contain at least one argument",
+        ));
+    }
+
+    Ok(command)
 }
 
 fn parse_documents(source: &str) -> Result<Vec<String>, LlmffError> {
@@ -303,6 +331,32 @@ mod tests {
         assert_eq!(manifest.graph[1].from.as_deref(), Some("load_1"));
         assert_eq!(manifest.graph[1].path.as_deref(), Some(".llmff/cache"));
         assert_eq!(manifest.graph[1].key.as_deref(), Some("prompt-v1"));
+    }
+
+    #[test]
+    fn parses_tool_stage_parameters() {
+        let manifest = Manifest::from_inline_graph(
+            "load | tool(command=/usr/bin/cat,method=POST,url=http://127.0.0.1:8000/process,header:content-type=application/json) | write(-)",
+            Some("question.txt".to_string()),
+        )
+        .expect("inline graph should parse");
+
+        assert_eq!(manifest.graph[1].id, "tool_2");
+        assert_eq!(manifest.graph[1].op, "tool");
+        assert_eq!(manifest.graph[1].from.as_deref(), Some("load_1"));
+        assert_eq!(
+            manifest.graph[1].command.as_deref(),
+            Some(&["/usr/bin/cat".to_string()][..])
+        );
+        assert_eq!(manifest.graph[1].method.as_deref(), Some("POST"));
+        assert_eq!(
+            manifest.graph[1].url.as_deref(),
+            Some("http://127.0.0.1:8000/process")
+        );
+        assert_eq!(
+            manifest.graph[1].headers["content-type"],
+            "application/json"
+        );
     }
 
     #[test]
