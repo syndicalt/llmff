@@ -12,14 +12,14 @@ This roadmap tracks major product capabilities that move `llmff` toward an FFmpe
 
 ## Packaged Installers
 
-Users should eventually be able to install `llmff` without a Rust toolchain. This is not part of the current `v0.1.x` GitHub/Cargo install path, but it is a release-track roadmap item.
+Users should be able to install `llmff` without a Rust toolchain. Native packaged installers are a release-track capability for Windows, macOS, and Linux distributions, with Cargo remaining as the source-build fallback.
 
 Target artifacts:
 
-- Windows installer and signed `llmff.exe` archive.
-- macOS installers or archives for Apple Silicon and Intel Macs, with signing and notarization before broad recommendation.
-- Linux `.deb` packages for Ubuntu and Debian.
-- Arch Linux package support, either through an official package recipe or an AUR-ready `PKGBUILD`.
+- Windows installer plus a signed `llmff.exe` archive.
+- macOS installer or signed/notarized archive for Apple Silicon and Intel Macs.
+- Ubuntu and Debian `.deb` packages.
+- Arch Linux package support through an official package recipe or an AUR-ready `PKGBUILD`.
 - Plain compressed binary archives for each supported platform.
 
 Release requirements:
@@ -39,6 +39,11 @@ Second implementation slice:
 
 - `scripts/package-deb.sh` creates an Ubuntu/Debian `.deb` package and adjacent SHA-256 checksum from an already-built Linux `llmff` binary.
 - `.github/workflows/release-artifacts.yml` builds and inspects an `amd64` `.deb` from the Ubuntu release-artifact job.
+
+Debian smoke implementation slice:
+
+- `scripts/smoke-deb.sh` extracts a `.deb` without root and verifies the packaged `llmff` binary with `--version`, `stages list`, `inspect`, and a deterministic mock-backed `run`.
+- `.github/workflows/release-artifacts.yml` runs the Debian package smoke gate for the Ubuntu/Debian release artifact.
 
 Third implementation slice:
 
