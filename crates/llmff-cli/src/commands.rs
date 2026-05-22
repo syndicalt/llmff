@@ -57,6 +57,8 @@ enum Command {
         input: Option<PathBuf>,
         #[arg(short = 'g', long = "graph")]
         graph: Option<String>,
+        #[arg(long = "plugin-dir")]
+        plugin_dir: Vec<PathBuf>,
         #[arg(long = "backend")]
         backend: Vec<String>,
         #[arg(long = "ollama")]
@@ -151,6 +153,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             manifest,
             input,
             graph,
+            plugin_dir,
             backend,
             ollama,
             api_key_env,
@@ -158,7 +161,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         } => {
             let (manifest, _) = load_pipeline_manifest(manifest, input, graph)?;
             let engine = build_engine(backend, ollama, api_key_env, api_key)?;
-            engine.validate_manifest(manifest)?;
+            engine.validate_manifest_with_plugin_dirs(manifest, &plugin_dir)?;
             println!("ok");
         }
         Command::Backends {

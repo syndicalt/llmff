@@ -14,7 +14,9 @@ use crate::backend::{Backend, InferRequest, UsageMetadata};
 use crate::error::LlmffError;
 use crate::graph::{stage_dependencies, Graph};
 use crate::manifest::{Manifest, StageSpec};
-use crate::plugin::{discover_plugin_tool_transports, PluginToolTransport};
+use crate::plugin::{
+    discover_plugin_stages, discover_plugin_tool_transports, PluginStage, PluginToolTransport,
+};
 use crate::stage::execute_deterministic_stage;
 use crate::trace::{TraceEvent, TraceWriter};
 use crate::value::{Message, StageStatus, Value};
@@ -113,10 +115,27 @@ impl Engine {
     }
 
     pub fn validate_manifest(&self, manifest: Manifest) -> Result<Graph, LlmffError> {
+        self.validate_manifest_with_plugins(manifest, &BTreeMap::new())
+    }
+
+    pub fn validate_manifest_with_plugin_dirs(
+        &self,
+        manifest: Manifest,
+        plugin_dirs: &[PathBuf],
+    ) -> Result<Graph, LlmffError> {
+        let plugin_stages = load_plugin_stages(plugin_dirs)?;
+        self.validate_manifest_with_plugins(manifest, &plugin_stages)
+    }
+
+    fn validate_manifest_with_plugins(
+        &self,
+        manifest: Manifest,
+        plugin_stages: &BTreeMap<String, PluginStage>,
+    ) -> Result<Graph, LlmffError> {
         validate_input_formats(&manifest)?;
         let graph = Graph::from_manifest(manifest.clone())?;
         for stage in graph.stages() {
-            self.validate_stage(stage)?;
+            self.validate_stage(stage, plugin_stages)?;
         }
         validate_stage_types(&graph, &manifest)?;
 
@@ -138,13 +157,14 @@ impl Engine {
         cwd: &Path,
         options: RunOptions,
     ) -> Result<RunReport, LlmffError> {
-        let graph = self.validate_manifest(manifest.clone())?;
+        let plugin_tool_transports = load_plugin_tool_transports(&options.plugin_dirs)?;
+        let plugin_stages = load_plugin_stages(&options.plugin_dirs)?;
+        let graph = self.validate_manifest_with_plugins(manifest.clone(), &plugin_stages)?;
         if options.stream_stage.is_some() && options.scheduler == SchedulerMode::Parallel {
             return Err(LlmffError::Config(
                 "stream-stage cannot be used with the parallel scheduler".to_string(),
             ));
         }
-        let plugin_tool_transports = load_plugin_tool_transports(&options.plugin_dirs)?;
         let mut stream_writer = create_stage_stream_writer(&options, &graph, cwd)?;
         let mut statuses = BTreeMap::new();
         let mut trace = create_trace_writers(&options)?;
@@ -184,6 +204,7 @@ impl Engine {
                     &mut trace,
                     &options.run_id,
                     &plugin_tool_transports,
+                    &plugin_stages,
                     stream_writer.as_mut(),
                 )
                 .await?;
@@ -197,6 +218,7 @@ impl Engine {
                     &mut trace,
                     &options.run_id,
                     &plugin_tool_transports,
+                    &plugin_stages,
                 )
                 .await?;
             }
@@ -267,6 +289,7 @@ impl Engine {
         trace: &mut Vec<TraceWriter>,
         run_id: &str,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
+        plugin_stages: &BTreeMap<String, PluginStage>,
         mut stream_writer: Option<&mut StageStreamWriter>,
     ) -> Result<(), LlmffError> {
         for stage in graph.stages() {
@@ -278,6 +301,7 @@ impl Engine {
                     statuses,
                     cwd,
                     plugin_tool_transports,
+                    plugin_stages,
                     stream_writer.as_deref_mut(),
                 )
                 .await?;
@@ -296,6 +320,7 @@ impl Engine {
         trace: &mut Vec<TraceWriter>,
         run_id: &str,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
+        plugin_stages: &BTreeMap<String, PluginStage>,
     ) -> Result<(), LlmffError> {
         let mut pending = graph.stages().iter().collect::<Vec<_>>();
 
@@ -332,6 +357,7 @@ impl Engine {
                     &status_snapshot,
                     cwd,
                     plugin_tool_transports,
+                    plugin_stages,
                     None,
                 )
             }))
@@ -422,9 +448,25 @@ impl Engine {
         )
     }
 
-    fn validate_stage(&self, stage: &StageSpec) -> Result<(), LlmffError> {
+    fn validate_stage(
+        &self,
+        stage: &StageSpec,
+        plugin_stages: &BTreeMap<String, PluginStage>,
+    ) -> Result<(), LlmffError> {
         validate_when_condition(stage)?;
         validate_sampling_parameters(stage)?;
+
+        if let Some(plugin_stage_name) = plugin_stage_name(&stage.op) {
+            require_stage_field(stage, stage.from.as_deref(), "plugin stage requires from")?;
+            return if plugin_stages.contains_key(plugin_stage_name) {
+                Ok(())
+            } else {
+                Err(stage_validation_error(
+                    stage,
+                    format!("unknown plugin stage `{plugin_stage_name}`"),
+                ))
+            };
+        }
 
         match stage.op.as_str() {
             "load" => {
@@ -525,6 +567,7 @@ impl Engine {
         statuses: &BTreeMap<String, StageStatus>,
         cwd: &Path,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
+        plugin_stages: &BTreeMap<String, PluginStage>,
         stream_writer: Option<&mut StageStreamWriter>,
     ) -> Result<StageOutcome, LlmffError> {
         if !should_execute_stage(stage, statuses)? {
@@ -556,7 +599,20 @@ impl Engine {
             "write" => self
                 .execute_write(stage, statuses, cwd)
                 .map(StageOutcome::without_usage),
-            other => Err(LlmffError::UnknownStage(other.to_string())),
+            other => {
+                if let Some(plugin_stage_name) = plugin_stage_name(other) {
+                    return self
+                        .execute_plugin_stage(
+                            stage,
+                            statuses,
+                            cwd,
+                            plugin_stages,
+                            plugin_stage_name,
+                        )
+                        .map(StageOutcome::without_usage);
+                }
+                Err(LlmffError::UnknownStage(other.to_string()))
+            }
         }
     }
 
@@ -766,6 +822,30 @@ impl Engine {
             stage_id: stage.id.clone(),
             message: "tool requires command, url, or plugin transport".to_string(),
         })
+    }
+
+    fn execute_plugin_stage(
+        &self,
+        stage: &StageSpec,
+        statuses: &BTreeMap<String, StageStatus>,
+        cwd: &Path,
+        plugin_stages: &BTreeMap<String, PluginStage>,
+        plugin_stage_name: &str,
+    ) -> Result<StageStatus, LlmffError> {
+        let plugin_stage =
+            plugin_stages
+                .get(plugin_stage_name)
+                .ok_or_else(|| LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: format!("unknown plugin stage `{plugin_stage_name}`"),
+                })?;
+        execute_command_stage(
+            stage,
+            statuses,
+            cwd,
+            &[plugin_stage.entrypoint.to_string_lossy().into_owned()],
+            "plugin stage",
+        )
     }
 
     fn execute_write(
@@ -1149,6 +1229,10 @@ fn should_execute_stage(
     }
 }
 
+fn plugin_stage_name(op: &str) -> Option<&str> {
+    op.strip_prefix("plugin:").filter(|name| !name.is_empty())
+}
+
 const CACHE_RECORD_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1302,6 +1386,10 @@ fn infer_stage_value_kind(
     manifest: &Manifest,
     kinds: &BTreeMap<String, StageValueKind>,
 ) -> StageValueKind {
+    if plugin_stage_name(&stage.op).is_some() {
+        return StageValueKind::Text;
+    }
+
     match stage.op.as_str() {
         "load" => stage
             .input
@@ -1427,16 +1515,44 @@ fn load_plugin_tool_transports(
     Ok(transports)
 }
 
+fn load_plugin_stages(
+    plugin_dirs: &[PathBuf],
+) -> Result<BTreeMap<String, PluginStage>, LlmffError> {
+    let mut stages = BTreeMap::new();
+    for plugin_dir in plugin_dirs {
+        for stage in discover_plugin_stages(plugin_dir)? {
+            if stages.contains_key(&stage.name) {
+                return Err(LlmffError::Config(format!(
+                    "duplicate plugin stage `{}`",
+                    stage.name
+                )));
+            }
+            stages.insert(stage.name.clone(), stage);
+        }
+    }
+    Ok(stages)
+}
+
 fn execute_command_tool(
     stage: &StageSpec,
     statuses: &BTreeMap<String, StageStatus>,
     cwd: &Path,
     command: &[String],
 ) -> Result<StageStatus, LlmffError> {
+    execute_command_stage(stage, statuses, cwd, command, "tool command")
+}
+
+fn execute_command_stage(
+    stage: &StageSpec,
+    statuses: &BTreeMap<String, StageStatus>,
+    cwd: &Path,
+    command: &[String],
+    label: &str,
+) -> Result<StageStatus, LlmffError> {
     let input = parent_text(stage, statuses)?;
     let program = command.first().ok_or_else(|| LlmffError::StageExecution {
         stage_id: stage.id.clone(),
-        message: "tool command cannot be empty".to_string(),
+        message: format!("{label} cannot be empty"),
     })?;
     let mut child = Command::new(resolve_command_path(cwd, program))
         .args(&command[1..])
@@ -1447,7 +1563,7 @@ fn execute_command_tool(
         .spawn()
         .map_err(|error| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
-            message: format!("failed to start tool command `{program}`: {error}"),
+            message: format!("failed to start {label} `{program}`: {error}"),
         })?;
 
     let mut stdin = child
@@ -1455,13 +1571,13 @@ fn execute_command_tool(
         .take()
         .ok_or_else(|| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
-            message: "failed to open tool command stdin".to_string(),
+            message: format!("failed to open {label} stdin"),
         })?;
     stdin
         .write_all(input.as_bytes())
         .map_err(|error| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
-            message: format!("failed to write tool command stdin: {error}"),
+            message: format!("failed to write {label} stdin: {error}"),
         })?;
     drop(stdin);
 
@@ -1469,7 +1585,7 @@ fn execute_command_tool(
         .wait_with_output()
         .map_err(|error| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
-            message: format!("failed to wait for tool command `{program}`: {error}"),
+            message: format!("failed to wait for {label} `{program}`: {error}"),
         })?;
 
     if !output.status.success() {
@@ -1477,7 +1593,7 @@ fn execute_command_tool(
         return Err(LlmffError::StageExecution {
             stage_id: stage.id.clone(),
             message: format!(
-                "tool command exited with status {}: {}",
+                "{label} exited with status {}: {}",
                 output.status,
                 stderr.trim()
             ),
@@ -1486,7 +1602,7 @@ fn execute_command_tool(
 
     let stdout = String::from_utf8(output.stdout).map_err(|error| LlmffError::StageExecution {
         stage_id: stage.id.clone(),
-        message: format!("tool command stdout was not valid UTF-8: {error}"),
+        message: format!("{label} stdout was not valid UTF-8: {error}"),
     })?;
     Ok(StageStatus::Success(Value::Text(stdout)))
 }
