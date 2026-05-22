@@ -41,6 +41,14 @@ enum Command {
     },
     Inspect {
         manifest: PathBuf,
+        #[arg(long = "backend")]
+        backend: Vec<String>,
+        #[arg(long = "ollama")]
+        ollama: Vec<String>,
+        #[arg(long = "api-key-env")]
+        api_key_env: Vec<String>,
+        #[arg(long = "api-key")]
+        api_key: Vec<String>,
     },
     Backends {
         #[command(subcommand)]
@@ -89,10 +97,17 @@ pub async fn run(cli: Cli) -> Result<()> {
             )
             .await?
         }
-        Command::Inspect { manifest } => {
+        Command::Inspect {
+            manifest,
+            backend,
+            ollama,
+            api_key_env,
+            api_key,
+        } => {
             let source = std::fs::read_to_string(&manifest)?;
             let manifest = Manifest::from_yaml_str(&source)?;
-            llmff_core::graph::Graph::from_manifest(manifest)?;
+            let engine = build_engine(backend, ollama, api_key_env, api_key)?;
+            engine.validate_manifest(manifest)?;
             println!("ok");
         }
         Command::Backends {
@@ -203,6 +218,26 @@ async fn run_pipeline(
     api_key: Vec<String>,
 ) -> Result<()> {
     let (manifest, cwd) = load_run_manifest(manifest_path, input_path, inline_graph)?;
+    let engine = build_engine(backend, ollama, api_key_env, api_key)?;
+
+    let options = RunOptions {
+        run_id: "cli-run".to_string(),
+        trace_path: trace,
+    };
+
+    engine
+        .run_manifest_with_options(manifest, &cwd, options)
+        .await?;
+
+    Ok(())
+}
+
+fn build_engine(
+    backend: Vec<String>,
+    ollama: Vec<String>,
+    api_key_env: Vec<String>,
+    api_key: Vec<String>,
+) -> Result<Engine> {
     let bad = std::env::var("LLMFF_MOCK_BAD_RESPONSE").unwrap_or_else(|_| "{}".to_string());
     let good = std::env::var("LLMFF_MOCK_GOOD_RESPONSE").unwrap_or_else(|_| bad.clone());
     let mut engine = Engine::new()
@@ -232,16 +267,7 @@ async fn run_pipeline(
         engine = engine.with_backend(backend.alias, Arc::new(OllamaBackend::new(backend.value)));
     }
 
-    let options = RunOptions {
-        run_id: "cli-run".to_string(),
-        trace_path: trace,
-    };
-
-    engine
-        .run_manifest_with_options(manifest, &cwd, options)
-        .await?;
-
-    Ok(())
+    Ok(engine)
 }
 
 fn load_run_manifest(

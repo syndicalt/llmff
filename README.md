@@ -5,7 +5,7 @@
 ## Current Scope
 
 - `llmff run <manifest>` executes a pipeline manifest.
-- `llmff inspect <manifest>` parses and validates graph references.
+- `llmff inspect <manifest>` dry-run validates graph references, stage requirements, and backend availability.
 - `llmff stages list` prints built-in stage names.
 - `llmff backends list` prints currently wired backend families.
 - The core crate owns execution semantics; the CLI is a thin adapter.
@@ -43,6 +43,14 @@ Inspect the manifest without running model calls:
 
 ```bash
 cargo run -p llmff -- inspect examples/json-repair.yaml
+```
+
+Inspect a manifest that references a registered backend alias:
+
+```bash
+cargo run -p llmff -- inspect pipeline.yaml \
+  --backend openai=https://api.openai.com/v1 \
+  --api-key-env openai=OPENAI_API_KEY
 ```
 
 List built-in stages:
@@ -163,6 +171,8 @@ The trace summary prints run status, stage status, duration, and safe metadata o
 ## Backend Notes
 
 The CLI keeps backend registration explicit. This keeps commands portable and FFmpeg-like: the command line describes the run, while environment variables are only used when you choose to read a secret by name.
+
+`run` and `inspect` accept the same backend registration flags. `inspect` validates that model ids resolve to configured backends, but it does not call model servers, tools, or pipeline stages.
 
 Register an OpenAI-compatible backend:
 
