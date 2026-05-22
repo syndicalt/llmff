@@ -176,6 +176,15 @@ fn summarize_trace_event(event: &serde_json::Value) -> Option<String> {
             push_string_metadata(&mut parts, event, "model");
             push_string_metadata(&mut parts, event, "backend");
             push_string_metadata(&mut parts, event, "provider_model");
+            if let Some(total) = integer_field(event, "total_tokens") {
+                parts.push(format!("usage={total}"));
+            }
+            if let Some(prompt) = integer_field(event, "prompt_tokens") {
+                parts.push(format!("prompt_tokens={prompt}"));
+            }
+            if let Some(completion) = integer_field(event, "completion_tokens") {
+                parts.push(format!("completion_tokens={completion}"));
+            }
             if let Some(count) = event
                 .get("validation_errors")
                 .and_then(serde_json::Value::as_array)

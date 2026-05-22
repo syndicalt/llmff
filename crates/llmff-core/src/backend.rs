@@ -17,6 +17,14 @@ pub struct InferRequest {
 pub struct InferResponse {
     pub model: String,
     pub text: String,
+    pub usage: Option<UsageMetadata>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageMetadata {
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
 }
 
 #[async_trait]
@@ -52,6 +60,7 @@ impl Backend for MockBackend {
         Ok(InferResponse {
             model: request.model,
             text: self.response.clone(),
+            usage: None,
         })
     }
 }
@@ -128,6 +137,7 @@ impl Backend for OpenAiCompatibleBackend {
         Ok(InferResponse {
             model: request.model,
             text,
+            usage: completion.usage.map(Into::into),
         })
     }
 }
@@ -171,6 +181,7 @@ impl Backend for OllamaBackend {
             .json()
             .await
             .map_err(|error| LlmffError::Backend(format!("invalid response JSON: {error}")))?;
+        let usage = ollama_usage(&completion);
         let text = completion.message.content.ok_or_else(|| {
             LlmffError::Backend("Ollama response missing message content".to_string())
         })?;
@@ -178,6 +189,7 @@ impl Backend for OllamaBackend {
         Ok(InferResponse {
             model: request.model,
             text,
+            usage,
         })
     }
 }
@@ -214,6 +226,7 @@ fn ollama_chat_request_body(request: &InferRequest) -> serde_json::Value {
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     choices: Vec<ChatChoice>,
+    usage: Option<OpenAiUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -227,13 +240,47 @@ struct ChatMessage {
 }
 
 #[derive(Debug, Deserialize)]
+struct OpenAiUsage {
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    total_tokens: Option<u64>,
+}
+
+impl From<OpenAiUsage> for UsageMetadata {
+    fn from(usage: OpenAiUsage) -> Self {
+        Self {
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
 struct OllamaChatResponse {
     message: OllamaMessage,
+    prompt_eval_count: Option<u64>,
+    eval_count: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct OllamaMessage {
     content: Option<String>,
+}
+
+fn ollama_usage(response: &OllamaChatResponse) -> Option<UsageMetadata> {
+    if response.prompt_eval_count.is_none() && response.eval_count.is_none() {
+        return None;
+    }
+
+    Some(UsageMetadata {
+        prompt_tokens: response.prompt_eval_count,
+        completion_tokens: response.eval_count,
+        total_tokens: match (response.prompt_eval_count, response.eval_count) {
+            (Some(prompt), Some(completion)) => Some(prompt + completion),
+            _ => None,
+        },
+    })
 }
 
 #[cfg(test)]
@@ -273,7 +320,12 @@ mod tests {
                             "content": "hello from backend"
                         }
                     }
-                ]
+                ],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 8,
+                    "total_tokens": 20
+                }
             })))
             .mount(&server)
             .await;
@@ -292,6 +344,10 @@ mod tests {
 
         assert_eq!(response.model, "test-model");
         assert_eq!(response.text, "hello from backend");
+        let usage = response.usage.expect("usage should be parsed");
+        assert_eq!(usage.prompt_tokens, Some(12));
+        assert_eq!(usage.completion_tokens, Some(8));
+        assert_eq!(usage.total_tokens, Some(20));
 
         let requests = server.received_requests().await.unwrap();
         let body: serde_json::Value = requests[0].body_json().unwrap();
@@ -313,7 +369,9 @@ mod tests {
                     "role": "assistant",
                     "content": "hello from ollama"
                 },
-                "done": true
+                "done": true,
+                "prompt_eval_count": 7,
+                "eval_count": 5
             })))
             .mount(&server)
             .await;
@@ -332,6 +390,10 @@ mod tests {
 
         assert_eq!(response.model, "llama3.1");
         assert_eq!(response.text, "hello from ollama");
+        let usage = response.usage.expect("usage should be parsed");
+        assert_eq!(usage.prompt_tokens, Some(7));
+        assert_eq!(usage.completion_tokens, Some(5));
+        assert_eq!(usage.total_tokens, Some(12));
 
         let requests = server.received_requests().await.unwrap();
         let body: serde_json::Value = requests[0].body_json().unwrap();

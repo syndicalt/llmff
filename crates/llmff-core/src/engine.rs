@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::backend::{Backend, InferRequest};
+use crate::backend::{Backend, InferRequest, UsageMetadata};
 use crate::error::LlmffError;
 use crate::graph::Graph;
 use crate::manifest::{Manifest, StageSpec};
@@ -22,6 +22,24 @@ pub enum RunStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunReport {
     pub final_status: RunStatus,
+}
+
+struct StageOutcome {
+    status: StageStatus,
+    usage: Option<UsageMetadata>,
+}
+
+impl StageOutcome {
+    fn without_usage(status: StageStatus) -> Self {
+        Self {
+            status,
+            usage: None,
+        }
+    }
+
+    fn with_usage(status: StageStatus, usage: Option<UsageMetadata>) -> Self {
+        Self { status, usage }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +122,9 @@ impl Engine {
                 tool_kind: None,
                 tool_target: None,
                 output_path: None,
+                prompt_tokens: None,
+                completion_tokens: None,
+                total_tokens: None,
             },
         )?;
 
@@ -126,11 +147,15 @@ impl Engine {
                     tool_kind: None,
                     tool_target: None,
                     output_path: None,
+                    prompt_tokens: None,
+                    completion_tokens: None,
+                    total_tokens: None,
                 },
             )?;
-            let status = self.execute_stage(&manifest, stage, &statuses, cwd).await?;
+            let outcome = self.execute_stage(&manifest, stage, &statuses, cwd).await?;
+            let status = outcome.status;
             let status_name = status_name(&status).to_string();
-            let metadata = self.trace_metadata(stage, &status);
+            let metadata = self.trace_metadata(stage, &status, outcome.usage.as_ref());
             statuses.insert(stage.id.clone(), status);
             write_trace(
                 &mut trace,
@@ -149,6 +174,9 @@ impl Engine {
                     tool_kind: metadata.tool_kind,
                     tool_target: metadata.tool_target,
                     output_path: metadata.output_path,
+                    prompt_tokens: metadata.prompt_tokens,
+                    completion_tokens: metadata.completion_tokens,
+                    total_tokens: metadata.total_tokens,
                 },
             )?;
         }
@@ -198,6 +226,9 @@ impl Engine {
                 tool_kind: None,
                 tool_target: None,
                 output_path: None,
+                prompt_tokens: None,
+                completion_tokens: None,
+                total_tokens: None,
             },
         )?;
 
@@ -277,13 +308,15 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         cwd: &Path,
-    ) -> Result<StageStatus, LlmffError> {
+    ) -> Result<StageOutcome, LlmffError> {
         if !should_execute_stage(stage, statuses)? {
-            return Ok(StageStatus::Skipped);
+            return Ok(StageOutcome::without_usage(StageStatus::Skipped));
         }
 
         match stage.op.as_str() {
-            "load" => self.execute_load(manifest, stage, cwd),
+            "load" => self
+                .execute_load(manifest, stage, cwd)
+                .map(StageOutcome::without_usage),
             "infer" => self.execute_infer(stage, statuses).await,
             "validate_json" | "system" | "template" => {
                 let input = stage
@@ -291,12 +324,19 @@ impl Engine {
                     .as_ref()
                     .and_then(|parent| statuses.get(parent))
                     .and_then(success_value);
-                execute_deterministic_stage(stage, input, cwd)
+                execute_deterministic_stage(stage, input, cwd).map(StageOutcome::without_usage)
             }
             "repair" => self.execute_repair(stage, statuses).await,
-            "route" => self.execute_route(stage, statuses),
-            "tool" => self.execute_tool(stage, statuses, cwd).await,
-            "write" => self.execute_write(stage, statuses, cwd),
+            "route" => self
+                .execute_route(stage, statuses)
+                .map(StageOutcome::without_usage),
+            "tool" => self
+                .execute_tool(stage, statuses, cwd)
+                .await
+                .map(StageOutcome::without_usage),
+            "write" => self
+                .execute_write(stage, statuses, cwd)
+                .map(StageOutcome::without_usage),
             other => Err(LlmffError::UnknownStage(other.to_string())),
         }
     }
@@ -337,7 +377,7 @@ impl Engine {
         &self,
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
-    ) -> Result<StageStatus, LlmffError> {
+    ) -> Result<StageOutcome, LlmffError> {
         let prompt = parent_text(stage, statuses)?;
         let model = required_model(stage)?;
         let resolved = self.backend_for_model(model)?;
@@ -351,14 +391,17 @@ impl Engine {
             })
             .await?;
 
-        Ok(StageStatus::Success(Value::Text(response.text)))
+        Ok(StageOutcome::with_usage(
+            StageStatus::Success(Value::Text(response.text)),
+            response.usage,
+        ))
     }
 
     async fn execute_repair(
         &self,
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
-    ) -> Result<StageStatus, LlmffError> {
+    ) -> Result<StageOutcome, LlmffError> {
         let parent = stage
             .from
             .as_ref()
@@ -369,8 +412,10 @@ impl Engine {
             })?;
 
         match parent {
-            StageStatus::Success(value) => Ok(StageStatus::Success(value.clone())),
-            StageStatus::Skipped => Ok(StageStatus::Skipped),
+            StageStatus::Success(value) => Ok(StageOutcome::without_usage(StageStatus::Success(
+                value.clone(),
+            ))),
+            StageStatus::Skipped => Ok(StageOutcome::without_usage(StageStatus::Skipped)),
             StageStatus::Invalid { value, errors } => {
                 let model = required_model(stage)?;
                 let resolved = self.backend_for_model(model)?;
@@ -388,7 +433,10 @@ impl Engine {
                     })
                     .await?;
 
-                Ok(StageStatus::Success(Value::Text(response.text)))
+                Ok(StageOutcome::with_usage(
+                    StageStatus::Success(Value::Text(response.text)),
+                    response.usage,
+                ))
             }
         }
     }
@@ -519,7 +567,12 @@ impl Engine {
         )))
     }
 
-    fn trace_metadata(&self, stage: &StageSpec, status: &StageStatus) -> TraceMetadata {
+    fn trace_metadata(
+        &self,
+        stage: &StageSpec,
+        status: &StageStatus,
+        usage: Option<&UsageMetadata>,
+    ) -> TraceMetadata {
         let mut metadata = TraceMetadata::default();
 
         if matches!(stage.op.as_str(), "infer" | "repair") {
@@ -550,6 +603,12 @@ impl Engine {
 
         if stage.op == "write" {
             metadata.output_path = stage.path.clone();
+        }
+
+        if let Some(usage) = usage {
+            metadata.prompt_tokens = usage.prompt_tokens;
+            metadata.completion_tokens = usage.completion_tokens;
+            metadata.total_tokens = usage.total_tokens;
         }
 
         metadata
@@ -811,6 +870,9 @@ struct TraceMetadata {
     tool_kind: Option<String>,
     tool_target: Option<String>,
     output_path: Option<String>,
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    total_tokens: Option<u64>,
 }
 
 struct ResolvedBackendMetadata {
@@ -1135,10 +1197,29 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use crate::backend::MockBackend;
+    use crate::backend::{InferResponse, MockBackend, UsageMetadata};
     use crate::manifest::Manifest;
     use wiremock::matchers::{body_string, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[derive(Debug)]
+    struct UsageBackend {
+        model: String,
+        text: String,
+        usage: UsageMetadata,
+    }
+
+    #[async_trait::async_trait]
+    impl Backend for UsageBackend {
+        async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
+            assert_eq!(request.model, self.model);
+            Ok(InferResponse {
+                model: request.model,
+                text: self.text.clone(),
+                usage: Some(self.usage.clone()),
+            })
+        }
+    }
 
     #[test]
     fn validate_manifest_rejects_unknown_stage_operation() {
@@ -1876,6 +1957,71 @@ outputs:
         assert_eq!(draft_finished["model"], "openai:gpt-test");
         assert_eq!(draft_finished["backend"], "openai");
         assert_eq!(draft_finished["provider_model"], "gpt-test");
+    }
+
+    #[tokio::test]
+    async fn trace_events_include_model_usage_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "hello").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: usage:test-model
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "usage",
+            Arc::new(UsageBackend {
+                model: "test-model".to_string(),
+                text: "ok".to_string(),
+                usage: UsageMetadata {
+                    prompt_tokens: Some(12),
+                    completion_tokens: Some(8),
+                    total_tokens: Some(20),
+                },
+            }),
+        );
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "trace-test".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let draft_finished = trace_stage_finished(&events, "draft");
+
+        assert_eq!(draft_finished["prompt_tokens"], 12);
+        assert_eq!(draft_finished["completion_tokens"], 8);
+        assert_eq!(draft_finished["total_tokens"], 20);
     }
 
     #[tokio::test]

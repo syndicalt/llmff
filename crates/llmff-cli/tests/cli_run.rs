@@ -569,7 +569,7 @@ fn trace_command_summarizes_trace_jsonl() {
     let trace = dir.path().join("trace.jsonl");
     std::fs::write(
         &trace,
-        r#"{"run_id":"test-run","event":"stage_finished","stage_id":"draft","op":"infer","status":"success","timestamp_ms":1,"duration_ms":14,"model":"openai:gpt-test","backend":"openai","provider_model":"gpt-test"}
+        r#"{"run_id":"test-run","event":"stage_finished","stage_id":"draft","op":"infer","status":"success","timestamp_ms":1,"duration_ms":14,"model":"openai:gpt-test","backend":"openai","provider_model":"gpt-test","prompt_tokens":12,"completion_tokens":8,"total_tokens":20}
 {"run_id":"test-run","event":"stage_finished","stage_id":"validate","op":"validate_json","status":"invalid","timestamp_ms":2,"duration_ms":1,"validation_errors":["missing answer"]}
 {"run_id":"test-run","event":"run_finished","status":"succeeded","timestamp_ms":3}
 "#,
@@ -584,6 +584,9 @@ fn trace_command_summarizes_trace_jsonl() {
         .stdout(predicate::str::contains("model=openai:gpt-test"))
         .stdout(predicate::str::contains("backend=openai"))
         .stdout(predicate::str::contains("provider_model=gpt-test"))
+        .stdout(predicate::str::contains("usage=20"))
+        .stdout(predicate::str::contains("prompt_tokens=12"))
+        .stdout(predicate::str::contains("completion_tokens=8"))
         .stdout(predicate::str::contains(
             "validate validate_json invalid 1ms validation_errors=1",
         ))
