@@ -9,31 +9,29 @@ use crate::value::{StageStatus, Value};
 pub fn execute_deterministic_stage(
     spec: &StageSpec,
     input: Option<Value>,
-    _cwd: &Path,
+    cwd: &Path,
 ) -> Result<StageStatus, LlmffError> {
     match spec.op.as_str() {
         "system" => Ok(StageStatus::Success(
             input.unwrap_or_else(|| Value::Text(String::new())),
         )),
-        "validate_json" => validate_json(spec, input),
+        "validate_json" => validate_json(spec, input, cwd),
         other => Err(LlmffError::UnknownStage(other.to_string())),
     }
 }
 
-fn validate_json(spec: &StageSpec, input: Option<Value>) -> Result<StageStatus, LlmffError> {
+fn validate_json(
+    spec: &StageSpec,
+    input: Option<Value>,
+    cwd: &Path,
+) -> Result<StageStatus, LlmffError> {
     let value = input.ok_or_else(|| LlmffError::StageExecution {
         stage_id: spec.id.clone(),
         message: "validate_json requires input".to_string(),
     })?;
-    let schema_source = spec
-        .schema
-        .as_ref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: "validate_json requires schema".to_string(),
-        })?;
+    let schema_source = schema_source(spec, cwd)?;
     let schema_json: serde_json::Value =
-        serde_json::from_str(schema_source).map_err(|error| LlmffError::StageExecution {
+        serde_json::from_str(&schema_source).map_err(|error| LlmffError::StageExecution {
             stage_id: spec.id.clone(),
             message: format!("invalid inline schema: {error}"),
         })?;
@@ -60,6 +58,34 @@ fn validate_json(spec: &StageSpec, input: Option<Value>) -> Result<StageStatus, 
     match validation_errors {
         None => Ok(StageStatus::Success(Value::Json(instance))),
         Some(errors) => Ok(StageStatus::Invalid { value, errors }),
+    }
+}
+
+fn schema_source(spec: &StageSpec, cwd: &Path) -> Result<String, LlmffError> {
+    if let Some(schema) = &spec.schema {
+        return Ok(schema.clone());
+    }
+
+    let schema_path = spec
+        .schema_path
+        .as_ref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: spec.id.clone(),
+            message: "validate_json requires schema or schema_path".to_string(),
+        })?;
+    let path = resolve_path(cwd, schema_path);
+    std::fs::read_to_string(&path).map_err(|error| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message: format!("failed to read schema_path `{schema_path}`: {error}"),
+    })
+}
+
+fn resolve_path(cwd: &Path, path: &str) -> std::path::PathBuf {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
     }
 }
 
@@ -122,5 +148,67 @@ mod tests {
         .expect("validation stage should run");
 
         assert!(matches!(output, StageStatus::Invalid { .. }));
+    }
+
+    #[test]
+    fn validate_json_loads_schema_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema_path = dir.path().join("answer.schema.json");
+        std::fs::write(
+            &schema_path,
+            r#"{"type":"object","required":["answer"],"properties":{"answer":{"type":"string"}}}"#,
+        )
+        .unwrap();
+        let spec = StageSpec {
+            id: "validate".to_string(),
+            op: "validate_json".to_string(),
+            input: None,
+            from: Some("draft".to_string()),
+            path: None,
+            model: None,
+            temperature: None,
+            schema: None,
+            schema_path: Some("answer.schema.json".to_string()),
+            when: None,
+        };
+
+        let output = execute_deterministic_stage(
+            &spec,
+            Some(Value::Text(r#"{"answer":"ok"}"#.to_string())),
+            dir.path(),
+        )
+        .expect("validation stage should run");
+
+        assert_eq!(
+            output,
+            StageStatus::Success(Value::Json(serde_json::json!({"answer":"ok"})))
+        );
+    }
+
+    #[test]
+    fn validate_json_reports_missing_schema_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = StageSpec {
+            id: "validate".to_string(),
+            op: "validate_json".to_string(),
+            input: None,
+            from: Some("draft".to_string()),
+            path: None,
+            model: None,
+            temperature: None,
+            schema: None,
+            schema_path: Some("missing.schema.json".to_string()),
+            when: None,
+        };
+
+        let error = execute_deterministic_stage(
+            &spec,
+            Some(Value::Text(r#"{"answer":"ok"}"#.to_string())),
+            dir.path(),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("schema_path `missing.schema.json`"));
     }
 }
