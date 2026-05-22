@@ -1,5 +1,14 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use std::path::PathBuf;
+
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("CLI crate should live under crates/llmff-cli")
+        .to_path_buf()
+}
 
 #[test]
 fn stages_list_prints_builtin_stages() {
@@ -102,4 +111,15 @@ outputs:
         .assert()
         .success()
         .stdout(predicate::str::contains(r#"{"answer":"ok"}"#));
+}
+
+#[test]
+fn inspect_example_manifest_succeeds() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+
+    cmd.args(["inspect", "examples/json-repair.yaml"])
+        .current_dir(workspace_root())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ok"));
 }
