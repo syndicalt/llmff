@@ -42,6 +42,8 @@ pub struct StageSpec {
     pub path: Option<String>,
     pub model: Option<String>,
     pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub max_tokens: Option<u32>,
     pub schema: Option<String>,
     pub schema_path: Option<String>,
     pub when: Option<String>,
@@ -134,6 +136,28 @@ graph:
         let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
 
         assert_eq!(manifest.inputs["payload"].format.as_deref(), Some("json"));
+    }
+
+    #[test]
+    fn parses_sampling_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: draft
+    op: infer
+    from: prompt
+    model: mock:good
+    temperature: 0.2
+    top_p: 0.9
+    max_tokens: 256
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(stage.temperature, Some(0.2));
+        assert_eq!(stage.top_p, Some(0.9));
+        assert_eq!(stage.max_tokens, Some(256));
     }
 
     #[test]

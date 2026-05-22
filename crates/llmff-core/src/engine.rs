@@ -206,6 +206,7 @@ impl Engine {
 
     fn validate_stage(&self, stage: &StageSpec) -> Result<(), LlmffError> {
         validate_when_condition(stage)?;
+        validate_sampling_parameters(stage)?;
 
         match stage.op.as_str() {
             "load" => {
@@ -345,6 +346,8 @@ impl Engine {
                 model: resolved.provider_model.to_string(),
                 prompt,
                 temperature: stage.temperature,
+                top_p: stage.top_p,
+                max_tokens: stage.max_tokens,
             })
             .await?;
 
@@ -380,6 +383,8 @@ impl Engine {
                             serialize_value(value)?
                         ),
                         temperature: stage.temperature,
+                        top_p: stage.top_p,
+                        max_tokens: stage.max_tokens,
                     })
                     .await?;
 
@@ -632,6 +637,33 @@ fn decode_input(
                 message: format!("input `{input_name}` is not valid JSON: {error}"),
             }),
     }
+}
+
+fn validate_sampling_parameters(stage: &StageSpec) -> Result<(), LlmffError> {
+    if let Some(temperature) = stage.temperature {
+        if temperature < 0.0 {
+            return Err(stage_validation_error(
+                stage,
+                "temperature must be greater than or equal to 0",
+            ));
+        }
+    }
+    if let Some(top_p) = stage.top_p {
+        if !(0.0..=1.0).contains(&top_p) {
+            return Err(stage_validation_error(
+                stage,
+                "top_p must be between 0 and 1",
+            ));
+        }
+    }
+    if let Some(0) = stage.max_tokens {
+        return Err(stage_validation_error(
+            stage,
+            "max_tokens must be greater than 0",
+        ));
+    }
+
+    Ok(())
 }
 
 fn validate_when_condition(stage: &StageSpec) -> Result<(), LlmffError> {
@@ -1244,6 +1276,37 @@ graph:
         assert!(error
             .to_string()
             .contains("input `payload` has unsupported format `yaml`"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_invalid_sampling_parameters() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+    top_p: 1.5
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .with_backend("mock:good", Arc::new(MockBackend::new("mock:good", "ok")))
+            .validate_manifest(manifest)
+            .expect_err("invalid sampling parameter should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("stage `draft` failed: top_p must be between 0 and 1"));
     }
 
     #[test]
