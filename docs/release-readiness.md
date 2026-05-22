@@ -30,7 +30,7 @@ Release `v0.1.1` was verified with:
 scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.1
 ```
 
-For release tags after this packaging slice, CI uploads binary archives, checksums, Ubuntu/Debian packages, and Arch packaging metadata to the matching GitHub Release assets. Manual dispatch keeps those outputs as Actions artifacts only.
+For release tags after this packaging slice, CI creates the GitHub Release when the tag does not already have one, then uploads binary archives, checksums, Ubuntu/Debian packages, and Arch packaging metadata to the matching GitHub Release assets. Manual dispatch keeps those outputs as Actions artifacts only.
 
 Current packaged artifact targets and installer assumptions are documented in
 [`docs/platform-support.md`](platform-support.md).
