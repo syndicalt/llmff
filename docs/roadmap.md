@@ -27,7 +27,7 @@ Release requirements:
 - Build artifacts from CI, not a developer machine.
 - Publish checksums for every artifact.
 - Verify each installer with a platform smoke test that runs `llmff --version`, `llmff stages list`, `llmff inspect`, and one deterministic mock-backed `llmff run`.
-- Document supported CPU architectures and any libc or OS-version assumptions.
+- Document supported CPU architectures and any libc or OS-version assumptions in `docs/platform-support.md`.
 - Keep `cargo install --git ... --tag ...` available as the source-build fallback.
 
 First implementation slice:
@@ -76,6 +76,11 @@ Fourth implementation slice:
 
 - `.github/workflows/release-artifacts.yml` uploads tag-built archives, checksums, `.deb` packages, and Arch metadata to the matching GitHub Release assets.
 - Manual workflow dispatch keeps generated files as Actions artifacts only.
+
+Platform support documentation slice:
+
+- `docs/platform-support.md` describes the release target triples, artifact types, CPU architecture assumptions, Linux glibc assumption, and unsigned installer status.
+- `scripts/check-platform-support-doc.sh` verifies that the documentation stays linked from the user-facing install and release-readiness docs.
 
 ## Backend Metadata
 
