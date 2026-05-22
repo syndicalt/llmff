@@ -29,6 +29,9 @@ llmff --version
 llmff stages list
 ```
 
+Supported release targets and installer assumptions are documented in
+[`docs/platform-support.md`](docs/platform-support.md).
+
 Run the install smoke gate from a checkout:
 
 ```bash
@@ -67,7 +70,7 @@ scripts/smoke-deb.sh --deb dist/llmff_0.1.1_amd64.deb
 
 Packaged installers for Windows, macOS, Ubuntu, Debian, and Arch Linux are on the roadmap; current releases install through Cargo from GitHub.
 
-Release tags also build compressed binary archives in CI as the first packaged-artifact slice. Ubuntu/Debian `.deb` packaging, Arch `PKGBUILD` metadata, unsigned Windows MSI packaging, and unsigned macOS `.pkg` packaging are wired into release artifact jobs; signed/notarized macOS installers and signed Windows installers are still future roadmap items.
+Release tags also build compressed binary archives in CI as the first packaged-artifact slice. Ubuntu/Debian `.deb` packaging, Arch `PKGBUILD` metadata, unsigned Windows MSI packaging, and unsigned macOS `.pkg` packaging are wired into release artifact jobs; signed/notarized macOS installers and signed Windows installers are still future roadmap items. See [`docs/platform-support.md`](docs/platform-support.md) for the current target matrix.
 
 Tagged release builds publish archives, checksums, `.deb` packages, and Arch metadata as GitHub Release assets. Manual workflow runs keep the same files as Actions artifacts.
 
