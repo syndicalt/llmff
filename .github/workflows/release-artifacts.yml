@@ -198,6 +198,12 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
+          find release-assets -maxdepth 3 -type f -print | sort
+          rm -rf release-assets/*msi-payload
+          find release-assets -type f \( -name '*.wxs' -o -name '*.wixpdb' \) -delete
+          if [[ -f release-assets/arch/PKGBUILD ]]; then
+            cp release-assets/arch/PKGBUILD release-assets/PKGBUILD
+          fi
           if [[ -f release-assets/arch/.SRCINFO ]]; then
             cp release-assets/arch/.SRCINFO "release-assets/llmff-${version}-arch.SRCINFO"
           elif [[ -f release-assets/.SRCINFO ]]; then
