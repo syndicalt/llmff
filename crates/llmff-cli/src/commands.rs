@@ -183,9 +183,10 @@ fn resolve_api_key_env(
     api_key_env: &std::collections::BTreeMap<String, String>,
     alias: &str,
 ) -> Option<Result<String>> {
-    api_key_env
-        .get(alias)
-        .map(|name| std::env::var(name).map_err(Into::into))
+    api_key_env.get(alias).map(|name| {
+        std::env::var(name)
+            .map_err(|_| anyhow::anyhow!("api key env `{name}` for backend `{alias}` is not set"))
+    })
 }
 
 #[cfg(test)]
