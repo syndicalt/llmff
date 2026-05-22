@@ -6,9 +6,13 @@ graph:
   - id: load_prompt
     op: load
     input: prompt
+  - id: render_prompt
+    op: template
+    from: load_prompt
+    path: ./prompt.tmpl
   - id: apply_policy
     op: system
-    from: load_prompt
+    from: render_prompt
     path: ./policy.md
   - id: draft
     op: infer
