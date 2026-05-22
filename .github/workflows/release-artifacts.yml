@@ -121,6 +121,7 @@ jobs:
             --out-dir dist
           test -f "dist/llmff-${version}-${{ matrix.target }}.pkg"
           (cd dist && shasum -a 256 -c "llmff-${version}-${{ matrix.target }}.pkg.sha256")
+          scripts/smoke-macos-pkg.sh --pkg "dist/llmff-${version}-${{ matrix.target }}.pkg"
 
       - name: Package Debian installer
         if: ${{ matrix.deb_arch != '' }}
