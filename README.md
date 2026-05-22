@@ -85,6 +85,31 @@ graph:
     default: fast_answer
 ```
 
+Tool stages call explicitly declared commands or HTTP endpoints:
+
+```yaml
+graph:
+  - id: normalize
+    op: tool
+    from: render_prompt
+    command: ["/bin/cat"]
+```
+
+Command tools use argv directly, never a shell string. The serialized parent value is written to stdin and stdout becomes the stage output.
+
+```yaml
+graph:
+  - id: call_endpoint
+    op: tool
+    from: render_prompt
+    method: POST
+    url: http://127.0.0.1:8080/process
+    headers:
+      content-type: text/plain
+```
+
+HTTP tools require `method` and `url`. `POST`, `PUT`, and `PATCH` send the serialized parent value as the request body; response text becomes the stage output.
+
 ## Backend Notes
 
 The CLI keeps backend registration explicit. This keeps commands portable and FFmpeg-like: the command line describes the run, while environment variables are only used when you choose to read a secret by name.

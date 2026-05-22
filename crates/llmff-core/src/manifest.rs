@@ -164,7 +164,10 @@ graph:
         let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
         let stage = &manifest.graph[0];
 
-        assert_eq!(stage.command.as_deref(), Some(&["/bin/cat".to_string()][..]));
+        assert_eq!(
+            stage.command.as_deref(),
+            Some(&["/bin/cat".to_string()][..])
+        );
         assert_eq!(stage.method.as_deref(), Some("POST"));
         assert_eq!(stage.url.as_deref(), Some("http://127.0.0.1:8080/process"));
         assert_eq!(stage.headers["content-type"], "application/json");

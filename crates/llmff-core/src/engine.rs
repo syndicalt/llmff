@@ -370,10 +370,13 @@ fn execute_command_tool(
             message: format!("failed to start tool command `{program}`: {error}"),
         })?;
 
-    let mut stdin = child.stdin.take().ok_or_else(|| LlmffError::StageExecution {
-        stage_id: stage.id.clone(),
-        message: "failed to open tool command stdin".to_string(),
-    })?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "failed to open tool command stdin".to_string(),
+        })?;
     stdin
         .write_all(input.as_bytes())
         .map_err(|error| LlmffError::StageExecution {
@@ -451,10 +454,13 @@ async fn execute_http_tool(
         request = request.body(input);
     }
 
-    let response = request.send().await.map_err(|error| LlmffError::StageExecution {
-        stage_id: stage.id.clone(),
-        message: format!("http tool request failed: {error}"),
-    })?;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("http tool request failed: {error}"),
+        })?;
     let status = response.status();
     let body = response
         .text()
