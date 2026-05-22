@@ -1,6 +1,8 @@
 use async_trait::async_trait;
+use futures::{stream, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::pin::Pin;
 
 use crate::error::LlmffError;
 use crate::value::Message;
@@ -21,6 +23,15 @@ pub struct InferRequest {
 pub struct InferResponse {
     pub model: String,
     pub text: String,
+    pub usage: Option<UsageMetadata>,
+}
+
+pub type InferStream = Pin<Box<dyn Stream<Item = Result<InferStreamChunk, LlmffError>> + Send>>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InferStreamChunk {
+    pub delta: String,
+    pub done: bool,
     pub usage: Option<UsageMetadata>,
 }
 
@@ -77,6 +88,7 @@ pub fn builtin_backend_families() -> &'static [BackendFamily] {
                 "response-format-json",
                 "sampling",
                 "seed-control",
+                "streaming-inference",
                 "stop-sequences",
                 "usage-metadata",
             ],
@@ -87,6 +99,14 @@ pub fn builtin_backend_families() -> &'static [BackendFamily] {
 #[async_trait]
 pub trait Backend: Send + Sync {
     async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError>;
+
+    fn stream(&self, _request: InferRequest) -> InferStream {
+        Box::pin(stream::once(async {
+            Err(LlmffError::Backend(
+                "streaming inference is not supported by this backend".to_string(),
+            ))
+        }))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +140,23 @@ impl Backend for MockBackend {
             usage: None,
         })
     }
+
+    fn stream(&self, request: InferRequest) -> InferStream {
+        let result = if request.model != self.model {
+            Err(LlmffError::Backend(format!(
+                "mock backend does not serve model `{}`",
+                request.model
+            )))
+        } else {
+            Ok(InferStreamChunk {
+                delta: self.response.clone(),
+                done: true,
+                usage: None,
+            })
+        };
+
+        Box::pin(stream::once(async move { result }))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -143,28 +180,7 @@ impl OpenAiCompatibleBackend {
 impl Backend for OpenAiCompatibleBackend {
     async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
         let url = format!("{}/chat/completions", self.base_url);
-        let mut body = json!({
-            "model": request.model,
-            "messages": request.messages,
-        });
-        if let Some(temperature) = request.temperature {
-            body["temperature"] = json!(temperature);
-        }
-        if let Some(top_p) = request.top_p {
-            body["top_p"] = json!(top_p);
-        }
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-        if let Some(seed) = request.seed {
-            body["seed"] = json!(seed);
-        }
-        if request.response_format.as_deref() == Some("json") {
-            body["response_format"] = json!({ "type": "json_object" });
-        }
-        if !request.stop.is_empty() {
-            body["stop"] = json!(request.stop);
-        }
+        let body = openai_request_body(&request, false);
         let mut http_request = self.client.post(url).json(&body);
         if !self.api_key.is_empty() {
             http_request = http_request.bearer_auth(&self.api_key);
@@ -201,6 +217,85 @@ impl Backend for OpenAiCompatibleBackend {
             usage: completion.usage.map(Into::into),
         })
     }
+
+    fn stream(&self, request: InferRequest) -> InferStream {
+        let url = format!("{}/chat/completions", self.base_url);
+        let api_key = self.api_key.clone();
+        let client = self.client.clone();
+
+        Box::pin(async_stream::try_stream! {
+            let body = openai_request_body(&request, true);
+            let mut http_request = client.post(url).json(&body);
+            if !api_key.is_empty() {
+                http_request = http_request.bearer_auth(&api_key);
+            }
+
+            let response = http_request
+                .send()
+                .await
+                .map_err(|error| LlmffError::Backend(format!("request failed: {error}")))?;
+            let status = response.status();
+            if status.is_success() {
+                let mut body_stream = response.bytes_stream();
+                let mut buffer = String::new();
+                while let Some(bytes) = body_stream.next().await {
+                    let bytes = bytes
+                        .map_err(|error| LlmffError::Backend(format!("stream read failed: {error}")))?;
+                    let text = std::str::from_utf8(&bytes)
+                        .map_err(|error| LlmffError::Backend(format!("stream chunk was not UTF-8: {error}")))?;
+                    buffer.push_str(text);
+
+                    while let Some(event) = take_sse_event(&mut buffer) {
+                        for chunk in parse_openai_sse_event(&event)? {
+                            yield chunk;
+                        }
+                    }
+                }
+
+                if !buffer.trim().is_empty() {
+                    for chunk in parse_openai_sse_event(&buffer)? {
+                        yield chunk;
+                    }
+                }
+            } else {
+                let body = response.text().await.unwrap_or_default();
+                Err(LlmffError::Backend(format!(
+                    "OpenAI-compatible backend returned {status}: {body}"
+                )))?;
+            }
+        })
+    }
+}
+
+fn openai_request_body(request: &InferRequest, stream: bool) -> serde_json::Value {
+    let mut body = json!({
+        "model": request.model,
+        "messages": request.messages,
+    });
+    if let Some(temperature) = request.temperature {
+        body["temperature"] = json!(temperature);
+    }
+    if let Some(top_p) = request.top_p {
+        body["top_p"] = json!(top_p);
+    }
+    if let Some(max_tokens) = request.max_tokens {
+        body["max_tokens"] = json!(max_tokens);
+    }
+    if let Some(seed) = request.seed {
+        body["seed"] = json!(seed);
+    }
+    if request.response_format.as_deref() == Some("json") {
+        body["response_format"] = json!({ "type": "json_object" });
+    }
+    if !request.stop.is_empty() {
+        body["stop"] = json!(request.stop);
+    }
+    if stream {
+        body["stream"] = json!(true);
+        body["stream_options"] = json!({ "include_usage": true });
+    }
+
+    body
 }
 
 fn normalize_openai_base_url(base_url: &str) -> String {
@@ -304,12 +399,28 @@ struct ChatCompletionResponse {
 }
 
 #[derive(Debug, Deserialize)]
+struct ChatCompletionStreamResponse {
+    choices: Vec<ChatStreamChoice>,
+    usage: Option<OpenAiUsage>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ChatChoice {
     message: ChatMessage,
 }
 
 #[derive(Debug, Deserialize)]
+struct ChatStreamChoice {
+    delta: ChatDelta,
+}
+
+#[derive(Debug, Deserialize)]
 struct ChatMessage {
+    content: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatDelta {
     content: Option<String>,
 }
 
@@ -328,6 +439,57 @@ impl From<OpenAiUsage> for UsageMetadata {
             total_tokens: usage.total_tokens,
         }
     }
+}
+
+fn take_sse_event(buffer: &mut String) -> Option<String> {
+    let (separator_index, separator_len) = if let Some(index) = buffer.find("\n\n") {
+        (index, 2)
+    } else if let Some(index) = buffer.find("\r\n\r\n") {
+        (index, 4)
+    } else {
+        return None;
+    };
+
+    let event = buffer[..separator_index].to_string();
+    buffer.drain(..separator_index + separator_len);
+    Some(event)
+}
+
+fn parse_openai_sse_event(event: &str) -> Result<Vec<InferStreamChunk>, LlmffError> {
+    let data = event
+        .lines()
+        .filter_map(|line| line.trim_end_matches('\r').strip_prefix("data:"))
+        .map(str::trim_start)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if data.is_empty() {
+        return Ok(Vec::new());
+    }
+    if data == "[DONE]" {
+        return Ok(vec![InferStreamChunk {
+            delta: String::new(),
+            done: true,
+            usage: None,
+        }]);
+    }
+
+    let chunk: ChatCompletionStreamResponse = serde_json::from_str(&data)
+        .map_err(|error| LlmffError::Backend(format!("invalid stream JSON: {error}")))?;
+    let delta = chunk
+        .choices
+        .first()
+        .and_then(|choice| choice.delta.content.as_deref())
+        .unwrap_or_default()
+        .to_string();
+    if delta.is_empty() && chunk.usage.is_none() {
+        return Ok(Vec::new());
+    }
+
+    Ok(vec![InferStreamChunk {
+        delta,
+        done: false,
+        usage: chunk.usage.map(Into::into),
+    }])
 }
 
 #[derive(Debug, Deserialize)]
@@ -360,6 +522,7 @@ fn ollama_usage(response: &OllamaChatResponse) -> Option<UsageMetadata> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
 
     #[test]
     fn builtin_backend_families_describe_capabilities() {
@@ -377,6 +540,117 @@ mod tests {
         assert_eq!(openai.registration_flag, "--backend <alias>=<base-url>");
         assert!(openai.requires_api_key);
         assert!(openai.capabilities.contains(&"usage-metadata"));
+        assert!(openai.capabilities.contains(&"streaming-inference"));
+    }
+
+    #[tokio::test]
+    async fn mock_backend_streams_configured_response_as_single_delta() {
+        let backend = MockBackend::new("mock:json", r#"{"answer":"ok"}"#);
+        let request = InferRequest {
+            model: "mock:json".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: "hello".to_string(),
+            }],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            seed: None,
+            response_format: None,
+            stop: vec![],
+        };
+
+        let chunks = backend
+            .stream(request)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("mock stream should succeed");
+
+        assert_eq!(
+            chunks,
+            vec![InferStreamChunk {
+                delta: r#"{"answer":"ok"}"#.to_string(),
+                done: true,
+                usage: None,
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn openai_compatible_backend_streams_chat_completion_deltas() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(
+                    r#"data: {"choices":[{"delta":{"content":"hel"}}]}
+
+data: {"choices":[{"delta":{"content":"lo"}}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}
+
+data: [DONE]
+
+"#,
+                ),
+            )
+            .mount(&server)
+            .await;
+
+        let backend = OpenAiCompatibleBackend::new(server.uri(), "");
+        let request = InferRequest {
+            model: "test-model".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: "Say hello".to_string(),
+            }],
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            seed: None,
+            response_format: None,
+            stop: vec![],
+        };
+
+        let chunks = backend
+            .stream(request)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("OpenAI-compatible stream should succeed");
+
+        assert_eq!(
+            chunks,
+            vec![
+                InferStreamChunk {
+                    delta: "hel".to_string(),
+                    done: false,
+                    usage: None,
+                },
+                InferStreamChunk {
+                    delta: "lo".to_string(),
+                    done: false,
+                    usage: Some(UsageMetadata {
+                        prompt_tokens: Some(3),
+                        completion_tokens: Some(2),
+                        total_tokens: Some(5),
+                    }),
+                },
+                InferStreamChunk {
+                    delta: String::new(),
+                    done: true,
+                    usage: None,
+                },
+            ]
+        );
+
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = requests[0].body_json().unwrap();
+        assert_eq!(body["stream"], true);
     }
 
     #[test]

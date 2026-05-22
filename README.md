@@ -479,7 +479,7 @@ graph:
       - "</answer>"
 ```
 
-OpenAI-compatible backends receive `temperature`, `top_p`, `max_tokens`, `seed`, `response_format`, and `stop`. Ollama receives the same controls under `options` except `response_format: json`, which maps to the top-level Ollama `format: "json"` hint. Inline graphs accept `seed=12345`, `response_format=json`, and stop sequences with semicolon separators, such as `stop=END;DONE`.
+OpenAI-compatible backends receive `temperature`, `top_p`, `max_tokens`, `seed`, `response_format`, and `stop`. They also expose a core streaming contract for server-sent chat completion deltas; the CLI still treats model outputs as complete stage values. Ollama receives the same controls under `options` except `response_format: json`, which maps to the top-level Ollama `format: "json"` hint. Inline graphs accept `seed=12345`, `response_format=json`, and stop sequences with semicolon separators, such as `stop=END;DONE`.
 
 Mock backends remain available for deterministic local runs and tests:
 
@@ -491,5 +491,6 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 ## Limitations
 
 - Schema values are inline JSON strings in the current manifest format.
+- `llmff run` streams lifecycle events, but not model token deltas or streaming stage payloads yet.
 - Remote embedding models, external vector indexes, multimodal values, and plugin loading are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.
