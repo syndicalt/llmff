@@ -13,6 +13,9 @@ pub struct TraceEvent {
     pub stage_id: Option<String>,
     pub op: Option<String>,
     pub status: Option<String>,
+    pub timestamp_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u128>,
 }
 
 pub struct TraceWriter {

@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::backend::{Backend, InferRequest};
 use crate::error::LlmffError;
@@ -83,10 +84,13 @@ impl Engine {
                 stage_id: None,
                 op: None,
                 status: None,
+                timestamp_ms: timestamp_ms(),
+                duration_ms: None,
             },
         )?;
 
         for stage in graph.stages() {
+            let stage_started = Instant::now();
             write_trace(
                 &mut trace,
                 TraceEvent {
@@ -95,6 +99,8 @@ impl Engine {
                     stage_id: Some(stage.id.clone()),
                     op: Some(stage.op.clone()),
                     status: None,
+                    timestamp_ms: timestamp_ms(),
+                    duration_ms: None,
                 },
             )?;
             let status = self.execute_stage(&manifest, stage, &statuses, cwd).await?;
@@ -108,6 +114,8 @@ impl Engine {
                     stage_id: Some(stage.id.clone()),
                     op: Some(stage.op.clone()),
                     status: Some(status_name),
+                    timestamp_ms: timestamp_ms(),
+                    duration_ms: Some(stage_started.elapsed().as_millis()),
                 },
             )?;
         }
@@ -148,6 +156,8 @@ impl Engine {
                 stage_id: None,
                 op: None,
                 status: Some("succeeded".to_string()),
+                timestamp_ms: timestamp_ms(),
+                duration_ms: None,
             },
         )?;
 
@@ -690,6 +700,13 @@ fn write_trace(trace: &mut Option<TraceWriter>, event: TraceEvent) -> Result<(),
     Ok(())
 }
 
+fn timestamp_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after Unix epoch")
+        .as_millis()
+}
+
 fn status_name(status: &StageStatus) -> &'static str {
     match status {
         StageStatus::Success(_) => "success",
@@ -816,6 +833,54 @@ outputs:
     }
 
     #[tokio::test]
+    async fn trace_events_include_timestamps_and_stage_durations() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "hello").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let options = RunOptions {
+            run_id: "trace-test".to_string(),
+            trace_path: Some(trace_path.clone()),
+        };
+
+        Engine::new()
+            .run_manifest_with_options(manifest, dir.path(), options)
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+
+        assert!(events.iter().all(|event| event["timestamp_ms"].is_u64()));
+        let stage_finished = events
+            .iter()
+            .find(|event| event["event"] == "stage_finished")
+            .expect("stage_finished event should exist");
+        assert!(stage_finished["duration_ms"].is_u64());
+    }
+
+    #[tokio::test]
     async fn alias_backend_receives_provider_model_id() {
         let dir = tempfile::tempdir().unwrap();
         let prompt_path = dir.path().join("question.txt");
@@ -857,6 +922,13 @@ outputs:
             std::fs::read_to_string(output_path).unwrap(),
             "hello from alias"
         );
+    }
+
+    fn parse_trace_events(trace: &str) -> Vec<serde_json::Value> {
+        trace
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("trace line should be JSON"))
+            .collect()
     }
 
     #[tokio::test]
