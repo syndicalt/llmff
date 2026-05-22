@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -132,7 +133,7 @@ impl Engine {
                     });
                 }
             };
-            std::fs::write(resolve_path(cwd, &output.path), serialize_value(value)?)?;
+            write_output(cwd, &output.path, &serialize_value(value)?)?;
         }
 
         let report = RunReport {
@@ -202,7 +203,7 @@ impl Engine {
                 stage_id: stage.id.clone(),
                 message: "input requires path".to_string(),
             })?;
-        let text = std::fs::read_to_string(resolve_path(cwd, path))?;
+        let text = read_input(cwd, path)?;
 
         Ok(StageStatus::Success(Value::Text(text)))
     }
@@ -332,6 +333,29 @@ fn resolve_path(cwd: &Path, path: &str) -> PathBuf {
     } else {
         cwd.join(path)
     }
+}
+
+fn read_input(cwd: &Path, path: &str) -> Result<String, LlmffError> {
+    if path == "-" {
+        let mut input = String::new();
+        std::io::stdin().read_to_string(&mut input)?;
+        Ok(input)
+    } else {
+        Ok(std::fs::read_to_string(resolve_path(cwd, path))?)
+    }
+}
+
+fn write_output(cwd: &Path, path: &str, value: &str) -> Result<(), LlmffError> {
+    if path == "-" {
+        let mut stdout = std::io::stdout().lock();
+        stdout.write_all(value.as_bytes())?;
+        stdout.write_all(b"\n")?;
+        stdout.flush()?;
+    } else {
+        std::fs::write(resolve_path(cwd, path), value)?;
+    }
+
+    Ok(())
 }
 
 fn write_trace(trace: &mut Option<TraceWriter>, event: TraceEvent) -> Result<(), LlmffError> {
