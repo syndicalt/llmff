@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::error::LlmffError;
@@ -26,6 +26,45 @@ pub struct UsageMetadata {
     pub prompt_tokens: Option<u64>,
     pub completion_tokens: Option<u64>,
     pub total_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BackendFamily {
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub registration_flag: &'static str,
+    pub requires_api_key: bool,
+    pub model_aliases: &'static [&'static str],
+    pub capabilities: &'static [&'static str],
+}
+
+pub fn builtin_backend_families() -> &'static [BackendFamily] {
+    &[
+        BackendFamily {
+            name: "mock",
+            kind: "deterministic",
+            registration_flag: "built-in",
+            requires_api_key: false,
+            model_aliases: &["mock:bad", "mock:good", "mock:json"],
+            capabilities: &["deterministic", "chat-messages"],
+        },
+        BackendFamily {
+            name: "ollama",
+            kind: "local-chat",
+            registration_flag: "--ollama <alias>=<base-url>",
+            requires_api_key: false,
+            model_aliases: &[],
+            capabilities: &["chat-messages", "sampling", "usage-metadata"],
+        },
+        BackendFamily {
+            name: "openai-compatible",
+            kind: "remote-chat",
+            registration_flag: "--backend <alias>=<base-url>",
+            requires_api_key: true,
+            model_aliases: &[],
+            capabilities: &["chat-messages", "sampling", "usage-metadata"],
+        },
+    ]
 }
 
 #[async_trait]
@@ -277,6 +316,24 @@ fn ollama_usage(response: &OllamaChatResponse) -> Option<UsageMetadata> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_backend_families_describe_capabilities() {
+        let families = builtin_backend_families();
+
+        assert_eq!(families[0].name, "mock");
+        assert!(families[0].model_aliases.contains(&"mock:good"));
+        assert!(families[0].capabilities.contains(&"deterministic"));
+
+        let openai = families
+            .iter()
+            .find(|family| family.name == "openai-compatible")
+            .expect("OpenAI-compatible backend family should be listed");
+        assert_eq!(openai.kind, "remote-chat");
+        assert_eq!(openai.registration_flag, "--backend <alias>=<base-url>");
+        assert!(openai.requires_api_key);
+        assert!(openai.capabilities.contains(&"usage-metadata"));
+    }
 
     #[tokio::test]
     async fn mock_backend_returns_configured_response() {
