@@ -28,7 +28,7 @@ jobs:
             deb_arch: ""
             arch_pkgbuild: false
             macos_pkg: true
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             binary: target/release/llmff
             deb_arch: ""
