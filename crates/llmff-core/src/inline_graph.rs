@@ -164,6 +164,7 @@ fn apply_inline_params(stage: &mut StageSpec, parsed: ParsedStage) -> Result<(),
                     inline_graph_error(format!("invalid top_k `{value}`: {error}"))
                 })?)
             }
+            "strategy" => stage.strategy = Some(value),
             other => {
                 if let Some(name) = other.strip_prefix("header:") {
                     if name.is_empty() {
@@ -240,6 +241,7 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         headers: BTreeMap::new(),
         documents: Vec::new(),
         top_k: None,
+        strategy: None,
         key: None,
     }
 }
@@ -316,6 +318,18 @@ mod tests {
             vec!["docs/rust.txt", "docs/python.txt"]
         );
         assert_eq!(manifest.graph[1].top_k, Some(1));
+    }
+
+    #[test]
+    fn parses_retrieve_strategy_parameter() {
+        let manifest = Manifest::from_inline_graph(
+            "load | retrieve(documents=docs/rust.txt,strategy=embedding) | write(-)",
+            Some("question.txt".to_string()),
+        )
+        .expect("inline graph should parse");
+
+        assert_eq!(manifest.graph[1].op, "retrieve");
+        assert_eq!(manifest.graph[1].strategy.as_deref(), Some("embedding"));
     }
 
     #[test]

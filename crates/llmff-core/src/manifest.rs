@@ -62,6 +62,7 @@ pub struct StageSpec {
     #[serde(default)]
     pub documents: Vec<String>,
     pub top_k: Option<usize>,
+    pub strategy: Option<String>,
     pub key: Option<String>,
 }
 
@@ -233,6 +234,7 @@ graph:
       - docs/rust.txt
       - docs/python.txt
     top_k: 1
+    strategy: embedding
 "#;
 
         let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
@@ -240,6 +242,7 @@ graph:
 
         assert_eq!(stage.documents, vec!["docs/rust.txt", "docs/python.txt"]);
         assert_eq!(stage.top_k, Some(1));
+        assert_eq!(stage.strategy.as_deref(), Some("embedding"));
     }
 
     #[test]

@@ -654,6 +654,37 @@ fn inline_graph_run_executes_retrieve_stage() {
 }
 
 #[test]
+fn inline_graph_run_executes_embedding_retrieve_strategy() {
+    let dir = tempfile::tempdir().unwrap();
+    let docs = dir.path().join("docs");
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("matches.json");
+    std::fs::create_dir(&docs).unwrap();
+    std::fs::write(&prompt, "rust").unwrap();
+    std::fs::write(docs.join("trust.txt"), "Trust systems keep state.").unwrap();
+    std::fs::write(docs.join("python.txt"), "Python notebooks handle tables.").unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args([
+            "run",
+            "-i",
+            prompt.to_str().unwrap(),
+            "-g",
+            "load | retrieve(documents=docs/python.txt;docs/trust.txt,top_k=1,strategy=embedding) | write(matches.json)",
+        ])
+        .assert()
+        .success();
+
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap())
+        .expect("retrieve output should be JSON");
+
+    assert_eq!(json["strategy"], "embedding");
+    assert_eq!(json["matches"][0]["path"], "docs/trust.txt");
+    assert!(json["matches"][0]["score"].as_f64().unwrap() > 0.0);
+}
+
+#[test]
 fn inline_graph_run_executes_cache_stage() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");

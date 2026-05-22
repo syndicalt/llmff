@@ -431,6 +431,7 @@ impl Engine {
                         "retrieve top_k must be greater than 0",
                     ));
                 }
+                validate_retrieve_strategy(stage)?;
                 Ok(())
             }
             "cache" => {
@@ -963,6 +964,16 @@ fn validate_sampling_parameters(stage: &StageSpec) -> Result<(), LlmffError> {
     }
 
     Ok(())
+}
+
+fn validate_retrieve_strategy(stage: &StageSpec) -> Result<(), LlmffError> {
+    match stage.strategy.as_deref().unwrap_or("lexical") {
+        "lexical" | "embedding" => Ok(()),
+        strategy => Err(stage_validation_error(
+            stage,
+            format!("retrieve strategy must be lexical or embedding, got `{strategy}`"),
+        )),
+    }
 }
 
 fn validate_when_condition(stage: &StageSpec) -> Result<(), LlmffError> {
@@ -1791,6 +1802,36 @@ graph:
         assert!(error
             .to_string()
             .contains("stage `retrieve_context` failed: retrieve requires documents"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_unknown_retrieve_strategy() {
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: retrieve_context
+    op: retrieve
+    from: load_prompt
+    documents: [docs/rust.txt]
+    strategy: remote
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .validate_manifest(manifest)
+            .expect_err("unknown retrieve strategy should be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("retrieve strategy must be lexical or embedding"));
     }
 
     #[tokio::test]
