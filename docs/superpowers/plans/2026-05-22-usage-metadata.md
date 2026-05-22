@@ -24,7 +24,7 @@
 **Files:**
 - Modify: `crates/llmff-core/src/backend.rs`
 
-- [ ] **Step 1: Write failing OpenAI-compatible usage test**
+- [x] **Step 1: Write failing OpenAI-compatible usage test**
 
 In `openai_compatible_backend_reads_chat_completion_content`, add this `usage` object to the mocked JSON response:
 
@@ -45,7 +45,7 @@ assert_eq!(usage.completion_tokens, Some(8));
 assert_eq!(usage.total_tokens, Some(20));
 ```
 
-- [ ] **Step 2: Run OpenAI-compatible test to verify RED**
+- [x] **Step 2: Run OpenAI-compatible test to verify RED**
 
 Run:
 
@@ -55,7 +55,7 @@ cargo test -p llmff-core backend::tests::openai_compatible_backend_reads_chat_co
 
 Expected: FAIL because `InferResponse` has no `usage`.
 
-- [ ] **Step 3: Implement OpenAI-compatible usage parsing**
+- [x] **Step 3: Implement OpenAI-compatible usage parsing**
 
 Add:
 
@@ -103,7 +103,7 @@ impl From<OpenAiUsage> for UsageMetadata {
 
 Set `InferResponse.usage` in every backend response. Mock backends use `None`.
 
-- [ ] **Step 4: Run OpenAI-compatible test to verify GREEN**
+- [x] **Step 4: Run OpenAI-compatible test to verify GREEN**
 
 Run:
 
@@ -113,7 +113,7 @@ cargo test -p llmff-core backend::tests::openai_compatible_backend_reads_chat_co
 
 Expected: PASS.
 
-- [ ] **Step 5: Write failing Ollama usage test**
+- [x] **Step 5: Write failing Ollama usage test**
 
 In `ollama_backend_reads_chat_message_content`, add these response fields:
 
@@ -131,7 +131,7 @@ assert_eq!(usage.completion_tokens, Some(5));
 assert_eq!(usage.total_tokens, Some(12));
 ```
 
-- [ ] **Step 6: Run Ollama test to verify RED**
+- [x] **Step 6: Run Ollama test to verify RED**
 
 Run:
 
@@ -141,7 +141,7 @@ cargo test -p llmff-core backend::tests::ollama_backend_reads_chat_message_conte
 
 Expected: FAIL because Ollama usage is not parsed yet.
 
-- [ ] **Step 7: Implement Ollama usage parsing**
+- [x] **Step 7: Implement Ollama usage parsing**
 
 Extend `OllamaChatResponse`:
 
@@ -170,7 +170,7 @@ fn ollama_usage(response: &OllamaChatResponse) -> Option<UsageMetadata> {
 
 Use it in `OllamaBackend::infer`.
 
-- [ ] **Step 8: Run backend tests to verify GREEN and commit**
+- [x] **Step 8: Run backend tests to verify GREEN and commit**
 
 Run:
 
