@@ -79,6 +79,13 @@ llmff run -i question.txt \
   -g 'load | retrieve(documents=docs/python.txt;docs/rust.txt,top_k=1) | write(matches.json)'
 ```
 
+Cache an inline pipeline value across runs:
+
+```bash
+llmff run -i question.txt \
+  -g 'load | cache(path=.llmff/cache,key=prompt-v1) | write(cached-question.txt)'
+```
+
 Inline `load` reads stdin when `-i/--input` is omitted:
 
 ```bash
