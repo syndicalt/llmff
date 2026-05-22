@@ -526,6 +526,44 @@ graph:
 }
 
 #[test]
+fn inspect_rejects_invalid_sampling_parameters() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+    max_tokens: 0
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["inspect", manifest.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "max_tokens must be greater than 0",
+        ));
+}
+
+#[test]
 fn trace_command_summarizes_trace_jsonl() {
     let dir = tempfile::tempdir().unwrap();
     let trace = dir.path().join("trace.jsonl");

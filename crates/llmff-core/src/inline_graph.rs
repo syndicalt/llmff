@@ -160,6 +160,8 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         path: None,
         model: None,
         temperature: None,
+        top_p: None,
+        max_tokens: None,
         schema: None,
         schema_path: None,
         when: None,

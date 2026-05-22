@@ -26,7 +26,7 @@
 - Modify: `crates/llmff-core/src/engine.rs`
 - Modify: `crates/llmff-cli/tests/cli_run.rs`
 
-- [ ] **Step 1: Write failing manifest parsing test**
+- [x] **Step 1: Write failing manifest parsing test**
 
 Add this test to `crates/llmff-core/src/manifest.rs`:
 
@@ -54,7 +54,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run parsing test to verify RED**
+- [x] **Step 2: Run parsing test to verify RED**
 
 Run:
 
@@ -64,7 +64,7 @@ cargo test -p llmff-core manifest::tests::parses_sampling_fields
 
 Expected: FAIL because `StageSpec` does not have `top_p` or `max_tokens`.
 
-- [ ] **Step 3: Implement manifest fields**
+- [x] **Step 3: Implement manifest fields**
 
 Add fields to `StageSpec` in `crates/llmff-core/src/manifest.rs`:
 
@@ -75,7 +75,7 @@ pub max_tokens: Option<u32>,
 
 Add the same fields with `None` defaults in `empty_stage` in `crates/llmff-core/src/inline_graph.rs`.
 
-- [ ] **Step 4: Run parsing test to verify GREEN**
+- [x] **Step 4: Run parsing test to verify GREEN**
 
 Run:
 
@@ -85,7 +85,7 @@ cargo test -p llmff-core manifest::tests::parses_sampling_fields
 
 Expected: PASS.
 
-- [ ] **Step 5: Write failing validation tests**
+- [x] **Step 5: Write failing validation tests**
 
 Add this core test to `crates/llmff-core/src/engine.rs`:
 
@@ -162,7 +162,7 @@ graph:
 }
 ```
 
-- [ ] **Step 6: Run validation tests to verify RED**
+- [x] **Step 6: Run validation tests to verify RED**
 
 Run:
 
@@ -173,7 +173,7 @@ cargo test -p llmff --test cli_run inspect_rejects_invalid_sampling_parameters
 
 Expected: FAIL because invalid sampling parameters are accepted.
 
-- [ ] **Step 7: Implement stage validation**
+- [x] **Step 7: Implement stage validation**
 
 In `Engine::validate_stage`, call this helper before matching operations:
 
@@ -202,7 +202,7 @@ fn validate_sampling_parameters(stage: &StageSpec) -> Result<(), LlmffError> {
 }
 ```
 
-- [ ] **Step 8: Run validation tests to verify GREEN and commit**
+- [x] **Step 8: Run validation tests to verify GREEN and commit**
 
 Run:
 
