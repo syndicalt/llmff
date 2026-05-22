@@ -51,6 +51,8 @@ require_text "$doc" 'scripts/smoke-archive.sh'
 require_text "$doc" 'scripts/smoke-deb.sh'
 require_text "$doc" 'scripts/smoke-macos-pkg.sh'
 require_text "$doc" 'scripts/release-preflight.sh'
+require_text "$doc" 'scripts/check-release-signing-gates.sh --platform windows'
+require_text "$doc" 'scripts/check-release-signing-gates.sh --platform macos'
 
 require_text 'README.md' 'docs/platform-support.md'
 require_text 'README.md' 'scripts/release-preflight.sh v0.1.1'

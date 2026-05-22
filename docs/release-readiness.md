@@ -21,6 +21,7 @@ At this point it is reasonable to say: `llmff` is installable from GitHub for ea
 - [x] The smoke install gate passes against the release source, not only the local checkout.
 - [x] At least one end-to-end example can be run by a new user without editing repository files.
 - [x] Release tag workflows publish packaged artifacts as GitHub release assets.
+- [x] Release tag workflows enforce signing and notarization release gates before macOS or Windows installer publication.
 
 Do not describe `llmff` as broadly released until every item in this section is checked.
 
@@ -32,6 +33,11 @@ scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.1
 ```
 
 For release tags after this packaging slice, CI creates the GitHub Release when the tag does not already have one, then uploads binary archives, checksums, Ubuntu/Debian packages, and Arch packaging metadata to the matching GitHub Release assets. Manual dispatch keeps those outputs as Actions artifacts only.
+
+Release-tag CI also runs signing and notarization release gates before native
+macOS or Windows installer publication. The gates fail when required Apple or
+Authenticode credentials are absent; manual workflow dispatch remains available
+for unsigned artifact testing.
 
 Current packaged artifact targets and installer assumptions are documented in
 [`docs/platform-support.md`](platform-support.md).

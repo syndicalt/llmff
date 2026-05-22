@@ -53,6 +53,25 @@ jobs:
         shell: bash
         run: dotnet tool restore
 
+      - name: Validate Windows signing gate
+        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.windows_msi }}
+        shell: bash
+        env:
+          WINDOWS_CODESIGN_CERT_P12_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_P12_BASE64 }}
+          WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
+          WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ secrets.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+        run: scripts/check-release-signing-gates.sh --platform windows
+
+      - name: Validate macOS signing and notarization gate
+        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.macos_pkg }}
+        shell: bash
+        env:
+          APPLE_DEVELOPER_ID_INSTALLER: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: scripts/check-release-signing-gates.sh --platform macos
+
       - name: Build release binary
         run: cargo build --locked --release -p llmff
 
