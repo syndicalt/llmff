@@ -44,6 +44,12 @@ Smoke test a generated release archive without installing:
 scripts/smoke-archive.sh --archive dist/llmff-0.1.1-x86_64-unknown-linux-gnu.tar.gz
 ```
 
+Run the release metadata preflight before creating or pushing a release tag:
+
+```bash
+scripts/release-preflight.sh v0.1.1
+```
+
 Generate and validate Windows MSI packaging metadata:
 
 ```bash

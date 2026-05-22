@@ -43,6 +43,12 @@ and Windows MSI payloads. The project should not treat native installers as
 broadly recommended until signing and notarization are in place where the
 platform expects them.
 
+Before creating or pushing a release tag, run the metadata preflight:
+
+```bash
+scripts/release-preflight.sh v0.1.1
+```
+
 ## Source-Build Fallback
 
 Users with a Rust toolchain can install from a tagged release:

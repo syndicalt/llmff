@@ -50,6 +50,9 @@ require_text "$doc" 'cargo install --git https://github.com/syndicalt/llmff --ta
 require_text "$doc" 'scripts/smoke-archive.sh'
 require_text "$doc" 'scripts/smoke-deb.sh'
 require_text "$doc" 'scripts/smoke-macos-pkg.sh'
+require_text "$doc" 'scripts/release-preflight.sh'
 
 require_text 'README.md' 'docs/platform-support.md'
+require_text 'README.md' 'scripts/release-preflight.sh v0.1.1'
 require_text 'docs/release-readiness.md' 'docs/platform-support.md'
+require_text 'docs/release-readiness.md' 'scripts/release-preflight.sh v0.1.1'
