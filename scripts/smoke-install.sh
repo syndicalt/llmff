@@ -5,17 +5,18 @@ usage() {
   cat <<'USAGE'
 usage:
   scripts/smoke-install.sh --path <repo-path>
-  scripts/smoke-install.sh --git <repo-url>
+  scripts/smoke-install.sh --git <repo-url> [--tag <tag>]
 USAGE
 }
 
-if [ "$#" -ne 2 ]; then
+if [ "$#" -ne 2 ] && [ "$#" -ne 4 ]; then
   usage >&2
   exit 2
 fi
 
 mode="$1"
 source="$2"
+tag=""
 case "$mode" in
   --path | --git) ;;
   *)
@@ -23,6 +24,14 @@ case "$mode" in
     exit 2
     ;;
 esac
+
+if [ "$#" -eq 4 ]; then
+  if [ "$mode" != "--git" ] || [ "$3" != "--tag" ] || [ -z "$4" ]; then
+    usage >&2
+    exit 2
+  fi
+  tag="$4"
+fi
 
 tmp="$(mktemp -d)"
 cleanup() {
@@ -40,7 +49,11 @@ if [ "$mode" = "--path" ]; then
   cargo install --path "$repo/crates/llmff-cli" --locked
   example="$repo/examples/json-repair.yaml"
 else
-  cargo install --git "$source" llmff --locked
+  install_args=(--git "$source")
+  if [ -n "$tag" ]; then
+    install_args+=(--tag "$tag")
+  fi
+  cargo install "${install_args[@]}" llmff --locked
   example="$tmp/json-repair.yaml"
   cat > "$example" <<'YAML'
 version: 1

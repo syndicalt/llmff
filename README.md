@@ -10,6 +10,12 @@ Install from GitHub:
 cargo install --git https://github.com/syndicalt/llmff llmff
 ```
 
+Install a tagged release:
+
+```bash
+cargo install --git https://github.com/syndicalt/llmff --tag v0.1.0 llmff
+```
+
 For a local checkout:
 
 ```bash
