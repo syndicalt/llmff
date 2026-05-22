@@ -184,6 +184,8 @@ jobs:
     needs: archive
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    env:
+      RELEASE_REPOSITORY: syndicalt/llmff
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -209,26 +211,37 @@ jobs:
           elif [[ -f release-assets/.SRCINFO ]]; then
             cp release-assets/.SRCINFO "release-assets/llmff-${version}-arch.SRCINFO"
           fi
+          rm -rf release-assets/arch
           test -f release-assets/PKGBUILD
           test -f "release-assets/llmff-${version}-arch.SRCINFO"
+
+      - name: Validate release repository
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REPOSITORY" != "$RELEASE_REPOSITORY" ]]; then
+            printf 'release publication must run from %s, got %s\n' "$RELEASE_REPOSITORY" "$GITHUB_REPOSITORY" >&2
+            exit 1
+          fi
 
       - name: Ensure GitHub Release exists
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+          if gh release view "$GITHUB_REF_NAME" --repo "$RELEASE_REPOSITORY" >/dev/null 2>&1; then
             exit 0
           fi
 
           notes_file="docs/release-notes/${GITHUB_REF_NAME}.md"
           if [[ -f "$notes_file" ]]; then
             gh release create "$GITHUB_REF_NAME" \
+              --repo "$RELEASE_REPOSITORY" \
               --verify-tag \
               --title "$GITHUB_REF_NAME" \
               --notes-file "$notes_file"
           else
             gh release create "$GITHUB_REF_NAME" \
+              --repo "$RELEASE_REPOSITORY" \
               --verify-tag \
               --title "$GITHUB_REF_NAME" \
               --generate-notes
@@ -239,15 +252,38 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          shopt -s globstar nullglob
-          files=()
-          for asset in release-assets/**; do
-            if [[ -f "$asset" && "$(basename "$asset")" != ".SRCINFO" ]]; then
-              files+=("$asset")
+          mapfile -t existing_assets < <(
+            gh release view "$GITHUB_REF_NAME" \
+              --repo "$RELEASE_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name' \
+              | sort
+          )
+
+          missing=()
+          while IFS= read -r asset; do
+            name="$(basename "$asset")"
+            if printf '%s\n' "${existing_assets[@]}" | grep -Fxq -- "$name"; then
+              continue
             fi
-          done
-          if [[ "${#files[@]}" -eq 0 ]]; then
-            printf 'no release assets found\n' >&2
+            missing+=("$asset")
+          done < <(find release-assets -maxdepth 1 -type f ! -name '.SRCINFO' | sort)
+
+          if [[ "${#missing[@]}" -eq 0 ]]; then
+            printf 'release assets already uploaded for %s\n' "$GITHUB_REF_NAME"
+            exit 0
+          fi
+
+          gh release upload "$GITHUB_REF_NAME" "${missing[@]}" --clobber --repo "$RELEASE_REPOSITORY"
+
+          expected_count="$(find release-assets -maxdepth 1 -type f ! -name '.SRCINFO' | wc -l | tr -d ' ')"
+          actual_count="$(
+            gh release view "$GITHUB_REF_NAME" \
+              --repo "$RELEASE_REPOSITORY" \
+              --json assets \
+              --jq '.assets | length'
+          )"
+          if [[ "$actual_count" -lt "$expected_count" ]]; then
+            printf 'release asset upload incomplete: expected at least %s assets, found %s\n' "$expected_count" "$actual_count" >&2
             exit 1
           fi
-          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
