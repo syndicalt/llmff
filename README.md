@@ -328,9 +328,9 @@ graph:
     top_k: 1
 ```
 
-`retrieve` renders its parent value as query text and returns JSON with `query`, `strategy`, and `matches`. The default `strategy: lexical` tokenizes the query and each document, scores documents by matching unique query terms, then sorts by score and path. `strategy: embedding` uses deterministic local character n-gram vectors and cosine similarity so near-overlap text can rank even when whole tokens differ. Document paths are relative to the manifest unless absolute. `top_k` is optional and must be greater than zero when present.
+`retrieve` renders its parent value as query text and returns JSON with `query`, `strategy`, and `matches`. The default `strategy: lexical` tokenizes the query and each document, scores documents by matching unique query terms, then sorts by score and path. `strategy: embedding` uses deterministic local character n-gram vectors and cosine similarity so near-overlap text can rank even when whole tokens differ. `strategy: command` runs a stdin/stdout command provider for remote embedding services or external vector indexes. The command receives JSON with `query`, `documents`, and optional `top_k`, and returns retrieve-shaped JSON. Document paths are relative to the manifest unless absolute. `top_k` is optional and must be greater than zero when present.
 
-`rerank` accepts retrieve-shaped JSON with `query` and `matches`, rescoring each match's `text` with `strategy: lexical` or `strategy: embedding`. It preserves match fields, replaces `score`, writes the selected `strategy`, and applies optional `top_k` after sorting.
+`rerank` accepts retrieve-shaped JSON with `query` and `matches`, rescoring each match's `text` with `strategy: lexical` or `strategy: embedding`. `strategy: command` runs a stdin/stdout command provider for learned reranker models. The command receives the retrieve-shaped JSON plus optional `top_k`, and returns retrieve-shaped JSON. Local reranking preserves match fields, replaces `score`, writes the selected `strategy`, and applies optional `top_k` after sorting.
 
 Cache stages persist and reuse successful parent values across runs:
 
@@ -527,5 +527,5 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 - Schema values are inline JSON strings in the current manifest format.
 - `llmff run --stream-stage <stage-id>` streams one selected stage to stdout. `infer` stages stream token deltas when the backend supports them; other stages stream their serialized payload after the stage finishes.
 - Plugin manifests can be discovered and listed, and plugin stages, backend commands, tool transports, and samplers can run through stdin/stdout plugin entrypoints.
-- Remote embedding models, external vector indexes, and multimodal values are not implemented yet.
+- Persistent vector indexes and multimodal values are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

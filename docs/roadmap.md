@@ -126,12 +126,14 @@ Embedding retrieval implementation slice:
 
 - `retrieve` supports `strategy: embedding` in manifests and `strategy=embedding` in inline graphs.
 - The first embedding strategy is deterministic and local, using character n-gram vectors and cosine similarity for offline retrieval without a vector database.
+- `retrieve` supports `strategy: command` in manifests, sending query, documents, and optional `top_k` to stdin/stdout command providers for remote embedding services or external vector indexes.
 
 Rerank implementation slice:
 
 - `rerank` accepts retrieve-shaped JSON and rescores candidates with `strategy: lexical` or `strategy: embedding`.
 - The first reranker is deterministic and local, preserves candidate metadata, replaces scores, and applies optional `top_k` after sorting.
-- Remote embedding providers, persistent vector indexes, and learned reranker models remain future work.
+- `rerank` supports `strategy: command` in manifests, sending retrieve-shaped JSON and optional `top_k` to stdin/stdout command providers for learned reranker models.
+- Persistent vector indexes remain future work.
 
 Plugin discovery implementation slice:
 
@@ -145,5 +147,4 @@ Plugin discovery implementation slice:
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
 - Richer backend adapters and provider capability metadata.
-- Remote embedding-backed retrieval and learned reranking.
 - More complete model/runtime abstraction once the pipeline runner is stable.

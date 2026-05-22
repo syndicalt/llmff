@@ -1022,6 +1022,190 @@ graph:
 }
 
 #[test]
+fn run_executes_command_retrieve_strategy() {
+    let dir = tempfile::tempdir().unwrap();
+    let docs = dir.path().join("docs");
+    let bin = dir.path().join("bin");
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("matches.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::create_dir(&docs).unwrap();
+    std::fs::create_dir(&bin).unwrap();
+    std::fs::write(&prompt, "rust graph").unwrap();
+    std::fs::write(
+        docs.join("rust.txt"),
+        "Rust builds reliable graph pipelines.",
+    )
+    .unwrap();
+    let command = bin.join("retrieve");
+    std::fs::write(
+        &command,
+        r#"#!/bin/sh
+request=$(cat)
+case "$request" in
+  *'"query":"rust graph"'*)
+    case "$request" in
+      *'"path":"docs/rust.txt"'*)
+        printf '{"query":"rust graph","strategy":"command","matches":[{"path":"remote://rust","score":0.99,"text":"remote result"}]}'
+        ;;
+      *)
+        printf '%s\n' "$request" >&2
+        exit 8
+        ;;
+    esac
+    ;;
+  *)
+    printf '%s\n' "$request" >&2
+    exit 8
+    ;;
+esac
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&command).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+    }
+    std::fs::set_permissions(&command, permissions).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: retrieve_context
+    op: retrieve
+    from: load_prompt
+    strategy: command
+    command: [{}]
+    documents:
+      - docs/rust.txt
+    top_k: 1
+outputs:
+  final:
+    from: retrieve_context
+    path: {}
+"#,
+            prompt.display(),
+            command.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap())
+        .expect("command retrieve output should be JSON");
+    assert_eq!(json["strategy"], "command");
+    assert_eq!(json["matches"][0]["path"], "remote://rust");
+    assert_eq!(json["matches"][0]["score"], 0.99);
+}
+
+#[test]
+fn run_executes_command_rerank_strategy() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    let input = dir.path().join("retrieved.json");
+    let output = dir.path().join("reranked.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::create_dir(&bin).unwrap();
+    std::fs::write(
+        &input,
+        r#"
+{
+  "query": "rust graph",
+  "strategy": "lexical",
+  "matches": [
+    {"path": "docs/python.txt", "score": 10, "text": "Python notebooks"},
+    {"path": "docs/rust.txt", "score": 1, "text": "Rust graph pipelines"}
+  ]
+}
+"#,
+    )
+    .unwrap();
+    let command = bin.join("rerank");
+    std::fs::write(
+        &command,
+        r#"#!/bin/sh
+request=$(cat)
+case "$request" in
+  *'"query":"rust graph"'*'"top_k":1'*)
+    printf '{"query":"rust graph","strategy":"command","matches":[{"path":"docs/rust.txt","score":0.98,"text":"Rust graph pipelines"}]}'
+    ;;
+  *)
+    printf '%s\n' "$request" >&2
+    exit 9
+    ;;
+esac
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&command).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+    }
+    std::fs::set_permissions(&command, permissions).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  retrieved:
+    path: {}
+    format: json
+graph:
+  - id: load_retrieved
+    op: load
+    input: retrieved
+  - id: rerank_context
+    op: rerank
+    from: load_retrieved
+    strategy: command
+    command: [{}]
+    top_k: 1
+outputs:
+  final:
+    from: rerank_context
+    path: {}
+"#,
+            input.display(),
+            command.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let json: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap())
+        .expect("command rerank output should be JSON");
+    assert_eq!(json["strategy"], "command");
+    assert_eq!(json["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(json["matches"][0]["path"], "docs/rust.txt");
+    assert_eq!(json["matches"][0]["score"], 0.98);
+}
+
+#[test]
 fn inline_graph_run_executes_cache_stage() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");
