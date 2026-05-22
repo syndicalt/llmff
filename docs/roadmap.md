@@ -52,6 +52,11 @@ macOS PKG implementation slice:
 - `.github/workflows/release-artifacts.yml` builds and checksums unsigned `.pkg` installers for Apple Silicon and Intel macOS release-artifact jobs.
 - Signing and notarization remain release gates before broad macOS installer recommendation.
 
+macOS PKG smoke implementation slice:
+
+- `scripts/smoke-macos-pkg.sh` expands a built `.pkg` on Darwin hosts and verifies the packaged `llmff` binary with `--version`, `stages list`, `inspect`, and a deterministic mock-backed `run`.
+- `.github/workflows/release-artifacts.yml` runs the macOS package smoke gate for Apple Silicon and Intel macOS release-artifact jobs.
+
 Second implementation slice:
 
 - `scripts/package-deb.sh` creates an Ubuntu/Debian `.deb` package and adjacent SHA-256 checksum from an already-built Linux `llmff` binary.

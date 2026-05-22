@@ -53,6 +53,12 @@ Generate and validate macOS installer payload metadata:
 scripts/package-macos-pkg.sh --binary target/release/llmff --version 0.1.1 --target aarch64-apple-darwin --out-dir dist --emit-payload-only
 ```
 
+Smoke test a generated macOS installer payload without installing:
+
+```bash
+scripts/smoke-macos-pkg.sh --payload-root dist/llmff-0.1.1-aarch64-apple-darwin.pkgroot
+```
+
 Smoke test a generated Debian package without root:
 
 ```bash
