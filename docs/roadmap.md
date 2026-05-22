@@ -61,7 +61,7 @@ macOS PKG implementation slice:
 
 - `scripts/package-macos-pkg.sh` builds an unsigned macOS Installer `.pkg` with `pkgbuild`, staging `llmff` into `/usr/local/bin`.
 - `.github/workflows/release-artifacts.yml` builds and checksums unsigned `.pkg` installers for Apple Silicon and Intel macOS release-artifact jobs.
-- Signing and notarization remain release gates before broad macOS installer recommendation.
+- Manual workflow dispatch keeps macOS `.pkg` artifacts unsigned for packaging tests; tag-triggered release jobs sign and notarize them in the later macOS signing slice.
 
 macOS PKG smoke implementation slice:
 
