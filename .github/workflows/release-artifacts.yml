@@ -123,6 +123,37 @@ jobs:
           fi
           scripts/smoke-windows-msi.sh --msi "dist/llmff-${version}-${{ matrix.target }}.msi"
 
+      - name: Sign Windows MSI installer
+        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.windows_msi }}
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_CERT_P12_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_P12_BASE64 }}
+          WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
+          WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ secrets.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+        run: |
+          if ($env:GITHUB_REF_NAME -like 'v*') {
+            $version = $env:GITHUB_REF_NAME.Substring(1)
+          } else {
+            $version = (cargo pkgid -p llmff) -replace '.*@', ''
+          }
+          $msi = "dist/llmff-$version-${{ matrix.target }}.msi"
+          scripts/sign-windows-msi.ps1 `
+            -Msi $msi `
+            -CertificateBase64 $env:WINDOWS_CODESIGN_CERT_P12_BASE64 `
+            -CertificatePassword $env:WINDOWS_CODESIGN_CERT_PASSWORD `
+            -TimestampUrl $env:WINDOWS_CODESIGN_TIMESTAMP_URL
+          Get-FileHash -Algorithm SHA256 $msi |
+            ForEach-Object { "$($_.Hash.ToLowerInvariant())  $(Split-Path -Leaf $msi)" } |
+            Set-Content -NoNewline "dist/llmff-$version-${{ matrix.target }}.msi.sha256"
+
+      - name: Smoke signed Windows MSI installer
+        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.windows_msi }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          (cd dist && sha256sum -c "llmff-${version}-${{ matrix.target }}.msi.sha256")
+          scripts/smoke-windows-msi.sh --msi "dist/llmff-${version}-${{ matrix.target }}.msi"
+
       - name: Package macOS installer
         if: ${{ matrix.macos_pkg }}
         shell: bash
