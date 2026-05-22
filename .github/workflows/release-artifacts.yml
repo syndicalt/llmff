@@ -20,15 +20,19 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary: target/release/llmff
+            deb_arch: amd64
           - os: macos-14
             target: aarch64-apple-darwin
             binary: target/release/llmff
+            deb_arch: ""
           - os: macos-13
             target: x86_64-apple-darwin
             binary: target/release/llmff
+            deb_arch: ""
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: target/release/llmff.exe
+            deb_arch: ""
 
     steps:
       - name: Checkout
@@ -60,6 +64,24 @@ jobs:
             --version "$version" \
             --target "${{ matrix.target }}" \
             --out-dir dist
+
+      - name: Package Debian installer
+        if: ${{ matrix.deb_arch != '' }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(cargo pkgid -p llmff | sed 's/.*@//')"
+          fi
+          scripts/package-deb.sh \
+            --binary "${{ matrix.binary }}" \
+            --version "$version" \
+            --arch "${{ matrix.deb_arch }}" \
+            --out-dir dist
+          dpkg-deb -f "dist/llmff_${version}_${{ matrix.deb_arch }}.deb" Package Version Architecture
+          dpkg-deb -c "dist/llmff_${version}_${{ matrix.deb_arch }}.deb" | grep '/usr/bin/llmff$'
+          (cd dist && sha256sum -c "llmff_${version}_${{ matrix.deb_arch }}.deb.sha256")
 
       - name: Upload archive artifacts
         uses: actions/upload-artifact@v4
