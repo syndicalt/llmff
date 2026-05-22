@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::backend::{Backend, InferRequest};
 use crate::error::LlmffError;
@@ -83,10 +84,20 @@ impl Engine {
                 stage_id: None,
                 op: None,
                 status: None,
+                timestamp_ms: timestamp_ms(),
+                duration_ms: None,
+                model: None,
+                backend: None,
+                provider_model: None,
+                validation_errors: None,
+                tool_kind: None,
+                tool_target: None,
+                output_path: None,
             },
         )?;
 
         for stage in graph.stages() {
+            let stage_started = Instant::now();
             write_trace(
                 &mut trace,
                 TraceEvent {
@@ -95,10 +106,20 @@ impl Engine {
                     stage_id: Some(stage.id.clone()),
                     op: Some(stage.op.clone()),
                     status: None,
+                    timestamp_ms: timestamp_ms(),
+                    duration_ms: None,
+                    model: None,
+                    backend: None,
+                    provider_model: None,
+                    validation_errors: None,
+                    tool_kind: None,
+                    tool_target: None,
+                    output_path: None,
                 },
             )?;
             let status = self.execute_stage(&manifest, stage, &statuses, cwd).await?;
             let status_name = status_name(&status).to_string();
+            let metadata = self.trace_metadata(stage, &status);
             statuses.insert(stage.id.clone(), status);
             write_trace(
                 &mut trace,
@@ -108,6 +129,15 @@ impl Engine {
                     stage_id: Some(stage.id.clone()),
                     op: Some(stage.op.clone()),
                     status: Some(status_name),
+                    timestamp_ms: timestamp_ms(),
+                    duration_ms: Some(stage_started.elapsed().as_millis()),
+                    model: metadata.model,
+                    backend: metadata.backend,
+                    provider_model: metadata.provider_model,
+                    validation_errors: metadata.validation_errors,
+                    tool_kind: metadata.tool_kind,
+                    tool_target: metadata.tool_target,
+                    output_path: metadata.output_path,
                 },
             )?;
         }
@@ -148,6 +178,15 @@ impl Engine {
                 stage_id: None,
                 op: None,
                 status: Some("succeeded".to_string()),
+                timestamp_ms: timestamp_ms(),
+                duration_ms: None,
+                model: None,
+                backend: None,
+                provider_model: None,
+                validation_errors: None,
+                tool_kind: None,
+                tool_target: None,
+                output_path: None,
             },
         )?;
 
@@ -393,6 +432,75 @@ impl Engine {
             "no backend configured for `{model}`"
         )))
     }
+
+    fn trace_metadata(&self, stage: &StageSpec, status: &StageStatus) -> TraceMetadata {
+        let mut metadata = TraceMetadata::default();
+
+        if matches!(stage.op.as_str(), "infer" | "repair") {
+            if let Some(model) = &stage.model {
+                metadata.model = Some(model.clone());
+                if let Some(resolved) = self.resolve_backend_metadata(model) {
+                    metadata.backend = Some(resolved.backend_alias);
+                    metadata.provider_model = Some(resolved.provider_model);
+                }
+            }
+        }
+
+        if let StageStatus::Invalid { errors, .. } = status {
+            metadata.validation_errors = Some(errors.clone());
+        }
+
+        if stage.op == "tool" {
+            if let Some(command) = &stage.command {
+                if let Some(program) = command.first() {
+                    metadata.tool_kind = Some("command".to_string());
+                    metadata.tool_target = Some(program.clone());
+                }
+            } else if let Some(url) = &stage.url {
+                metadata.tool_kind = Some("http".to_string());
+                metadata.tool_target = Some(url.clone());
+            }
+        }
+
+        if stage.op == "write" {
+            metadata.output_path = stage.path.clone();
+        }
+
+        metadata
+    }
+
+    fn resolve_backend_metadata(&self, model: &str) -> Option<ResolvedBackendMetadata> {
+        if self.backends.contains_key(model) {
+            return Some(ResolvedBackendMetadata {
+                backend_alias: model.to_string(),
+                provider_model: model.to_string(),
+            });
+        }
+
+        let (alias, provider_model) = model.split_once(':')?;
+        self.backends
+            .contains_key(alias)
+            .then(|| ResolvedBackendMetadata {
+                backend_alias: alias.to_string(),
+                provider_model: provider_model.to_string(),
+            })
+    }
+}
+
+#[derive(Default)]
+struct TraceMetadata {
+    model: Option<String>,
+    backend: Option<String>,
+    provider_model: Option<String>,
+    validation_errors: Option<Vec<String>>,
+    tool_kind: Option<String>,
+    tool_target: Option<String>,
+    output_path: Option<String>,
+}
+
+struct ResolvedBackendMetadata {
+    backend_alias: String,
+    provider_model: String,
 }
 
 fn execute_command_tool(
@@ -690,6 +798,13 @@ fn write_trace(trace: &mut Option<TraceWriter>, event: TraceEvent) -> Result<(),
     Ok(())
 }
 
+fn timestamp_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after Unix epoch")
+        .as_millis()
+}
+
 fn status_name(status: &StageStatus) -> &'static str {
     match status {
         StageStatus::Success(_) => "success",
@@ -816,6 +931,228 @@ outputs:
     }
 
     #[tokio::test]
+    async fn trace_events_include_timestamps_and_stage_durations() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "hello").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let options = RunOptions {
+            run_id: "trace-test".to_string(),
+            trace_path: Some(trace_path.clone()),
+        };
+
+        Engine::new()
+            .run_manifest_with_options(manifest, dir.path(), options)
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+
+        assert!(events.iter().all(|event| event["timestamp_ms"].is_u64()));
+        let stage_finished = events
+            .iter()
+            .find(|event| event["event"] == "stage_finished")
+            .expect("stage_finished event should exist");
+        assert!(stage_finished["duration_ms"].is_u64());
+    }
+
+    #[tokio::test]
+    async fn trace_events_include_infer_model_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "hello").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: openai:gpt-test
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let engine =
+            Engine::new().with_backend("openai", Arc::new(MockBackend::new("gpt-test", "ok")));
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "trace-test".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let draft_finished = trace_stage_finished(&events, "draft");
+
+        assert_eq!(draft_finished["model"], "openai:gpt-test");
+        assert_eq!(draft_finished["backend"], "openai");
+        assert_eq!(draft_finished["provider_model"], "gpt-test");
+    }
+
+    #[tokio::test]
+    async fn trace_events_include_validation_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, r#"{"wrong":true}"#).unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: validate
+    op: validate_json
+    from: load_prompt
+    schema: '{{"type":"object","required":["answer"]}}'
+  - id: save_invalid
+    op: route
+    from: validate
+    on_invalid: validate
+outputs:
+  final:
+    from: save_invalid
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        let error = Engine::new()
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "trace-test".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                },
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("output references invalid stage"));
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let validate_finished = trace_stage_finished(&events, "validate");
+
+        assert!(
+            validate_finished["validation_errors"].as_array().unwrap()[0]
+                .as_str()
+                .unwrap()
+                .contains("answer")
+        );
+    }
+
+    #[tokio::test]
+    async fn trace_events_include_tool_and_write_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let written_path = dir.path().join("written.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "hello").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: call_tool
+    op: tool
+    from: load_prompt
+    command: ["/bin/cat"]
+  - id: write_tool
+    op: write
+    from: call_tool
+    path: {}
+"#,
+            prompt_path.display(),
+            written_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "trace-test".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let tool_finished = trace_stage_finished(&events, "call_tool");
+        let write_finished = trace_stage_finished(&events, "write_tool");
+
+        assert_eq!(tool_finished["tool_kind"], "command");
+        assert_eq!(tool_finished["tool_target"], "/bin/cat");
+        assert_eq!(
+            write_finished["output_path"].as_str(),
+            Some(written_path.to_string_lossy().as_ref())
+        );
+    }
+
+    #[tokio::test]
     async fn alias_backend_receives_provider_model_id() {
         let dir = tempfile::tempdir().unwrap();
         let prompt_path = dir.path().join("question.txt");
@@ -857,6 +1194,23 @@ outputs:
             std::fs::read_to_string(output_path).unwrap(),
             "hello from alias"
         );
+    }
+
+    fn parse_trace_events(trace: &str) -> Vec<serde_json::Value> {
+        trace
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("trace line should be JSON"))
+            .collect()
+    }
+
+    fn trace_stage_finished<'a>(
+        events: &'a [serde_json::Value],
+        stage_id: &str,
+    ) -> &'a serde_json::Value {
+        events
+            .iter()
+            .find(|event| event["event"] == "stage_finished" && event["stage_id"] == stage_id)
+            .expect("stage_finished event should exist")
     }
 
     #[tokio::test]

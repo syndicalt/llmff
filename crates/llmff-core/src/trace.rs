@@ -13,6 +13,23 @@ pub struct TraceEvent {
     pub stage_id: Option<String>,
     pub op: Option<String>,
     pub status: Option<String>,
+    pub timestamp_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u128>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation_errors: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_path: Option<String>,
 }
 
 pub struct TraceWriter {
