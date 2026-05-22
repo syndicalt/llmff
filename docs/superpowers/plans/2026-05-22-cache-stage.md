@@ -208,7 +208,7 @@ git commit -m "feat: execute cache stages"
 
 ## Task 3: Trace, CLI, and Documentation
 
-- [ ] **Step 1: Write failing trace and CLI tests**
+- [x] **Step 1: Write failing trace and CLI tests**
 
 Add a core trace test that runs the same cache manifest twice with `RunOptions.trace_path`, then asserts one `cache_hit:false` and one `cache_hit:true` stage-finished event for `cached`.
 
@@ -216,7 +216,7 @@ Update `stages_list_prints_builtin_stages` to assert `cache`.
 
 Add `run_executes_cache_stage` in `cli_run.rs` with the same two-run behavior as the core test.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run:
 
@@ -227,7 +227,7 @@ cargo test -p llmff --test cli_run stages_list_prints_builtin_stages run_execute
 
 Expected: FAIL until trace metadata and stage listing are wired.
 
-- [ ] **Step 3: Implement CLI/docs**
+- [x] **Step 3: Implement CLI/docs**
 
 Add `cache_hit` and `cache_path` to `TraceEvent` and trace summary output. Add `cache` to `llmff stages list`.
 
@@ -239,7 +239,7 @@ Document:
 - no required env flags
 - remove `cache stages` from limitations
 
-- [ ] **Step 4: Run GREEN and final verification**
+- [x] **Step 4: Run GREEN and final verification**
 
 Run:
 
@@ -251,7 +251,7 @@ cargo test --workspace
 cargo run -p llmff -- inspect examples/json-repair.yaml
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Commit:
 

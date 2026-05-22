@@ -126,6 +126,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             command: StagesCommand::List,
         } => {
             println!("load");
+            println!("cache");
             println!("system");
             println!("template");
             println!("retrieve");
@@ -200,6 +201,10 @@ fn summarize_trace_event(event: &serde_json::Value) -> Option<String> {
             push_string_metadata(&mut parts, event, "tool_kind");
             push_string_metadata(&mut parts, event, "tool_target");
             push_string_metadata(&mut parts, event, "output_path");
+            if let Some(cache_hit) = bool_field(event, "cache_hit") {
+                parts.push(format!("cache_hit={cache_hit}"));
+            }
+            push_string_metadata(&mut parts, event, "cache_path");
 
             Some(parts.join(" "))
         }
@@ -219,6 +224,10 @@ fn string_field<'a>(event: &'a serde_json::Value, name: &str) -> Option<&'a str>
 
 fn integer_field(event: &serde_json::Value, name: &str) -> Option<u64> {
     event.get(name).and_then(serde_json::Value::as_u64)
+}
+
+fn bool_field(event: &serde_json::Value, name: &str) -> Option<bool> {
+    event.get(name).and_then(serde_json::Value::as_bool)
 }
 
 async fn run_pipeline(

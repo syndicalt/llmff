@@ -36,6 +36,8 @@ pub enum SchedulerMode {
 struct StageOutcome {
     status: StageStatus,
     usage: Option<UsageMetadata>,
+    cache_hit: Option<bool>,
+    cache_path: Option<String>,
 }
 
 impl StageOutcome {
@@ -43,11 +45,27 @@ impl StageOutcome {
         Self {
             status,
             usage: None,
+            cache_hit: None,
+            cache_path: None,
         }
     }
 
     fn with_usage(status: StageStatus, usage: Option<UsageMetadata>) -> Self {
-        Self { status, usage }
+        Self {
+            status,
+            usage,
+            cache_hit: None,
+            cache_path: None,
+        }
+    }
+
+    fn with_cache(status: StageStatus, cache_hit: bool, cache_path: String) -> Self {
+        Self {
+            status,
+            usage: None,
+            cache_hit: Some(cache_hit),
+            cache_path: Some(cache_path),
+        }
     }
 }
 
@@ -136,6 +154,8 @@ impl Engine {
                 prompt_tokens: None,
                 completion_tokens: None,
                 total_tokens: None,
+                cache_hit: None,
+                cache_path: None,
             },
         )?;
 
@@ -212,6 +232,8 @@ impl Engine {
                 prompt_tokens: None,
                 completion_tokens: None,
                 total_tokens: None,
+                cache_hit: None,
+                cache_path: None,
             },
         )?;
 
@@ -317,6 +339,8 @@ impl Engine {
                 prompt_tokens: None,
                 completion_tokens: None,
                 total_tokens: None,
+                cache_hit: None,
+                cache_path: None,
             },
         )?;
         Ok(started)
@@ -334,6 +358,8 @@ impl Engine {
         let status = outcome.status;
         let status_name = status_name(&status).to_string();
         let metadata = self.trace_metadata(stage, &status, outcome.usage.as_ref());
+        let cache_hit = outcome.cache_hit;
+        let cache_path = outcome.cache_path;
         statuses.insert(stage.id.clone(), status);
         write_trace(
             trace,
@@ -355,6 +381,8 @@ impl Engine {
                 prompt_tokens: metadata.prompt_tokens,
                 completion_tokens: metadata.completion_tokens,
                 total_tokens: metadata.total_tokens,
+                cache_hit,
+                cache_path,
             },
         )
     }
@@ -467,9 +495,7 @@ impl Engine {
                     .and_then(success_value);
                 execute_deterministic_stage(stage, input, cwd).map(StageOutcome::without_usage)
             }
-            "cache" => self
-                .execute_cache(stage, statuses, cwd)
-                .map(StageOutcome::without_usage),
+            "cache" => self.execute_cache(stage, statuses, cwd),
             "repair" => self.execute_repair(stage, statuses).await,
             "route" => self
                 .execute_route(stage, statuses)
@@ -697,9 +723,13 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         cwd: &Path,
-    ) -> Result<StageStatus, LlmffError> {
+    ) -> Result<StageOutcome, LlmffError> {
         let value = parent_success_value(stage, statuses)?;
-        let cache_dir = resolve_path(cwd, stage.path.as_deref().unwrap_or(".llmff/cache"));
+        let cache_path = stage
+            .path
+            .clone()
+            .unwrap_or_else(|| ".llmff/cache".to_string());
+        let cache_dir = resolve_path(cwd, &cache_path);
         let cache_file = cache_dir.join(format!("{}.json", cache_digest(stage, value)?));
 
         if cache_file.exists() {
@@ -728,7 +758,11 @@ impl Engine {
                 });
             }
 
-            return Ok(StageStatus::Success(record.value));
+            return Ok(StageOutcome::with_cache(
+                StageStatus::Success(record.value),
+                true,
+                cache_path,
+            ));
         }
 
         std::fs::create_dir_all(&cache_dir).map_err(|error| LlmffError::StageExecution {
@@ -745,7 +779,11 @@ impl Engine {
         let encoded = serde_json::to_vec_pretty(&record).map_err(LlmffError::Json)?;
         write_cache_file(stage, &cache_file, &encoded)?;
 
-        Ok(StageStatus::Success(value.clone()))
+        Ok(StageOutcome::with_cache(
+            StageStatus::Success(value.clone()),
+            false,
+            cache_path,
+        ))
     }
 
     fn backend_for_model<'a>(&'a self, model: &'a str) -> Result<ResolvedBackend<'a>, LlmffError> {
@@ -2628,6 +2666,58 @@ graph:
             write_finished["output_path"].as_str(),
             Some(written_path.to_string_lossy().as_ref())
         );
+    }
+
+    #[tokio::test]
+    async fn trace_events_include_cache_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.txt");
+        let first_trace_path = dir.path().join("trace-first.jsonl");
+        let second_trace_path = dir.path().join("trace-second.jsonl");
+        std::fs::write(&prompt_path, "first").unwrap();
+
+        let engine = Engine::new();
+        let manifest = cache_manifest("answer-v1");
+        engine
+            .run_manifest_with_options(
+                manifest.clone(),
+                dir.path(),
+                RunOptions {
+                    run_id: "cache-miss".to_string(),
+                    trace_path: Some(first_trace_path.clone()),
+                    scheduler: SchedulerMode::Sequential,
+                },
+            )
+            .await
+            .unwrap();
+
+        std::fs::write(&prompt_path, "secret-prompt-beta").unwrap();
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "cache-hit".to_string(),
+                    trace_path: Some(second_trace_path.clone()),
+                    scheduler: SchedulerMode::Sequential,
+                },
+            )
+            .await
+            .unwrap();
+
+        let first_trace = std::fs::read_to_string(first_trace_path).unwrap();
+        let second_trace = std::fs::read_to_string(second_trace_path).unwrap();
+        let first_events = parse_trace_events(&first_trace);
+        let second_events = parse_trace_events(&second_trace);
+        let first_cached = trace_stage_finished(&first_events, "cached");
+        let second_cached = trace_stage_finished(&second_events, "cached");
+
+        assert_eq!(first_cached["cache_hit"], false);
+        assert_eq!(second_cached["cache_hit"], true);
+        assert_eq!(first_cached["cache_path"], ".llmff/cache");
+        assert_eq!(second_cached["cache_path"], ".llmff/cache");
+        assert!(!first_trace.contains("secret-prompt-alpha"));
+        assert!(!second_trace.contains("secret-prompt-alpha"));
     }
 
     #[tokio::test]
