@@ -6,8 +6,8 @@ usage() {
 Usage:
   scripts/check-macos-signing-wiring.sh
 
-Verifies that macOS package signing, notarization, and stapling are wired into
-tag-triggered release artifacts and local release preflight checks.
+Verifies that macOS signing/notarization helpers remain available, while
+v0.1.2 release artifact publication is documented as unsigned.
 USAGE
 }
 
@@ -46,14 +46,5 @@ require_text 'scripts/sign-notarize-macos-pkg.sh' 'pkgutil --check-signature'
 
 require_text 'scripts/check-release-signing-gates.sh' 'APPLE_INSTALLER_CERT_P12_BASE64'
 require_text 'scripts/check-release-signing-gates.sh' 'APPLE_INSTALLER_CERT_PASSWORD'
-
-require_text '.github/workflows/release-artifacts.yml' 'Sign and notarize macOS installer'
-require_text '.github/workflows/release-artifacts.yml' 'Smoke signed and notarized macOS installer'
-require_text '.github/workflows/release-artifacts.yml' 'scripts/sign-notarize-macos-pkg.sh'
-require_text '.github/workflows/release-artifacts.yml' 'APPLE_INSTALLER_CERT_P12_BASE64'
-require_text '.github/workflows/release-artifacts.yml' 'APPLE_INSTALLER_CERT_PASSWORD'
-
-require_text 'scripts/release-preflight.sh' 'bash scripts/check-macos-signing-wiring.sh'
-require_text 'docs/platform-support.md' 'signed and notarized `.pkg`'
-require_text 'docs/roadmap.md' 'Signed, notarized, and stapled macOS `.pkg` installers'
-require_text 'docs/release-readiness.md' 'macOS release tags sign, notarize, staple, and smoke-test'
+require_text 'docs/platform-support.md' 'unsigned `.pkg`'
+require_text 'docs/roadmap.md' 'Apple Developer ID signing and notarization remain a future paid distribution track'

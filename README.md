@@ -50,12 +50,6 @@ Run the release metadata preflight before creating or pushing a release tag:
 scripts/release-preflight.sh v0.1.2
 ```
 
-Verify repository signing and notarization secrets before pushing a release tag:
-
-```bash
-scripts/release-preflight.sh --check-github-secrets v0.1.2
-```
-
 Verify a published release's assets, checksums, and host-compatible packages:
 
 ```bash
@@ -99,7 +93,7 @@ Smoke test a generated Debian package without root:
 scripts/smoke-deb.sh --deb dist/llmff_0.1.2_amd64.deb
 ```
 
-Release tags build compressed binary archives, Ubuntu/Debian `.deb` packages, Arch `PKGBUILD` metadata, signed Windows executable archives, signed Windows MSI packages, and signed/notarized macOS `.pkg` packages in CI. Tag-triggered installer jobs enforce Authenticode and Apple signing/notarization credential gates before Windows or macOS installer publication; manual dispatch remains available for unsigned artifact testing. See [`docs/platform-support.md`](docs/platform-support.md) for the current target matrix.
+Release tags build compressed binary archives, Ubuntu/Debian `.deb` packages, Arch `PKGBUILD` metadata, unsigned Windows MSI packages, and unsigned macOS `.pkg` packages in CI. Trusted Windows Authenticode signing and Apple Developer ID signing/notarization are deferred until paid credentials are available. See [`docs/platform-support.md`](docs/platform-support.md) for the current target matrix.
 
 Tagged release builds publish archives, checksums, `.deb` packages, Arch metadata, Windows MSI packages, and macOS `.pkg` packages as GitHub Release assets. Manual workflow runs keep the same files as Actions artifacts.
 
