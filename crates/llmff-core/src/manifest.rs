@@ -42,6 +42,7 @@ pub struct StageSpec {
     pub model: Option<String>,
     pub temperature: Option<f32>,
     pub schema: Option<String>,
+    pub schema_path: Option<String>,
     pub when: Option<String>,
 }
 
@@ -82,5 +83,24 @@ outputs:
         assert_eq!(manifest.graph[1].op, "infer");
         assert_eq!(manifest.graph[1].model.as_deref(), Some("mock:json"));
         assert_eq!(manifest.outputs["final"].from, "draft");
+    }
+
+    #[test]
+    fn parses_schema_path() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: validate
+    op: validate_json
+    from: draft
+    schema_path: ./answer.schema.json
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+
+        assert_eq!(
+            manifest.graph[0].schema_path.as_deref(),
+            Some("./answer.schema.json")
+        );
     }
 }

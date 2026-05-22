@@ -6,14 +6,18 @@ graph:
   - id: load_prompt
     op: load
     input: prompt
+  - id: apply_policy
+    op: system
+    from: load_prompt
+    path: ./policy.md
   - id: draft
     op: infer
-    from: load_prompt
+    from: apply_policy
     model: mock:bad
   - id: validate
     op: validate_json
     from: draft
-    schema: '{"type":"object","required":["answer"],"properties":{"answer":{"type":"string"}},"additionalProperties":false}'
+    schema_path: ./answer.schema.json
   - id: repair
     op: repair
     from: validate
