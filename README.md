@@ -38,6 +38,21 @@ cargo run -p llmff -- stages list
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
 
+Manifest stages can reference file-backed resources relative to the manifest:
+
+```yaml
+graph:
+  - id: apply_policy
+    op: system
+    from: load_prompt
+    path: ./policy.md
+
+  - id: validate
+    op: validate_json
+    from: draft
+    schema_path: ./answer.schema.json
+```
+
 ## Backend Notes
 
 The CLI keeps backend registration explicit. This keeps commands portable and FFmpeg-like: the command line describes the run, while environment variables are only used when you choose to read a secret by name.
