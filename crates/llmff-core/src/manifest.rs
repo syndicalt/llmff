@@ -44,6 +44,13 @@ pub struct StageSpec {
     pub schema: Option<String>,
     pub schema_path: Option<String>,
     pub when: Option<String>,
+    pub on_success: Option<String>,
+    pub on_invalid: Option<String>,
+    pub on_skipped: Option<String>,
+    pub field: Option<String>,
+    #[serde(default)]
+    pub cases: BTreeMap<String, String>,
+    pub default: Option<String>,
 }
 
 #[cfg(test)]
@@ -102,5 +109,35 @@ graph:
             manifest.graph[0].schema_path.as_deref(),
             Some("./answer.schema.json")
         );
+    }
+
+    #[test]
+    fn parses_route_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: choose
+    op: route
+    from: classify
+    on_success: fast_answer
+    on_invalid: repair_answer
+    on_skipped: fallback_answer
+    field: kind
+    cases:
+      simple: fast_answer
+      hard: strong_answer
+    default: fallback_answer
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(stage.on_success.as_deref(), Some("fast_answer"));
+        assert_eq!(stage.on_invalid.as_deref(), Some("repair_answer"));
+        assert_eq!(stage.on_skipped.as_deref(), Some("fallback_answer"));
+        assert_eq!(stage.field.as_deref(), Some("kind"));
+        assert_eq!(stage.cases["simple"], "fast_answer");
+        assert_eq!(stage.cases["hard"], "strong_answer");
+        assert_eq!(stage.default.as_deref(), Some("fallback_answer"));
     }
 }
