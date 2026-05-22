@@ -41,6 +41,12 @@ Smoke test a generated release archive without installing:
 scripts/smoke-archive.sh --archive dist/llmff-0.1.1-x86_64-unknown-linux-gnu.tar.gz
 ```
 
+Generate and validate Windows MSI packaging metadata:
+
+```bash
+scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.1 --target x86_64-pc-windows-msvc --out-dir dist --emit-wxs-only
+```
+
 Smoke test a generated Debian package without root:
 
 ```bash
@@ -49,7 +55,7 @@ scripts/smoke-deb.sh --deb dist/llmff_0.1.1_amd64.deb
 
 Packaged installers for Windows, macOS, Ubuntu, Debian, and Arch Linux are on the roadmap; current releases install through Cargo from GitHub.
 
-Release tags also build compressed binary archives in CI as the first packaged-artifact slice. Ubuntu/Debian `.deb` packaging and Arch `PKGBUILD` metadata are wired for the Linux release job; macOS signed/notarized installers and Windows installers are still future roadmap items.
+Release tags also build compressed binary archives in CI as the first packaged-artifact slice. Ubuntu/Debian `.deb` packaging, Arch `PKGBUILD` metadata, and unsigned Windows MSI packaging are wired into release artifact jobs; macOS signed/notarized installers and signed Windows installers are still future roadmap items.
 
 Tagged release builds publish archives, checksums, `.deb` packages, and Arch metadata as GitHub Release assets. Manual workflow runs keep the same files as Actions artifacts.
 

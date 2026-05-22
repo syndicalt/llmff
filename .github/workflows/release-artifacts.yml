@@ -37,6 +37,7 @@ jobs:
             binary: target/release/llmff.exe
             deb_arch: ""
             arch_pkgbuild: false
+            windows_msi: true
 
     steps:
       - name: Checkout
@@ -44,6 +45,13 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install WiX
+        if: ${{ matrix.windows_msi }}
+        shell: bash
+        run: |
+          dotnet tool install --global wix --version 5.*
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       - name: Build release binary
         run: cargo build --locked --release -p llmff
@@ -73,6 +81,27 @@ jobs:
             archive_ext="zip"
           fi
           scripts/smoke-archive.sh --archive "dist/llmff-${version}-${{ matrix.target }}.${archive_ext}"
+
+      - name: Package Windows MSI installer
+        if: ${{ matrix.windows_msi }}
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(cargo pkgid -p llmff | sed 's/.*@//')"
+          fi
+          scripts/package-windows-msi.sh \
+            --binary "${{ matrix.binary }}" \
+            --version "$version" \
+            --target "${{ matrix.target }}" \
+            --out-dir dist
+          test -f "dist/llmff-${version}-${{ matrix.target }}.msi"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum -c "llmff-${version}-${{ matrix.target }}.msi.sha256")
+          else
+            (cd dist && shasum -a 256 -c "llmff-${version}-${{ matrix.target }}.msi.sha256")
+          fi
 
       - name: Package Debian installer
         if: ${{ matrix.deb_arch != '' }}
