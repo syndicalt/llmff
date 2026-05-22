@@ -482,6 +482,130 @@ outputs:
 }
 
 #[test]
+fn run_streams_load_stage_payload_to_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "stream this input").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args([
+        "run",
+        manifest.to_str().unwrap(),
+        "--stream-stage",
+        "load_prompt",
+    ])
+    .env("LLMFF_MOCK_GOOD_RESPONSE", "final answer")
+    .assert()
+    .success()
+    .stdout("stream this input");
+
+    assert_eq!(std::fs::read_to_string(output).unwrap(), "final answer");
+}
+
+#[test]
+fn run_streams_retrieve_stage_payload_to_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let docs = dir.path().join("docs");
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("matches.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::create_dir(&docs).unwrap();
+    std::fs::write(&prompt, "rust graph").unwrap();
+    std::fs::write(
+        docs.join("rust.txt"),
+        "Rust builds reliable graph pipelines.",
+    )
+    .unwrap();
+    std::fs::write(
+        docs.join("python.txt"),
+        "Python scripts are useful for quick notebooks.",
+    )
+    .unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: retrieve_context
+    op: retrieve
+    from: load_prompt
+    documents:
+      - docs/python.txt
+      - docs/rust.txt
+    top_k: 1
+outputs:
+  final:
+    from: retrieve_context
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    let stdout = cmd
+        .args([
+            "run",
+            manifest.to_str().unwrap(),
+            "--stream-stage",
+            "retrieve_context",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let streamed: serde_json::Value =
+        serde_json::from_slice(&stdout).expect("streamed retrieve output should be JSON");
+
+    assert_eq!(streamed["query"], "rust graph");
+    assert_eq!(streamed["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(streamed["matches"][0]["path"], "docs/rust.txt");
+    assert_eq!(streamed["matches"][0]["score"], 2);
+    assert_eq!(
+        std::fs::read_to_string(output).unwrap(),
+        String::from_utf8(stdout).unwrap()
+    );
+}
+
+#[test]
 fn run_executes_retrieve_stage() {
     let dir = tempfile::tempdir().unwrap();
     let docs = dir.path().join("docs");

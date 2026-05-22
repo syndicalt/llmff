@@ -513,7 +513,7 @@ graph:
       - "</answer>"
 ```
 
-OpenAI-compatible backends receive `temperature`, `top_p`, `max_tokens`, `seed`, `response_format`, and `stop`. They also expose a streaming contract for server-sent chat completion deltas. Use `llmff run --stream-stage <infer-stage-id>` to stream one `infer` stage's token deltas to stdout while still writing the normal manifest outputs. Do not combine `--stream-stage` with `--events -` or manifest outputs that write to `-`; write lifecycle events and final outputs to files to keep the token stream clean. Ollama receives the same controls under `options` except `response_format: json`, which maps to the top-level Ollama `format: "json"` hint. Inline graphs accept `seed=12345`, `response_format=json`, and stop sequences with semicolon separators, such as `stop=END;DONE`.
+OpenAI-compatible backends receive `temperature`, `top_p`, `max_tokens`, `seed`, `response_format`, and `stop`. They also expose a streaming contract for server-sent chat completion deltas. Use `llmff run --stream-stage <stage-id>` to stream one stage to stdout while still writing the normal manifest outputs. For `infer` stages, `llmff` streams backend token deltas as they arrive; for deterministic and integration stages, it streams the serialized stage payload when the stage finishes. Do not combine `--stream-stage` with `--events -` or manifest outputs that write to `-`; write lifecycle events and final outputs to files to keep the stream clean. Ollama receives the same controls under `options` except `response_format: json`, which maps to the top-level Ollama `format: "json"` hint. Inline graphs accept `seed=12345`, `response_format=json`, and stop sequences with semicolon separators, such as `stop=END;DONE`.
 
 Mock backends remain available for deterministic local runs and tests:
 
@@ -525,7 +525,7 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 ## Limitations
 
 - Schema values are inline JSON strings in the current manifest format.
-- `llmff run --stream-stage <infer-stage-id>` streams one model stage's token deltas to stdout. Streaming arbitrary stage payloads is not implemented yet.
+- `llmff run --stream-stage <stage-id>` streams one selected stage to stdout. `infer` stages stream token deltas when the backend supports them; other stages stream their serialized payload after the stage finishes.
 - Plugin manifests can be discovered and listed, and plugin stages, backend commands, tool transports, and samplers can run through stdin/stdout plugin entrypoints.
 - Remote embedding models, external vector indexes, and multimodal values are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

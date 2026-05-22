@@ -44,6 +44,7 @@ struct StageOutcome {
     usage: Option<UsageMetadata>,
     cache_hit: Option<bool>,
     cache_path: Option<String>,
+    stream_written: bool,
 }
 
 impl StageOutcome {
@@ -53,6 +54,7 @@ impl StageOutcome {
             usage: None,
             cache_hit: None,
             cache_path: None,
+            stream_written: false,
         }
     }
 
@@ -62,6 +64,17 @@ impl StageOutcome {
             usage,
             cache_hit: None,
             cache_path: None,
+            stream_written: false,
+        }
+    }
+
+    fn with_streamed_usage(status: StageStatus, usage: Option<UsageMetadata>) -> Self {
+        Self {
+            status,
+            usage,
+            cache_hit: None,
+            cache_path: None,
+            stream_written: true,
         }
     }
 
@@ -71,6 +84,7 @@ impl StageOutcome {
             usage: None,
             cache_hit: Some(cache_hit),
             cache_path: Some(cache_path),
+            stream_written: false,
         }
     }
 }
@@ -317,6 +331,7 @@ impl Engine {
                     stream_writer.as_deref_mut(),
                 )
                 .await?;
+            stream_stage_payload_if_selected(stream_writer.as_deref_mut(), stage, &outcome)?;
             self.finish_stage_trace(trace, run_id, stage, stage_started, outcome, statuses)?;
         }
 
@@ -715,7 +730,7 @@ impl Engine {
                     }
                 }
 
-                return Ok(StageOutcome::with_usage(
+                return Ok(StageOutcome::with_streamed_usage(
                     StageStatus::Success(Value::Text(text)),
                     usage,
                 ));
@@ -1680,6 +1695,31 @@ impl StageStreamWriter {
         self.writer.flush()?;
         Ok(())
     }
+
+    fn write_value(&mut self, value: &Value) -> Result<(), LlmffError> {
+        self.writer.write_all(serialize_value(value)?.as_bytes())?;
+        self.writer.flush()?;
+        Ok(())
+    }
+}
+
+fn stream_stage_payload_if_selected(
+    stream_writer: Option<&mut StageStreamWriter>,
+    stage: &StageSpec,
+    outcome: &StageOutcome,
+) -> Result<(), LlmffError> {
+    let Some(writer) = stream_writer else {
+        return Ok(());
+    };
+    if writer.stage_id != stage.id || outcome.stream_written {
+        return Ok(());
+    }
+    match &outcome.status {
+        StageStatus::Success(value) | StageStatus::Invalid { value, .. } => {
+            writer.write_value(value)
+        }
+        StageStatus::Skipped => Ok(()),
+    }
 }
 
 fn create_stage_stream_writer(
@@ -1690,7 +1730,7 @@ fn create_stage_stream_writer(
     let Some(stage_id) = options.stream_stage.as_ref() else {
         return Ok(None);
     };
-    let stage = graph
+    graph
         .stages()
         .iter()
         .find(|stage| stage.id == *stage_id)
@@ -1699,11 +1739,6 @@ fn create_stage_stream_writer(
                 "stream-stage references unknown stage `{stage_id}`"
             ))
         })?;
-    if stage.op != "infer" {
-        return Err(LlmffError::Config(format!(
-            "stream-stage `{stage_id}` must reference an infer stage"
-        )));
-    }
 
     let path = options
         .stream_path
