@@ -18,8 +18,8 @@ as the source-build fallback.
 
 Implemented artifact targets:
 
-- Windows installer plus a signed `llmff.exe` archive.
-- macOS signed/notarized `.pkg` installers for Apple Silicon and Intel Macs.
+- Windows installer plus an unsigned `llmff.exe` archive.
+- macOS unsigned `.pkg` installers for Apple Silicon and Intel Macs.
 - Ubuntu and Debian `.deb` packages.
 - Arch Linux package support through an official package recipe or an AUR-ready `PKGBUILD`.
 - Plain compressed binary archives for each supported platform.
@@ -28,9 +28,8 @@ Implemented release gates:
 
 - CI-built release archives for Linux, macOS Apple Silicon, macOS Intel, and Windows.
 - Archive, Debian package, macOS package payload, and Windows MSI smoke tests.
-- Tag-only signing credential gates for Windows and macOS installer publication.
-- Signed Windows `llmff.exe` archives and signed Windows MSI packages.
-- Signed, notarized, and stapled macOS `.pkg` installers.
+- Unsigned Windows `.zip` archives and unsigned Windows MSI packages.
+- Unsigned macOS `.pkg` installers.
 - GitHub Release creation and asset upload for tag-triggered release jobs.
 - Platform support documentation and local release preflight checks.
 
@@ -61,13 +60,12 @@ implemented on `main`:
 ## Release Stabilization
 
 The immediate release goal is `v0.1.2`: the first release cut after packaged
-artifact publication, Windows signing, and macOS notarization wiring landed.
+artifact publication landed, with Windows and macOS artifacts explicitly
+published unsigned.
 
 Required before broad native-installer announcement:
 
 - Run `scripts/release-preflight.sh v0.1.2` on the tag candidate.
-- Run `scripts/release-preflight.sh --check-github-secrets v0.1.2` before
-  pushing the release tag.
 - Push the `v0.1.2` tag and verify GitHub Actions creates the release.
 - Confirm release assets include Linux/macOS/Windows archives, checksums,
   Debian package, Arch metadata, Windows MSI, and macOS `.pkg` files.
@@ -76,6 +74,11 @@ Required before broad native-installer announcement:
 - Smoke test at least the source-build install path from the published tag.
 - Smoke test native packages on their target platforms before describing them
   as broadly verified.
+
+Trusted signing and notarization remain a future paid distribution track:
+
+- Windows Authenticode signing remains a future paid distribution track.
+- Apple Developer ID signing and notarization remain a future paid distribution track.
 
 ## Next Product Roadmap
 

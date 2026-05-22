@@ -6,8 +6,8 @@ usage() {
 Usage:
   scripts/check-release-signing-wiring.sh
 
-Verifies that release signing and notarization gates are wired into release
-metadata, docs, and tag-only release artifact CI.
+Verifies that paid release signing and notarization are documented as deferred
+and do not block tag-triggered unsigned release artifact publication.
 USAGE
 }
 
@@ -45,16 +45,21 @@ require_text 'scripts/check-github-release-secrets.sh' 'WINDOWS_CODESIGN_CERT_P1
 require_text 'scripts/check-github-release-secrets.sh' 'APPLE_DEVELOPER_ID_INSTALLER'
 require_text 'scripts/check-github-release-secrets.sh' 'APPLE_APP_SPECIFIC_PASSWORD'
 require_text 'scripts/release-preflight.sh' '--check-github-secrets'
-require_text '.github/workflows/release-artifacts.yml' 'Validate Windows signing gate'
-require_text '.github/workflows/release-artifacts.yml' 'Validate macOS signing and notarization gate'
-require_text '.github/workflows/release-artifacts.yml' 'scripts/check-release-signing-gates.sh --platform windows'
-require_text '.github/workflows/release-artifacts.yml' 'scripts/check-release-signing-gates.sh --platform macos'
-require_text '.github/workflows/release-artifacts.yml' 'WINDOWS_CODESIGN_CERT_P12_BASE64'
-require_text '.github/workflows/release-artifacts.yml' 'APPLE_DEVELOPER_ID_INSTALLER'
-require_text '.github/workflows/release-artifacts.yml' 'APPLE_INSTALLER_CERT_P12_BASE64'
-require_text 'docs/platform-support.md' 'scripts/check-release-signing-gates.sh --platform windows'
-require_text 'docs/platform-support.md' 'scripts/check-release-signing-gates.sh --platform macos'
-require_text 'docs/release-readiness.md' 'signing and notarization release gates'
-require_text 'docs/roadmap.md' 'Tag-only signing credential gates'
-require_text 'scripts/release-preflight.sh' 'bash scripts/check-windows-signing-wiring.sh'
-require_text 'scripts/release-preflight.sh' 'bash scripts/check-macos-signing-wiring.sh'
+require_text 'docs/platform-support.md' 'unsigned `.zip` and unsigned `.msi`'
+require_text 'docs/platform-support.md' 'unsigned `.pkg`'
+require_text 'docs/release-readiness.md' 'Unsigned Windows and macOS artifacts are acceptable for v0.1.2'
+require_text 'docs/roadmap.md' 'Trusted signing and notarization remain a future paid distribution track'
+
+for forbidden in \
+  'Validate Windows signing gate' \
+  'Validate macOS signing and notarization gate' \
+  'Sign Windows release binary' \
+  'Sign Windows MSI installer' \
+  'Smoke signed Windows MSI installer' \
+  'Sign and notarize macOS installer' \
+  'Smoke signed and notarized macOS installer'; do
+  if grep -Fq -- "$forbidden" '.github/workflows/release-artifacts.yml'; then
+    printf 'error: release workflow still blocks unsigned publication with: %s\n' "$forbidden" >&2
+    exit 1
+  fi
+done
