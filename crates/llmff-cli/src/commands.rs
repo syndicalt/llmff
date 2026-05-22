@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use llmff_core::backend::{MockBackend, OllamaBackend, OpenAiCompatibleBackend};
-use llmff_core::engine::{Engine, RunOptions};
+use llmff_core::engine::{Engine, RunOptions, SchedulerMode};
 use llmff_core::manifest::Manifest;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +30,8 @@ enum Command {
         graph: Option<String>,
         #[arg(long)]
         trace: Option<PathBuf>,
+        #[arg(long)]
+        parallel: bool,
         #[arg(long = "backend")]
         backend: Vec<String>,
         #[arg(long = "ollama")]
@@ -80,6 +82,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             input,
             graph,
             trace,
+            parallel,
             backend,
             ollama,
             api_key_env,
@@ -90,6 +93,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 input,
                 graph,
                 trace,
+                parallel,
                 backend,
                 ollama,
                 api_key_env,
@@ -221,6 +225,7 @@ async fn run_pipeline(
     input_path: Option<PathBuf>,
     inline_graph: Option<String>,
     trace: Option<PathBuf>,
+    parallel: bool,
     backend: Vec<String>,
     ollama: Vec<String>,
     api_key_env: Vec<String>,
@@ -232,6 +237,11 @@ async fn run_pipeline(
     let options = RunOptions {
         run_id: "cli-run".to_string(),
         trace_path: trace,
+        scheduler: if parallel {
+            SchedulerMode::Parallel
+        } else {
+            SchedulerMode::Sequential
+        },
     };
 
     engine

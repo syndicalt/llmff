@@ -86,7 +86,7 @@ fn order_stages(stages: Vec<StageSpec>) -> Result<Vec<StageSpec>, LlmffError> {
     Ok(ordered)
 }
 
-fn stage_dependencies(stage: &StageSpec) -> BTreeSet<String> {
+pub(crate) fn stage_dependencies(stage: &StageSpec) -> BTreeSet<String> {
     let mut dependencies = BTreeSet::new();
 
     if let Some(parent) = &stage.from {
