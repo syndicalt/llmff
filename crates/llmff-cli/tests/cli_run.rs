@@ -116,6 +116,68 @@ outputs:
 }
 
 #[test]
+fn inline_graph_run_uses_input_graph_and_write_stage() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.json");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.current_dir(dir.path())
+        .args([
+            "run",
+            "-i",
+            prompt.to_str().unwrap(),
+            "-g",
+            "load | infer(model=mock:good) | write(answer.json)",
+        ])
+        .env("LLMFF_MOCK_GOOD_RESPONSE", r#"{"answer":"ok"}"#)
+        .assert()
+        .success();
+
+    assert_eq!(
+        std::fs::read_to_string(output).unwrap(),
+        r#"{"answer":"ok"}"#
+    );
+}
+
+#[test]
+fn inline_graph_run_defaults_load_to_stdin_and_write_to_stdout() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", "-g", "load | infer(model=mock:good) | write(-)"])
+        .write_stdin("Return an answer object")
+        .env("LLMFF_MOCK_GOOD_RESPONSE", r#"{"answer":"ok"}"#)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#"{"answer":"ok"}"#));
+}
+
+#[test]
+fn inline_graph_run_rejects_manifest_and_graph_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+graph: []
+"#,
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args([
+        "run",
+        manifest.to_str().unwrap(),
+        "-g",
+        "load | write(-)",
+    ])
+    .assert()
+    .failure()
+    .stderr(predicate::str::contains("provide either manifest or --graph"));
+}
+
+#[test]
 fn inspect_example_manifest_succeeds() {
     let mut cmd = Command::cargo_bin("llmff").unwrap();
 
