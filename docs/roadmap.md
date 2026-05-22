@@ -68,9 +68,15 @@ macOS PKG smoke implementation slice:
 - `scripts/smoke-macos-pkg.sh` expands a built `.pkg` on Darwin hosts and verifies the packaged `llmff` binary with `--version`, `stages list`, `inspect`, and a deterministic mock-backed `run`.
 - `.github/workflows/release-artifacts.yml` runs the macOS package smoke gate for Apple Silicon and Intel macOS release-artifact jobs.
 
+macOS package signing and notarization implementation slice:
+
+- `scripts/sign-notarize-macos-pkg.sh` imports the release Developer ID Installer certificate, signs a built package with `productsign`, verifies the package signature, submits it to Apple notarization, staples the notarization ticket, validates the staple, and removes the temporary signing keychain.
+- `.github/workflows/release-artifacts.yml` signs and notarizes macOS package artifacts only on tag-triggered release jobs, regenerates the package checksum after stapling, and smoke-tests the signed and notarized package before upload.
+- `scripts/check-macos-signing-wiring.sh` and `scripts/release-preflight.sh` keep macOS signing, notarization, CI, and documentation wiring covered by local release preflight.
+
 Signing gate implementation slice:
 
-- `scripts/check-release-signing-gates.sh` verifies that Windows Authenticode and macOS Apple signing or notarization credentials are present before release-tag installer jobs proceed.
+- `scripts/check-release-signing-gates.sh` verifies that Windows Authenticode and macOS Apple signing and notarization credentials are present before release-tag installer jobs proceed.
 - `.github/workflows/release-artifacts.yml` runs those signing credential gates only for tag-triggered Windows and macOS installer jobs, preserving unsigned manual-dispatch artifact testing.
 - `scripts/check-release-signing-wiring.sh` and `scripts/release-preflight.sh` keep signing gate CI and documentation wiring covered by local release preflight.
 
