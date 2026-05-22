@@ -40,19 +40,19 @@ Commit `feat: add chat message values`.
 
 ## Task 2: Backend Message Requests
 
-- [ ] **Step 1: Write failing backend HTTP assertions**
+- [x] **Step 1: Write failing backend HTTP assertions**
 
 Update OpenAI-compatible and Ollama backend tests to assert the request body contains separate `system` and `user` messages.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
 Run the two backend tests.
 
-- [ ] **Step 3: Implement `InferRequest.messages`**
+- [x] **Step 3: Implement `InferRequest.messages`**
 
 Replace prompt-only backend request construction with structured messages. Update mock, OpenAI-compatible, and Ollama backends.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 Run the focused backend tests and commit `feat: send chat messages to backends`.
 

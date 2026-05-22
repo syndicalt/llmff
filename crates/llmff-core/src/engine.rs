@@ -11,7 +11,7 @@ use crate::graph::Graph;
 use crate::manifest::{Manifest, StageSpec};
 use crate::stage::execute_deterministic_stage;
 use crate::trace::{TraceEvent, TraceWriter};
-use crate::value::{StageStatus, Value};
+use crate::value::{Message, StageStatus, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
@@ -378,13 +378,13 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
     ) -> Result<StageOutcome, LlmffError> {
-        let prompt = parent_text(stage, statuses)?;
+        let messages = parent_messages(stage, statuses)?;
         let model = required_model(stage)?;
         let resolved = self.backend_for_model(model)?;
         let response = resolved
             .infer(InferRequest {
                 model: resolved.provider_model.to_string(),
-                prompt,
+                messages,
                 temperature: stage.temperature,
                 top_p: stage.top_p,
                 max_tokens: stage.max_tokens,
@@ -422,11 +422,14 @@ impl Engine {
                 let response = resolved
                     .infer(InferRequest {
                         model: resolved.provider_model.to_string(),
-                        prompt: format!(
-                            "Repair this output so it satisfies validation errors.\nErrors:\n{}\nOutput:\n{}",
-                            errors.join("\n"),
-                            serialize_value(value)?
-                        ),
+                        messages: vec![Message {
+                            role: "user".to_string(),
+                            content: format!(
+                                "Repair this output so it satisfies validation errors.\nErrors:\n{}\nOutput:\n{}",
+                                errors.join("\n"),
+                                serialize_value(value)?
+                            ),
+                        }],
                         temperature: stage.temperature,
                         top_p: stage.top_p,
                         max_tokens: stage.max_tokens,
@@ -1120,6 +1123,44 @@ fn parent_text(
     }
 }
 
+fn parent_messages(
+    stage: &StageSpec,
+    statuses: &BTreeMap<String, StageStatus>,
+) -> Result<Vec<Message>, LlmffError> {
+    let parent = stage
+        .from
+        .as_ref()
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "stage requires parent input".to_string(),
+        })?;
+    let status = statuses
+        .get(parent)
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("unknown parent stage `{parent}`"),
+        })?;
+    match status {
+        StageStatus::Success(Value::Messages(messages)) => Ok(messages.clone()),
+        StageStatus::Success(Value::Text(text)) => Ok(vec![Message {
+            role: "user".to_string(),
+            content: text.clone(),
+        }]),
+        StageStatus::Success(Value::Json(json)) => Ok(vec![Message {
+            role: "user".to_string(),
+            content: json.to_string(),
+        }]),
+        StageStatus::Invalid { errors, .. } => Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("parent stage is invalid: {}", errors.join("; ")),
+        }),
+        StageStatus::Skipped => Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "parent stage was skipped".to_string(),
+        }),
+    }
+}
+
 fn required_model(stage: &StageSpec) -> Result<&str, LlmffError> {
     stage
         .model
@@ -1138,7 +1179,7 @@ fn serialize_value(value: &Value) -> Result<String, LlmffError> {
     }
 }
 
-fn render_messages_as_text(messages: &[crate::value::Message]) -> String {
+fn render_messages_as_text(messages: &[Message]) -> String {
     messages
         .iter()
         .map(|message| format!("{}: {}", message.role, message.content))

@@ -3,11 +3,12 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::error::LlmffError;
+use crate::value::Message;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InferRequest {
     pub model: String,
-    pub prompt: String,
+    pub messages: Vec<Message>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
     pub max_tokens: Option<u32>,
@@ -88,12 +89,7 @@ impl Backend for OpenAiCompatibleBackend {
         let url = format!("{}/v1/chat/completions", self.base_url);
         let mut body = json!({
             "model": request.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": request.prompt
-                }
-            ],
+            "messages": request.messages,
         });
         if let Some(temperature) = request.temperature {
             body["temperature"] = json!(temperature);
@@ -197,12 +193,7 @@ impl Backend for OllamaBackend {
 fn ollama_chat_request_body(request: &InferRequest) -> serde_json::Value {
     let mut body = json!({
         "model": request.model,
-        "messages": [
-            {
-                "role": "user",
-                "content": request.prompt
-            }
-        ],
+        "messages": request.messages,
         "stream": false,
     });
 
@@ -293,7 +284,10 @@ mod tests {
         let response = backend
             .infer(InferRequest {
                 model: "mock:json".to_string(),
-                prompt: "Return JSON".to_string(),
+                messages: vec![Message {
+                    role: "user".to_string(),
+                    content: "Return JSON".to_string(),
+                }],
                 temperature: Some(0.2),
                 top_p: None,
                 max_tokens: None,
@@ -334,7 +328,16 @@ mod tests {
         let response = backend
             .infer(InferRequest {
                 model: "test-model".to_string(),
-                prompt: "Say hello".to_string(),
+                messages: vec![
+                    Message {
+                        role: "system".to_string(),
+                        content: "Use terse JSON.".to_string(),
+                    },
+                    Message {
+                        role: "user".to_string(),
+                        content: "Say hello".to_string(),
+                    },
+                ],
                 temperature: Some(0.0),
                 top_p: Some(0.9),
                 max_tokens: Some(256),
@@ -351,6 +354,10 @@ mod tests {
 
         let requests = server.received_requests().await.unwrap();
         let body: serde_json::Value = requests[0].body_json().unwrap();
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][0]["content"], "Use terse JSON.");
+        assert_eq!(body["messages"][1]["role"], "user");
+        assert_eq!(body["messages"][1]["content"], "Say hello");
         assert!((body["top_p"].as_f64().unwrap() - 0.9).abs() < 0.000_001);
         assert_eq!(body["max_tokens"], 256);
     }
@@ -380,7 +387,16 @@ mod tests {
         let response = backend
             .infer(InferRequest {
                 model: "llama3.1".to_string(),
-                prompt: "Say hello".to_string(),
+                messages: vec![
+                    Message {
+                        role: "system".to_string(),
+                        content: "Use terse JSON.".to_string(),
+                    },
+                    Message {
+                        role: "user".to_string(),
+                        content: "Say hello".to_string(),
+                    },
+                ],
                 temperature: Some(0.2),
                 top_p: Some(0.8),
                 max_tokens: Some(128),
@@ -398,8 +414,10 @@ mod tests {
         let requests = server.received_requests().await.unwrap();
         let body: serde_json::Value = requests[0].body_json().unwrap();
         assert_eq!(body["model"], "llama3.1");
-        assert_eq!(body["messages"][0]["role"], "user");
-        assert_eq!(body["messages"][0]["content"], "Say hello");
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][0]["content"], "Use terse JSON.");
+        assert_eq!(body["messages"][1]["role"], "user");
+        assert_eq!(body["messages"][1]["content"], "Say hello");
         assert_eq!(body["stream"], false);
         assert!((body["options"]["temperature"].as_f64().unwrap() - 0.2).abs() < 0.000_001);
         assert!((body["options"]["top_p"].as_f64().unwrap() - 0.8).abs() < 0.000_001);
