@@ -130,19 +130,19 @@ if [ "$archive_ext" = "zip" ]; then
       cd "$stage"
       zip -q -r "$archive" "$package"
     )
+  elif command -v 7z >/dev/null 2>&1; then
+    (
+      cd "$stage"
+      7z a -tzip "$archive" "$package" >/dev/null
+    )
   elif command -v powershell.exe >/dev/null 2>&1; then
     (
       cd "$stage"
       powershell.exe -NoProfile -Command \
         "Compress-Archive -LiteralPath '$(native_path "$stage/$package")' -DestinationPath '$(native_path "$archive")' -Force" >/dev/null
     )
-  elif command -v 7z >/dev/null 2>&1; then
-    (
-      cd "$stage"
-      7z a -tzip "$archive" "$package" >/dev/null
-    )
   else
-    printf 'error: zip, powershell.exe, or 7z is required to create Windows archives\n' >&2
+    printf 'error: zip, 7z, or powershell.exe is required to create Windows archives\n' >&2
     exit 1
   fi
 else
