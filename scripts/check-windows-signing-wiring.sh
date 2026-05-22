@@ -33,7 +33,7 @@ require_text() {
   local file="$1"
   local needle="$2"
   require_file "$file"
-  if ! grep -Fq "$needle" "$file"; then
+  if ! grep -Fq -- "$needle" "$file"; then
     printf 'error: %s must contain: %s\n' "$file" "$needle" >&2
     exit 1
   fi

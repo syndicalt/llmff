@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/release-preflight.sh <tag>
+  scripts/release-preflight.sh [--check-github-secrets] <tag>
 
 Checks local release metadata before creating or pushing a release tag.
 The tag must match the workspace package version, have release notes, and keep
@@ -19,6 +19,24 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   usage
   exit 0
 fi
+
+check_github_secrets=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --check-github-secrets)
+      check_github_secrets=1
+      shift
+      ;;
+    -*)
+      usage >&2
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 if [ "$#" -ne 1 ]; then
   usage >&2
@@ -51,7 +69,7 @@ require_text() {
   local file="$1"
   local needle="$2"
   require_file "$file"
-  if ! grep -Fq "$needle" "$file"; then
+  if ! grep -Fq -- "$needle" "$file"; then
     printf 'error: %s must contain: %s\n' "$file" "$needle" >&2
     exit 1
   fi
@@ -93,5 +111,9 @@ bash scripts/check-release-publication-wiring.sh
 bash scripts/check-release-signing-wiring.sh
 bash scripts/check-windows-signing-wiring.sh
 bash scripts/check-macos-signing-wiring.sh
+
+if [ "$check_github_secrets" -eq 1 ]; then
+  bash scripts/check-github-release-secrets.sh
+fi
 
 printf 'release preflight succeeded for %s\n' "$tag"

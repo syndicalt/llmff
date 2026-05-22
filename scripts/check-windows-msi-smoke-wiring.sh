@@ -34,7 +34,7 @@ require_text() {
   local file="$1"
   local needle="$2"
 
-  if ! grep -Fq "$needle" "$file"; then
+  if ! grep -Fq -- "$needle" "$file"; then
     printf 'error: %s does not mention required text: %s\n' "$file" "$needle" >&2
     exit 1
   fi

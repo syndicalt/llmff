@@ -39,6 +39,13 @@ check passes locally:
 scripts/release-preflight.sh v0.1.2
 ```
 
+Before pushing the release tag, verify the repository has the required Windows
+and Apple signing/notarization secrets:
+
+```bash
+scripts/release-preflight.sh --check-github-secrets v0.1.2
+```
+
 For release tags after this packaging slice, CI creates the GitHub Release when
 the tag does not already have one, then uploads binary archives, checksums,
 Ubuntu/Debian packages, Arch packaging metadata, Windows MSI packages, and
