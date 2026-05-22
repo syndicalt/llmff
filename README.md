@@ -5,7 +5,7 @@
 ## Current Scope
 
 - `llmff run <manifest>` executes a pipeline manifest.
-- `llmff inspect <manifest>` dry-run validates graph references, stage requirements, and backend availability.
+- `llmff inspect <manifest>` dry-run validates graph references, stage requirements, conservative type compatibility, and backend availability.
 - `llmff stages list` prints built-in stage names.
 - `llmff backends list` prints currently wired backend families.
 - The core crate owns execution semantics; the CLI is a thin adapter.
@@ -44,6 +44,8 @@ Inspect the manifest without running model calls:
 ```bash
 cargo run -p llmff -- inspect examples/json-repair.yaml
 ```
+
+`inspect` catches type mismatches that are statically provable, such as field-based route stages whose source is known to be text rather than JSON.
 
 Inspect a manifest that references a registered backend alias:
 

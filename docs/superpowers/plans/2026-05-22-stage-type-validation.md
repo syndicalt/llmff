@@ -23,7 +23,7 @@
 - Modify: `crates/llmff-core/src/engine.rs`
 - Test: `crates/llmff-core/src/engine.rs`
 
-- [ ] **Step 1: Write failing engine tests**
+- [x] **Step 1: Write failing engine tests**
 
 Add these tests to the existing `#[cfg(test)] mod tests` in `crates/llmff-core/src/engine.rs`:
 
@@ -99,7 +99,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run:
 
@@ -116,7 +116,7 @@ cargo test -p llmff-core validate_manifest_accepts_field_route_from_json_source
 
 Expected: the reject test FAILS because current dry-run validation accepts the invalid field route.
 
-- [ ] **Step 3: Implement static success-kind validation**
+- [x] **Step 3: Implement static success-kind validation**
 
 In `crates/llmff-core/src/engine.rs`:
 
@@ -149,7 +149,7 @@ stage_validation_error(
   - `route`: `Any`
   - `write`: parent kind or `Any`
 
-- [ ] **Step 4: Run tests to verify GREEN**
+- [x] **Step 4: Run tests to verify GREEN**
 
 Run:
 
@@ -160,7 +160,7 @@ cargo test -p llmff-core validate_manifest_accepts_field_route_from_json_source
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add crates/llmff-core/src/engine.rs
@@ -172,7 +172,7 @@ git commit -m "feat: validate field route input types"
 **Files:**
 - Modify: `crates/llmff-cli/tests/cli_run.rs`
 
-- [ ] **Step 1: Write failing CLI integration test**
+- [x] **Step 1: Write failing CLI integration test**
 
 Add this test near the existing `inspect_*` tests:
 
@@ -224,7 +224,7 @@ graph:
 }
 ```
 
-- [ ] **Step 2: Run test**
+- [x] **Step 2: Run test**
 
 Run:
 
@@ -234,7 +234,7 @@ cargo test -p llmff --test cli_run inspect_rejects_field_route_from_text_source
 
 Expected: PASS after Task 1. If it fails before Task 1, that is the expected red state.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add crates/llmff-cli/tests/cli_run.rs
@@ -248,11 +248,11 @@ git commit -m "test: inspect rejects field route type mismatch"
 - Modify: `docs/superpowers/specs/2026-05-22-stage-type-validation-design.md`
 - Modify: `docs/superpowers/plans/2026-05-22-stage-type-validation.md`
 
-- [ ] **Step 1: Update README**
+- [x] **Step 1: Update README**
 
 Update the inspect description to mention conservative type compatibility validation.
 
-- [ ] **Step 2: Run final verification**
+- [x] **Step 2: Run final verification**
 
 Run:
 
