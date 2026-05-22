@@ -113,6 +113,50 @@ fn backends_list_json_prints_backend_capabilities() {
 }
 
 #[test]
+fn plugins_list_json_prints_discovered_plugin_manifests() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join("json-tools")).unwrap();
+    std::fs::write(
+        directory
+            .path()
+            .join("json-tools")
+            .join("llmff-plugin.yaml"),
+        r#"
+name: json-tools
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: json.flatten
+    entrypoint: ./json_flatten
+"#,
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "list",
+            "--plugin-dir",
+            directory.path().to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plugins: serde_json::Value =
+        serde_json::from_slice(&output).expect("plugin list should be valid JSON");
+
+    assert_eq!(plugins[0]["name"], "json-tools");
+    assert_eq!(plugins[0]["version"], "0.1.0");
+    assert_eq!(plugins[0]["capabilities"][0]["kind"], "stage");
+    assert_eq!(plugins[0]["capabilities"][0]["name"], "json.flatten");
+}
+
+#[test]
 fn run_executes_manifest_with_mock_backends() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");

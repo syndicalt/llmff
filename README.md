@@ -101,6 +101,7 @@ Tagged release builds publish archives, checksums, `.deb` packages, and Arch met
 - `llmff stages list --format json` prints machine-readable stage metadata and capability flags.
 - `llmff backends list` prints currently wired backend families.
 - `llmff backends list --format json` prints machine-readable backend family metadata and capability flags.
+- `llmff plugins list --plugin-dir <path>` discovers `llmff-plugin.yaml` manifests and prints plugin capability metadata.
 - The core crate owns execution semantics; the CLI is a thin adapter.
 - Mock backends are available for deterministic local runs and tests.
 - An OpenAI-compatible backend exists in the core crate for `/v1/chat/completions` servers.
@@ -213,6 +214,12 @@ List backend capability metadata:
 
 ```bash
 llmff backends list --format json
+```
+
+List plugin manifest metadata:
+
+```bash
+llmff plugins list --plugin-dir ./plugins --format json
 ```
 
 Use stdin/stdout by setting manifest input or output paths to `-`.
@@ -492,5 +499,6 @@ Those mock env vars are convenience fixtures, not the primary backend configurat
 
 - Schema values are inline JSON strings in the current manifest format.
 - `llmff run` streams lifecycle events, but not model token deltas or streaming stage payloads yet.
-- Remote embedding models, external vector indexes, multimodal values, and plugin loading are not implemented yet.
+- Plugin manifests can be discovered and listed, but plugin stage/backend/sampler/tool-transport execution is not wired into pipeline runtime yet.
+- Remote embedding models, external vector indexes, and multimodal values are not implemented yet.
 - Native model loading, quantization, and hardware scheduling are out of scope for this MVP.

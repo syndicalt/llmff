@@ -8,6 +8,7 @@ use llmff_core::backend::{
 };
 use llmff_core::engine::{Engine, RunOptions, SchedulerMode};
 use llmff_core::manifest::Manifest;
+use llmff_core::plugin::discover_plugin_manifests;
 use llmff_core::stage::builtin_stage_metadata;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +70,10 @@ enum Command {
         #[command(subcommand)]
         command: StagesCommand,
     },
+    Plugins {
+        #[command(subcommand)]
+        command: PluginsCommand,
+    },
     Trace {
         path: PathBuf,
     },
@@ -85,6 +90,16 @@ enum StagesCommand {
 #[derive(Debug, Subcommand)]
 enum BackendsCommand {
     List {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginsCommand {
+    List {
+        #[arg(long = "plugin-dir")]
+        plugin_dir: PathBuf,
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
@@ -144,6 +159,9 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Stages {
             command: StagesCommand::List { format },
         } => print_stage_metadata(format)?,
+        Command::Plugins {
+            command: PluginsCommand::List { plugin_dir, format },
+        } => print_plugin_manifests(&plugin_dir, format)?,
         Command::Trace { path } => summarize_trace(&path)?,
     }
 
@@ -186,6 +204,28 @@ fn print_backend_families(format: OutputFormat) -> Result<()> {
                 "{}",
                 serde_json::to_string_pretty(builtin_backend_families())?
             );
+        }
+    }
+
+    Ok(())
+}
+
+fn print_plugin_manifests(plugin_dir: &Path, format: OutputFormat) -> Result<()> {
+    let manifests = discover_plugin_manifests(plugin_dir)?;
+    match format {
+        OutputFormat::Text => {
+            for manifest in manifests {
+                println!("{} {}", manifest.name, manifest.version);
+                for capability in manifest.capabilities {
+                    println!(
+                        "  {} {} {}",
+                        capability.kind, capability.name, capability.entrypoint
+                    );
+                }
+            }
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&manifests)?);
         }
     }
 
