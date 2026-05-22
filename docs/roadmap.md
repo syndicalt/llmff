@@ -119,7 +119,8 @@ Streaming implementation slice:
 - `llmff run --events <path>` writes run and stage lifecycle events as JSONL while the pipeline executes.
 - `llmff run --events -` streams those events to stdout for supervisors, dashboards, and shell pipelines.
 - OpenAI-compatible backends expose a stream API that requests server-sent chat completion chunks with `stream: true`, parses content deltas, and preserves streamed usage metadata when providers emit it.
-- Lifecycle events and backend token streams are now separate primitives; CLI model-token streaming and streaming stage payloads remain future work.
+- `llmff run --stream-stage <infer-stage-id>` streams one model stage's token deltas to stdout while preserving normal manifest outputs.
+- Lifecycle events and backend token streams are now separate primitives; streaming arbitrary stage payloads remains future work.
 
 Embedding retrieval implementation slice:
 
@@ -142,7 +143,7 @@ Plugin discovery implementation slice:
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
 - Richer backend adapters and provider capability metadata.
-- CLI streaming inference and streaming stage outputs.
+- Streaming arbitrary stage outputs.
 - Remote embedding-backed retrieval and learned reranking.
 - Runtime plugin loading for stages, samplers, and backends.
 - More complete model/runtime abstraction once the pipeline runner is stable.
