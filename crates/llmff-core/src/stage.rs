@@ -5,7 +5,7 @@ use jsonschema::JSONSchema;
 
 use crate::error::LlmffError;
 use crate::manifest::StageSpec;
-use crate::value::{StageStatus, Value};
+use crate::value::{Message, StageStatus, Value};
 
 pub fn execute_deterministic_stage(
     spec: &StageSpec,
@@ -47,6 +47,9 @@ fn template(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageS
 fn template_variables(input: Value) -> BTreeMap<String, String> {
     match input {
         Value::Text(text) => BTreeMap::from([("input".to_string(), text)]),
+        Value::Messages(messages) => {
+            BTreeMap::from([("input".to_string(), render_messages_as_text(&messages))])
+        }
         Value::Json(serde_json::Value::Object(object)) => object
             .into_iter()
             .map(|(key, value)| {
@@ -98,12 +101,20 @@ fn system(spec: &StageSpec, input: Option<Value>, cwd: &Path) -> Result<StageSta
     })?;
     let input_text = match input {
         Value::Text(text) => text,
+        Value::Messages(messages) => render_messages_as_text(&messages),
         Value::Json(json) => json.to_string(),
     };
 
-    Ok(StageStatus::Success(Value::Text(format!(
-        "{system_text}\n\n{input_text}"
-    ))))
+    Ok(StageStatus::Success(Value::Messages(vec![
+        Message {
+            role: "system".to_string(),
+            content: system_text,
+        },
+        Message {
+            role: "user".to_string(),
+            content: input_text,
+        },
+    ])))
 }
 
 fn validate_json(
@@ -123,12 +134,8 @@ fn validate_json(
         })?;
     let instance = match &value {
         Value::Json(json) => json.clone(),
-        Value::Text(text) => {
-            serde_json::from_str(text).map_err(|error| LlmffError::StageExecution {
-                stage_id: spec.id.clone(),
-                message: format!("input is not valid JSON: {error}"),
-            })?
-        }
+        Value::Text(text) => parse_json_stage_input(spec, text)?,
+        Value::Messages(messages) => parse_json_stage_input(spec, &render_messages_as_text(messages))?,
     };
     let compiled =
         JSONSchema::compile(&schema_json).map_err(|error| LlmffError::StageExecution {
@@ -145,6 +152,24 @@ fn validate_json(
         None => Ok(StageStatus::Success(Value::Json(instance))),
         Some(errors) => Ok(StageStatus::Invalid { value, errors }),
     }
+}
+
+fn parse_json_stage_input(
+    spec: &StageSpec,
+    source: &str,
+) -> Result<serde_json::Value, LlmffError> {
+    serde_json::from_str(source).map_err(|error| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message: format!("input is not valid JSON: {error}"),
+    })
+}
+
+fn render_messages_as_text(messages: &[Message]) -> String {
+    messages
+        .iter()
+        .map(|message| format!("{}: {}", message.role, message.content))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn schema_source(spec: &StageSpec, cwd: &Path) -> Result<String, LlmffError> {
@@ -181,7 +206,7 @@ mod tests {
     use std::path::Path;
 
     use crate::manifest::StageSpec;
-    use crate::value::{StageStatus, Value};
+    use crate::value::{Message, StageStatus, Value};
 
     #[test]
     fn system_stage_preserves_text_value() {
@@ -384,9 +409,67 @@ mod tests {
 
         assert_eq!(
             output,
-            StageStatus::Success(Value::Text(
-                "Use terse JSON.\n\nReturn an object.".to_string()
-            ))
+            StageStatus::Success(Value::Messages(vec![
+                Message {
+                    role: "system".to_string(),
+                    content: "Use terse JSON.".to_string(),
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: "Return an object.".to_string(),
+                },
+            ]))
+        );
+    }
+
+    #[test]
+    fn system_stage_creates_chat_messages_from_policy_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("policy.md"), "Use terse JSON.").unwrap();
+        let spec = StageSpec {
+            id: "policy".to_string(),
+            op: "system".to_string(),
+            input: None,
+            from: Some("load_prompt".to_string()),
+            path: Some("policy.md".to_string()),
+            model: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            schema: None,
+            schema_path: None,
+            when: None,
+            on_success: None,
+            on_invalid: None,
+            on_skipped: None,
+            field: None,
+            cases: Default::default(),
+            default: None,
+            command: None,
+            method: None,
+            url: None,
+            headers: Default::default(),
+        };
+
+        let output = execute_deterministic_stage(
+            &spec,
+            Some(Value::Text("Return an answer.".to_string())),
+            dir.path(),
+        )
+        .expect("system stage should run");
+
+        assert_eq!(
+            output,
+            StageStatus::Success(Value::Messages(vec![
+                Message {
+                    role: "system".to_string(),
+                    content: "Use terse JSON.".to_string(),
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: "Return an answer.".to_string(),
+                },
+            ]))
         );
     }
 

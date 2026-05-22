@@ -1107,6 +1107,7 @@ fn parent_text(
         })?;
     match status {
         StageStatus::Success(Value::Text(text)) => Ok(text.clone()),
+        StageStatus::Success(Value::Messages(messages)) => Ok(render_messages_as_text(messages)),
         StageStatus::Success(Value::Json(json)) => Ok(json.to_string()),
         StageStatus::Invalid { errors, .. } => Err(LlmffError::StageExecution {
             stage_id: stage.id.clone(),
@@ -1132,8 +1133,17 @@ fn required_model(stage: &StageSpec) -> Result<&str, LlmffError> {
 fn serialize_value(value: &Value) -> Result<String, LlmffError> {
     match value {
         Value::Text(text) => Ok(text.clone()),
+        Value::Messages(messages) => Ok(render_messages_as_text(messages)),
         Value::Json(json) => serde_json::to_string(json).map_err(LlmffError::Json),
     }
+}
+
+fn render_messages_as_text(messages: &[crate::value::Message]) -> String {
+    messages
+        .iter()
+        .map(|message| format!("{}: {}", message.role, message.content))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn resolve_path(cwd: &Path, path: &str) -> PathBuf {
