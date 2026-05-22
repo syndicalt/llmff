@@ -42,9 +42,14 @@ Manifest stages can reference file-backed resources relative to the manifest:
 
 ```yaml
 graph:
+  - id: render_prompt
+    op: template
+    from: load_prompt
+    path: ./prompt.tmpl
+
   - id: apply_policy
     op: system
-    from: load_prompt
+    from: render_prompt
     path: ./policy.md
 
   - id: validate
@@ -52,6 +57,8 @@ graph:
     from: draft
     schema_path: ./answer.schema.json
 ```
+
+`template` replaces `{{input}}` when the parent value is text. When the parent value is a JSON object, object fields are available by name, such as `{{name}}`.
 
 ## Backend Notes
 
