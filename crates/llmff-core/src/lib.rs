@@ -1,6 +1,8 @@
 pub mod error;
 pub mod graph;
 pub mod manifest;
+pub mod stage;
+pub mod value;
 
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
