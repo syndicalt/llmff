@@ -111,6 +111,13 @@ LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
 llmff run --parallel pipeline.yaml
 ```
 
+Stream run and stage lifecycle events as JSONL:
+
+```bash
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
+llmff run --events - pipeline.yaml
+```
+
 Run a compact inline graph:
 
 ```bash
@@ -205,6 +212,11 @@ cargo run -p llmff -- inspect examples/json-repair.yaml
 ```
 
 Manifest stages may be written in any order. `llmff` validates references across the full graph and executes stages in dependency order. By default stages execute sequentially for deterministic local behavior; `run --parallel` executes independent ready stages concurrently.
+
+`run --events <path>` writes the same JSONL lifecycle events as `--trace` while
+the pipeline is running. Use `run --events -` to stream those events to stdout
+for supervisors, dashboards, or shell pipelines. Keep pipeline outputs pointed
+at files when streaming events to stdout to avoid interleaving two data streams.
 
 Manifest stages can reference file-backed resources relative to the manifest:
 

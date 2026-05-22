@@ -8,7 +8,7 @@ This roadmap tracks major product capabilities that move `llmff` toward an FFmpe
 - YAML manifests and compact inline graphs.
 - Deterministic stages for loading, templating, system prompts, local retrieval, caching, routing, validation, repair, tools, and writes.
 - Mock, OpenAI-compatible, and Ollama backend adapters.
-- Dry-run inspection, JSONL traces, trace summaries, and a GitHub install smoke gate.
+- Dry-run inspection, JSONL traces, streamed lifecycle events, trace summaries, and a GitHub install smoke gate.
 
 ## Packaged Installers
 
@@ -113,6 +113,12 @@ First implementation slice:
 - Command tool argv values use semicolon separators inside the `command` parameter, matching the existing inline convention for list-like values.
 
 ## Future Capability Tracks
+
+Streaming implementation slice:
+
+- `llmff run --events <path>` writes run and stage lifecycle events as JSONL while the pipeline executes.
+- `llmff run --events -` streams those events to stdout for supervisors, dashboards, and shell pipelines.
+- This is the first streaming surface; token-level model streaming and streaming stage payloads remain future work.
 
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
 - Richer backend adapters and provider capability metadata.
