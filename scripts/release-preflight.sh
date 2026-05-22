@@ -103,6 +103,10 @@ require_text "docs/platform-support.md" "scripts/release-preflight.sh"
 require_text ".github/workflows/release-artifacts.yml" 'gh release view "$GITHUB_REF_NAME"'
 require_text ".github/workflows/release-artifacts.yml" 'gh release create "$GITHUB_REF_NAME"'
 require_text ".github/workflows/release-artifacts.yml" 'gh release upload "$GITHUB_REF_NAME"'
+require_text ".github/workflows/release-artifacts.yml" 'RELEASE_REPOSITORY: syndicalt/llmff'
+require_text ".github/workflows/release-artifacts.yml" '--repo "$RELEASE_REPOSITORY"'
+require_text ".github/workflows/release-artifacts.yml" 'find release-assets -maxdepth 1 -type f'
+require_text ".github/workflows/release-artifacts.yml" 'release assets already uploaded for %s'
 
 bash scripts/check-wix-tooling.sh
 bash scripts/check-platform-support-doc.sh
