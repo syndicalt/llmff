@@ -99,8 +99,8 @@ Tagged release builds publish archives, checksums, `.deb` packages, and Arch met
 - `llmff inspect <manifest>` dry-run validates graph references, stage requirements, conservative type compatibility, and backend availability.
 - `llmff stages list` prints built-in stage names.
 - `llmff stages list --format json` prints machine-readable stage metadata and capability flags.
-- `llmff backends list` prints currently wired backend families.
-- `llmff backends list --format json` prints machine-readable backend family metadata and capability flags.
+- `llmff backends list` prints built-in and explicitly registered backend families.
+- `llmff backends list --format json` prints machine-readable backend family metadata and capability flags, including backends registered with `--backend`, `--ollama`, or `--plugin-dir`.
 - `llmff plugins list --plugin-dir <path>` discovers `llmff-plugin.yaml` manifests and prints plugin capability metadata.
 - `llmff run --plugin-dir <path>` can execute plugin-provided stages, backends, and tool transports declared in those manifests.
 - The core crate owns execution semantics; the CLI is a thin adapter.
@@ -221,6 +221,15 @@ List backend capability metadata:
 
 ```bash
 llmff backends list --format json
+```
+
+Include runtime-registered providers in backend metadata:
+
+```bash
+llmff backends list --format json \
+  --backend openai_alt=https://api.example.test/v1 \
+  --ollama local=http://localhost:11434 \
+  --plugin-dir ./plugins
 ```
 
 List plugin manifest metadata:
