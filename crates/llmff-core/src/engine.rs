@@ -172,6 +172,7 @@ impl Engine {
                 execute_deterministic_stage(stage, input, cwd)
             }
             "repair" => self.execute_repair(stage, statuses).await,
+            "route" => self.execute_route(stage, statuses),
             other => Err(LlmffError::UnknownStage(other.to_string())),
         }
     }
@@ -264,6 +265,44 @@ impl Engine {
         }
     }
 
+    fn execute_route(
+        &self,
+        stage: &StageSpec,
+        statuses: &BTreeMap<String, StageStatus>,
+    ) -> Result<StageStatus, LlmffError> {
+        let source_id = stage
+            .from
+            .as_ref()
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "route requires from".to_string(),
+            })?;
+        let source = statuses
+            .get(source_id)
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: format!("route source `{source_id}` is not available"),
+            })?;
+
+        let selected = if let Some(field) = &stage.field {
+            select_field_route(stage, field, source)?
+        } else {
+            select_status_route(stage, source)
+        };
+
+        let target_id = selected.ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "route did not match any target".to_string(),
+        })?;
+        statuses
+            .get(target_id)
+            .cloned()
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: format!("route target `{target_id}` is not available"),
+            })
+    }
+
     fn backend_for_model<'a>(&'a self, model: &'a str) -> Result<ResolvedBackend<'a>, LlmffError> {
         if let Some(backend) = self.backends.get(model) {
             return Ok(ResolvedBackend {
@@ -284,6 +323,54 @@ impl Engine {
         Err(LlmffError::Backend(format!(
             "no backend configured for `{model}`"
         )))
+    }
+}
+
+fn select_status_route<'a>(stage: &'a StageSpec, source: &StageStatus) -> Option<&'a str> {
+    match source {
+        StageStatus::Success(_) => stage.on_success.as_deref().or(stage.default.as_deref()),
+        StageStatus::Invalid { .. } => stage.on_invalid.as_deref().or(stage.default.as_deref()),
+        StageStatus::Skipped => stage.on_skipped.as_deref().or(stage.default.as_deref()),
+    }
+}
+
+fn select_field_route<'a>(
+    stage: &'a StageSpec,
+    field: &str,
+    source: &StageStatus,
+) -> Result<Option<&'a str>, LlmffError> {
+    let StageStatus::Success(Value::Json(serde_json::Value::Object(object))) = source else {
+        return Err(LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: "field route requires successful JSON object source".to_string(),
+        });
+    };
+    let value = object
+        .get(field)
+        .ok_or_else(|| LlmffError::StageExecution {
+            stage_id: stage.id.clone(),
+            message: format!("field route source is missing field `{field}`"),
+        })?;
+    let key = route_value_key(value).ok_or_else(|| LlmffError::StageExecution {
+        stage_id: stage.id.clone(),
+        message: format!("field route `{field}` must be string, number, or boolean"),
+    })?;
+
+    Ok(stage
+        .cases
+        .get(&key)
+        .map(String::as_str)
+        .or(stage.default.as_deref()))
+}
+
+fn route_value_key(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(text) => Some(text.clone()),
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::Bool(boolean) => Some(boolean.to_string()),
+        serde_json::Value::Null | serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+            None
+        }
     }
 }
 
@@ -610,5 +697,218 @@ outputs:
             std::fs::read_to_string(output_path).unwrap(),
             "template worked"
         );
+    }
+
+    #[tokio::test]
+    async fn route_stage_selects_success_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, r#"{"answer":"ok"}"#).unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: validate
+    op: validate_json
+    from: load_prompt
+    schema: '{{"type":"object","required":["answer"]}}'
+  - id: choose
+    op: route
+    from: validate
+    on_success: validate
+outputs:
+  final:
+    from: choose
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(output_path).unwrap(),
+            r#"{"answer":"ok"}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn route_stage_selects_invalid_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, r#"{"wrong":true}"#).unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: validate
+    op: validate_json
+    from: load_prompt
+    schema: '{{"type":"object","required":["answer"]}}'
+  - id: repair
+    op: repair
+    from: validate
+    model: mock:json
+  - id: choose
+    op: route
+    from: validate
+    on_invalid: repair
+outputs:
+  final:
+    from: choose
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"fixed"}"#)),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(output_path).unwrap(),
+            r#"{"answer":"fixed"}"#
+        );
+    }
+
+    #[tokio::test]
+    async fn route_stage_selects_json_field_case_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("source.json");
+        let fast_path = dir.path().join("fast.txt");
+        let strong_path = dir.path().join("strong.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&source_path, r#"{"kind":"hard"}"#).unwrap();
+        std::fs::write(&fast_path, "fast").unwrap();
+        std::fs::write(&strong_path, "strong").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  source:
+    path: {}
+  fast:
+    path: {}
+  strong:
+    path: {}
+graph:
+  - id: load_source
+    op: load
+    input: source
+  - id: parse_source
+    op: validate_json
+    from: load_source
+    schema: '{{"type":"object","required":["kind"]}}'
+  - id: fast_answer
+    op: load
+    input: fast
+  - id: strong_answer
+    op: load
+    input: strong
+  - id: choose
+    op: route
+    from: parse_source
+    field: kind
+    cases:
+      hard: strong_answer
+      simple: fast_answer
+outputs:
+  final:
+    from: choose
+    path: {}
+"#,
+            source_path.display(),
+            fast_path.display(),
+            strong_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "strong");
+    }
+
+    #[tokio::test]
+    async fn route_stage_uses_default_for_unmatched_json_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("source.json");
+        let fallback_path = dir.path().join("fallback.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&source_path, r#"{"kind":"unknown"}"#).unwrap();
+        std::fs::write(&fallback_path, "fallback").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  source:
+    path: {}
+  fallback:
+    path: {}
+graph:
+  - id: load_source
+    op: load
+    input: source
+  - id: parse_source
+    op: validate_json
+    from: load_source
+    schema: '{{"type":"object","required":["kind"]}}'
+  - id: fallback_answer
+    op: load
+    input: fallback
+  - id: choose
+    op: route
+    from: parse_source
+    field: kind
+    cases:
+      hard: fallback_answer
+    default: fallback_answer
+outputs:
+  final:
+    from: choose
+    path: {}
+"#,
+            source_path.display(),
+            fallback_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "fallback");
     }
 }
