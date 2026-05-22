@@ -84,6 +84,20 @@ jobs:
           "${{ matrix.binary }}" stages list | grep '^infer$'
           "${{ matrix.binary }}" inspect examples/json-repair.yaml
 
+      - name: Sign Windows release binary
+        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.windows_msi }}
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_CERT_P12_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_P12_BASE64 }}
+          WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
+          WINDOWS_CODESIGN_TIMESTAMP_URL: ${{ secrets.WINDOWS_CODESIGN_TIMESTAMP_URL }}
+        run: |
+          scripts/sign-windows-binary.ps1 `
+            -Binary "${{ matrix.binary }}" `
+            -CertificateBase64 $env:WINDOWS_CODESIGN_CERT_P12_BASE64 `
+            -CertificatePassword $env:WINDOWS_CODESIGN_CERT_PASSWORD `
+            -TimestampUrl $env:WINDOWS_CODESIGN_TIMESTAMP_URL
+
       - name: Package archive
         shell: bash
         run: |
