@@ -70,6 +70,7 @@ pub struct StageSpec {
     pub top_k: Option<usize>,
     pub strategy: Option<String>,
     pub key: Option<String>,
+    pub index: Option<String>,
 }
 
 #[cfg(test)]
@@ -266,6 +267,7 @@ graph:
       - docs/python.txt
     top_k: 1
     strategy: embedding
+    index: .llmff/retrieve/context.index.json
 "#;
 
         let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
@@ -274,6 +276,10 @@ graph:
         assert_eq!(stage.documents, vec!["docs/rust.txt", "docs/python.txt"]);
         assert_eq!(stage.top_k, Some(1));
         assert_eq!(stage.strategy.as_deref(), Some("embedding"));
+        assert_eq!(
+            stage.index.as_deref(),
+            Some(".llmff/retrieve/context.index.json")
+        );
     }
 
     #[test]
