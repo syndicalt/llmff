@@ -16,6 +16,8 @@ pub enum LlmffError {
     StageExecution { stage_id: String, message: String },
     #[error("backend error: {0}")]
     Backend(String),
+    #[error("configuration error: {0}")]
+    Config(String),
     #[error("not implemented: {0}")]
     NotImplemented(&'static str),
 }

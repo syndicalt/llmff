@@ -4,6 +4,7 @@ pub mod error;
 pub mod graph;
 pub mod inline_graph;
 pub mod manifest;
+pub mod plugin;
 pub mod stage;
 pub mod trace;
 pub mod value;

@@ -8,7 +8,7 @@ This roadmap tracks major product capabilities that move `llmff` toward an FFmpe
 - YAML manifests and compact inline graphs.
 - Deterministic stages for loading, templating, system prompts, local lexical and embedding-style retrieval, local reranking, caching, routing, validation, repair, tools, and writes.
 - Mock, OpenAI-compatible, and Ollama backend adapters with portable sampling, seed, JSON response-format, and stop-sequence controls. OpenAI-compatible backends also expose the first token-streaming contract.
-- Dry-run inspection, JSONL traces, streamed lifecycle events, trace summaries, and a GitHub install smoke gate.
+- Dry-run inspection, JSONL traces, streamed lifecycle events, trace summaries, plugin manifest discovery, and a GitHub install smoke gate.
 
 ## Packaged Installers
 
@@ -132,9 +132,16 @@ Rerank implementation slice:
 - The first reranker is deterministic and local, preserves candidate metadata, replaces scores, and applies optional `top_k` after sorting.
 - Remote embedding providers, persistent vector indexes, and learned reranker models remain future work.
 
+Plugin discovery implementation slice:
+
+- `llmff-core` parses `llmff-plugin.yaml` manifests from immediate child directories of a plugin directory.
+- Plugin manifests declare a name, version, and typed capabilities for `stage`, `sampler`, `backend`, or `tool-transport` extension points.
+- `llmff plugins list --plugin-dir <path> --format json` exposes discovered plugin metadata for scripts and wrappers.
+- Runtime loading and execution of plugin-provided stages, samplers, backends, and tool transports remain future work.
+
 - Stronger inline graph expressiveness while keeping manifests as the canonical format for branching pipelines.
 - Richer backend adapters and provider capability metadata.
 - CLI streaming inference and streaming stage outputs.
 - Remote embedding-backed retrieval and learned reranking.
-- Plugin loading for stages, samplers, backends, and tool transports.
+- Runtime plugin loading for stages, samplers, backends, and tool transports.
 - More complete model/runtime abstraction once the pipeline runner is stable.
