@@ -351,7 +351,7 @@ git commit -m "feat: trace model usage metadata"
 - Modify: `README.md`
 - Modify: `docs/superpowers/plans/2026-05-22-usage-metadata.md`
 
-- [ ] **Step 1: Write failing trace CLI test**
+- [x] **Step 1: Write failing trace CLI test**
 
 Update `trace_command_summarizes_trace_jsonl` fixture to include:
 
@@ -367,7 +367,7 @@ Add stdout assertions:
 .stdout(predicate::str::contains("completion_tokens=8"))
 ```
 
-- [ ] **Step 2: Run trace CLI test to verify RED**
+- [x] **Step 2: Run trace CLI test to verify RED**
 
 Run:
 
@@ -377,7 +377,7 @@ cargo test -p llmff --test cli_run trace_command_summarizes_trace_jsonl
 
 Expected: FAIL because trace summaries do not print usage metadata.
 
-- [ ] **Step 3: Implement trace summary usage fields**
+- [x] **Step 3: Implement trace summary usage fields**
 
 In `summarize_trace_event`, after provider metadata, add:
 
@@ -393,7 +393,7 @@ if let Some(completion) = integer_field(event, "completion_tokens") {
 }
 ```
 
-- [ ] **Step 4: Run trace CLI test to verify GREEN**
+- [x] **Step 4: Run trace CLI test to verify GREEN**
 
 Run:
 
@@ -403,7 +403,7 @@ cargo test -p llmff --test cli_run trace_command_summarizes_trace_jsonl
 
 Expected: PASS.
 
-- [ ] **Step 5: Document usage metadata**
+- [x] **Step 5: Document usage metadata**
 
 Update README trace notes:
 
@@ -411,7 +411,7 @@ Update README trace notes:
 Model stage traces include token usage when the backend reports it: `prompt_tokens`, `completion_tokens`, and `total_tokens`. `llmff trace` summarizes total usage as `usage=<total>`.
 ```
 
-- [ ] **Step 6: Run final verification**
+- [x] **Step 6: Run final verification**
 
 Run:
 
@@ -423,7 +423,7 @@ cargo run -p llmff -- inspect examples/json-repair.yaml
 
 Expected: all commands exit 0; inspect prints `ok`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add README.md crates/llmff-cli/src/commands.rs crates/llmff-cli/tests/cli_run.rs docs/superpowers/plans/2026-05-22-usage-metadata.md

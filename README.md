@@ -182,6 +182,7 @@ Top-level `outputs` remain supported for simple final outputs. Use `write` when 
 Stage traces add safe operation metadata when available:
 
 - `model`, `backend`, and `provider_model` for model-calling stages.
+- `prompt_tokens`, `completion_tokens`, and `total_tokens` for model-calling stages when the backend reports usage.
 - `validation_errors` for invalid validation results.
 - `tool_kind` and `tool_target` for tool stages.
 - `output_path` for write stages.
@@ -194,7 +195,7 @@ Summarize a trace file:
 cargo run -p llmff -- trace /tmp/llmff-trace.jsonl
 ```
 
-The trace summary prints run status, stage status, duration, and safe metadata only.
+The trace summary prints run status, stage status, duration, and safe metadata only. Total usage is summarized as `usage=<total>`.
 
 ## Backend Notes
 

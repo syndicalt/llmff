@@ -327,7 +327,9 @@ impl Engine {
                 execute_deterministic_stage(stage, input, cwd).map(StageOutcome::without_usage)
             }
             "repair" => self.execute_repair(stage, statuses).await,
-            "route" => self.execute_route(stage, statuses).map(StageOutcome::without_usage),
+            "route" => self
+                .execute_route(stage, statuses)
+                .map(StageOutcome::without_usage),
             "tool" => self
                 .execute_tool(stage, statuses, cwd)
                 .await
