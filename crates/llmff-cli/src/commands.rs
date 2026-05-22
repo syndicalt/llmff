@@ -8,6 +8,7 @@ use llmff_core::backend::{
 };
 use llmff_core::engine::{Engine, RunOptions, SchedulerMode};
 use llmff_core::manifest::Manifest;
+use llmff_core::stage::builtin_stage_metadata;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AliasValue {
@@ -73,7 +74,10 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum StagesCommand {
-    List,
+    List {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -134,21 +138,27 @@ pub async fn run(cli: Cli) -> Result<()> {
             command: BackendsCommand::List { format },
         } => print_backend_families(format)?,
         Command::Stages {
-            command: StagesCommand::List,
-        } => {
-            println!("load");
-            println!("cache");
-            println!("system");
-            println!("template");
-            println!("retrieve");
-            println!("infer");
-            println!("validate_json");
-            println!("repair");
-            println!("route");
-            println!("tool");
-            println!("write");
-        }
+            command: StagesCommand::List { format },
+        } => print_stage_metadata(format)?,
         Command::Trace { path } => summarize_trace(&path)?,
+    }
+
+    Ok(())
+}
+
+fn print_stage_metadata(format: OutputFormat) -> Result<()> {
+    match format {
+        OutputFormat::Text => {
+            for stage in builtin_stage_metadata() {
+                println!("{}", stage.name);
+            }
+        }
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(builtin_stage_metadata())?
+            );
+        }
     }
 
     Ok(())

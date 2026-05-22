@@ -2,10 +2,109 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use jsonschema::JSONSchema;
+use serde::Serialize;
 
 use crate::error::LlmffError;
 use crate::manifest::StageSpec;
 use crate::value::{Message, StageStatus, Value};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct StageMetadata {
+    pub name: &'static str,
+    pub kind: &'static str,
+    pub required_fields: &'static [&'static str],
+    pub optional_fields: &'static [&'static str],
+    pub capabilities: &'static [&'static str],
+}
+
+pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
+    &[
+        StageMetadata {
+            name: "load",
+            kind: "input",
+            required_fields: &["input"],
+            optional_fields: &[],
+            capabilities: &["text-input", "json-input", "stdin"],
+        },
+        StageMetadata {
+            name: "cache",
+            kind: "storage",
+            required_fields: &["from"],
+            optional_fields: &["path", "key"],
+            capabilities: &["persistent-cache"],
+        },
+        StageMetadata {
+            name: "system",
+            kind: "prompt",
+            required_fields: &["from"],
+            optional_fields: &["path"],
+            capabilities: &["chat-messages", "system-prompt"],
+        },
+        StageMetadata {
+            name: "template",
+            kind: "prompt",
+            required_fields: &["from", "path"],
+            optional_fields: &[],
+            capabilities: &["file-template", "json-fields"],
+        },
+        StageMetadata {
+            name: "retrieve",
+            kind: "retrieval",
+            required_fields: &["from", "documents"],
+            optional_fields: &["top_k"],
+            capabilities: &["local-documents", "lexical-scoring"],
+        },
+        StageMetadata {
+            name: "infer",
+            kind: "model",
+            required_fields: &["from", "model"],
+            optional_fields: &["temperature", "top_p", "max_tokens"],
+            capabilities: &["chat-messages", "sampling", "usage-metadata"],
+        },
+        StageMetadata {
+            name: "validate_json",
+            kind: "validation",
+            required_fields: &["from", "schema|schema_path"],
+            optional_fields: &[],
+            capabilities: &["json-schema"],
+        },
+        StageMetadata {
+            name: "repair",
+            kind: "model",
+            required_fields: &["from", "model"],
+            optional_fields: &["temperature", "top_p", "max_tokens"],
+            capabilities: &["json-repair", "sampling"],
+        },
+        StageMetadata {
+            name: "route",
+            kind: "control-flow",
+            required_fields: &["from", "target"],
+            optional_fields: &[
+                "on_success",
+                "on_invalid",
+                "on_skipped",
+                "field",
+                "cases",
+                "default",
+            ],
+            capabilities: &["status-routing", "json-field-routing"],
+        },
+        StageMetadata {
+            name: "tool",
+            kind: "integration",
+            required_fields: &["from", "transport"],
+            optional_fields: &["command", "method", "url", "headers"],
+            capabilities: &["command-tool", "http-tool"],
+        },
+        StageMetadata {
+            name: "write",
+            kind: "output",
+            required_fields: &["from", "path"],
+            optional_fields: &[],
+            capabilities: &["file-output", "stdout"],
+        },
+    ]
+}
 
 pub fn execute_deterministic_stage(
     spec: &StageSpec,
@@ -285,6 +384,31 @@ mod tests {
 
     use crate::manifest::StageSpec;
     use crate::value::{Message, StageStatus, Value};
+
+    #[test]
+    fn builtin_stage_metadata_describes_pipeline_operations() {
+        let stages = builtin_stage_metadata();
+
+        assert_eq!(stages[0].name, "load");
+        assert_eq!(stages[0].kind, "input");
+        assert!(stages[0].required_fields.contains(&"input"));
+
+        let infer = stages
+            .iter()
+            .find(|stage| stage.name == "infer")
+            .expect("infer stage should be described");
+        assert_eq!(infer.kind, "model");
+        assert!(infer.required_fields.contains(&"model"));
+        assert!(infer.capabilities.contains(&"sampling"));
+
+        let tool = stages
+            .iter()
+            .find(|stage| stage.name == "tool")
+            .expect("tool stage should be described");
+        assert_eq!(tool.kind, "integration");
+        assert!(tool.optional_fields.contains(&"command"));
+        assert!(tool.optional_fields.contains(&"url"));
+    }
 
     #[test]
     fn system_stage_preserves_text_value() {
