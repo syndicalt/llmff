@@ -19,14 +19,16 @@ scripts/trace-to-metrics.sh /tmp/llmff-trace.jsonl
 
 - run status
 - stage counts and per-stage timing
-- total stage duration
+- run wall-clock duration and total stage duration
 - prompt, completion, and total token usage
 - cache hits, misses, and hit rate
-- backend error count and backend error rate
+- backend and timeout error counts and rates
+- failure counts and stable failure classes
 
 `scripts/trace-to-metrics.sh` prints Prometheus-style text metrics:
 
 - `llmff_stage_duration_ms_sum`
+- `llmff_run_duration_ms`
 - `llmff_stage_duration_ms{stage_id,op}`
 - `llmff_prompt_tokens_total`
 - `llmff_completion_tokens_total`
@@ -36,6 +38,10 @@ scripts/trace-to-metrics.sh /tmp/llmff-trace.jsonl
 - `llmff_cache_hit_rate`
 - `llmff_backend_errors_total`
 - `llmff_backend_error_rate`
+- `llmff_failures_total`
+- `llmff_failure_rate`
+- `llmff_timeout_errors_total`
+- `llmff_timeout_error_rate`
 
 The scripts use only Bash and Python standard library modules. They do not open
 network connections and do not require collectors, agents, or cloud services.

@@ -118,9 +118,9 @@ scripts/trace-to-metrics.sh /tmp/llmff-trace.jsonl
 The exporters use only local files, Bash, and Python standard library modules.
 They are safe hooks for later OpenTelemetry bridges because they do not start
 collectors or send telemetry over the network.
-`trace-to-summary.sh` reports stage timing, output and cache artifact
-locations, token usage, cache hit rate, backend error rate, and sanitized
-failure classifications from `run_failed`.
+`trace-to-summary.sh` reports run wall-clock duration, stage timing, output and
+cache artifact locations, token usage, cache hit rate, backend and timeout
+error rates, and sanitized failure classifications from `run_failed`.
 
 ## Stream Separation
 

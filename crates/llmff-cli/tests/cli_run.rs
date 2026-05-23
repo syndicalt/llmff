@@ -1606,7 +1606,9 @@ fn observability_export_scripts_summarize_trace_fixture() {
         .stdout(predicate::str::contains(
             "stages total=5 success=5 failed=0",
         ))
-        .stdout(predicate::str::contains("timing total_stage_ms=48"))
+        .stdout(predicate::str::contains(
+            "timing run_wall_ms=54 total_stage_ms=48",
+        ))
         .stdout(predicate::str::contains("artifacts outputs=1 caches=2"))
         .stdout(predicate::str::contains(
             "artifact output stage=write_answer path=examples/out/answer.json",
@@ -1633,6 +1635,9 @@ fn observability_export_scripts_summarize_trace_fixture() {
         .success()
         .stdout(predicate::str::contains("run fixture-error failed"))
         .stdout(predicate::str::contains(
+            "timing run_wall_ms=5 total_stage_ms=0",
+        ))
+        .stdout(predicate::str::contains(
             "failures total=1 backend=1 timeout=0",
         ))
         .stdout(predicate::str::contains(
@@ -1643,10 +1648,27 @@ fn observability_export_scripts_summarize_trace_fixture() {
         .args([metrics_script.to_str().unwrap(), fixture.to_str().unwrap()])
         .assert()
         .success()
+        .stdout(predicate::str::contains("llmff_run_duration_ms 54"))
         .stdout(predicate::str::contains("llmff_stage_duration_ms_sum 48"))
         .stdout(predicate::str::contains("llmff_tokens_total 20"))
         .stdout(predicate::str::contains("llmff_cache_hit_rate 0.5000"))
+        .stdout(predicate::str::contains("llmff_failures_total 0"))
+        .stdout(predicate::str::contains("llmff_timeout_errors_total 0"))
+        .stdout(predicate::str::contains("llmff_timeout_error_rate 0.0000"))
         .stdout(predicate::str::contains("llmff_backend_error_rate 0.0000"));
+
+    Command::new("bash")
+        .args([
+            metrics_script.to_str().unwrap(),
+            failure_fixture.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("llmff_run_duration_ms 5"))
+        .stdout(predicate::str::contains("llmff_failures_total 1"))
+        .stdout(predicate::str::contains("llmff_timeout_errors_total 0"))
+        .stdout(predicate::str::contains("llmff_timeout_error_rate 0.0000"))
+        .stdout(predicate::str::contains("llmff_backend_error_rate 1.0000"));
 }
 
 #[test]
