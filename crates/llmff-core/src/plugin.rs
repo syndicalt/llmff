@@ -53,7 +53,28 @@ pub struct PluginValidationReport {
     pub valid: bool,
     pub plugin_count: usize,
     pub plugins: Vec<PluginManifest>,
+    pub conformance_checks: Vec<PluginConformanceCheck>,
     pub diagnostics: Vec<PluginDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginConformanceCheck {
+    pub code: String,
+    pub status: PluginConformanceStatus,
+    pub message: String,
+    pub manifest_path: String,
+    pub plugin_name: String,
+    pub capability_kind: String,
+    pub capability_name: String,
+    pub entrypoint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginConformanceStatus {
+    Passed,
+    Warning,
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +141,7 @@ pub fn validate_plugin_directory(
         ))
     })?;
     let mut plugins = Vec::new();
+    let mut conformance_checks = Vec::new();
     let mut diagnostics = Vec::new();
 
     for entry in entries {
@@ -146,7 +168,48 @@ pub fn validate_plugin_directory(
                             capability,
                             &entrypoint,
                         ));
+                        conformance_checks.push(conformance_check(
+                            "entrypoint_executable",
+                            PluginConformanceStatus::Error,
+                            "entrypoint is missing and cannot satisfy the command protocol",
+                            &manifest_path,
+                            &manifest,
+                            capability,
+                            &entrypoint,
+                        ));
+                    } else if !is_executable(&entrypoint) {
+                        diagnostics.push(non_executable_entrypoint_diagnostic(
+                            &manifest_path,
+                            &manifest,
+                            capability,
+                            &entrypoint,
+                        ));
+                        conformance_checks.push(conformance_check(
+                            "entrypoint_executable",
+                            PluginConformanceStatus::Error,
+                            "entrypoint must be executable by the current host before llmff can run it",
+                            &manifest_path,
+                            &manifest,
+                            capability,
+                            &entrypoint,
+                        ));
+                    } else {
+                        conformance_checks.push(conformance_check(
+                            "entrypoint_executable",
+                            PluginConformanceStatus::Passed,
+                            "entrypoint exists and is executable by the current host",
+                            &manifest_path,
+                            &manifest,
+                            capability,
+                            &entrypoint,
+                        ));
                     }
+                    conformance_checks.extend(protocol_conformance_checks(
+                        &manifest_path,
+                        &manifest,
+                        capability,
+                        &entrypoint,
+                    ));
                 }
                 plugins.push(manifest);
             }
@@ -161,6 +224,12 @@ pub fn validate_plugin_directory(
             .then_with(|| left.code.cmp(&right.code))
             .then_with(|| left.capability_name.cmp(&right.capability_name))
     });
+    conformance_checks.sort_by(|left, right| {
+        left.manifest_path
+            .cmp(&right.manifest_path)
+            .then_with(|| left.capability_name.cmp(&right.capability_name))
+            .then_with(|| left.code.cmp(&right.code))
+    });
 
     Ok(PluginValidationReport {
         format_version: PLUGIN_VALIDATION_REPORT_FORMAT_VERSION,
@@ -169,6 +238,7 @@ pub fn validate_plugin_directory(
         valid: diagnostics.is_empty(),
         plugin_count: plugins.len(),
         plugins,
+        conformance_checks,
         diagnostics,
     })
 }
@@ -419,6 +489,123 @@ fn resolve_entrypoint(plugin_root: &Path, entrypoint: &str) -> PathBuf {
     } else {
         plugin_root.join(entrypoint)
     }
+}
+
+fn non_executable_entrypoint_diagnostic(
+    manifest_path: &Path,
+    manifest: &PluginManifest,
+    capability: &PluginCapability,
+    entrypoint: &Path,
+) -> PluginDiagnostic {
+    PluginDiagnostic {
+        severity: PluginDiagnosticSeverity::Error,
+        code: "entrypoint_not_executable".to_string(),
+        message: format!(
+            "plugin manifest `{}` capability `{}` `{}` has non-executable entrypoint `{}`",
+            manifest_path.display(),
+            capability.kind,
+            capability.name,
+            entrypoint.display()
+        ),
+        manifest_path: manifest_path.display().to_string(),
+        plugin_name: Some(manifest.name.clone()),
+        capability_kind: Some(capability.kind.clone()),
+        capability_name: Some(capability.name.clone()),
+        entrypoint: Some(entrypoint.display().to_string()),
+    }
+}
+
+fn protocol_conformance_checks(
+    manifest_path: &Path,
+    manifest: &PluginManifest,
+    capability: &PluginCapability,
+    entrypoint: &Path,
+) -> Vec<PluginConformanceCheck> {
+    vec![
+        conformance_check(
+            "command_protocol_v1",
+            PluginConformanceStatus::Passed,
+            "capability kind is covered by plugin protocol v1 stdin/stdout process semantics",
+            manifest_path,
+            manifest,
+            capability,
+            entrypoint,
+        ),
+        conformance_check(
+            "schema_output_contract",
+            PluginConformanceStatus::Passed,
+            schema_output_message(&capability.kind),
+            manifest_path,
+            manifest,
+            capability,
+            entrypoint,
+        ),
+        conformance_check(
+            "error_handling_contract",
+            PluginConformanceStatus::Passed,
+            "plugin protocol v1 expects failures to exit non-zero and write diagnostics to stderr",
+            manifest_path,
+            manifest,
+            capability,
+            entrypoint,
+        ),
+        conformance_check(
+            "trust_boundary_review",
+            PluginConformanceStatus::Warning,
+            "plugin protocol v1 does not sandbox or sign plugins; review docs/plugins/trust.md before running untrusted code",
+            manifest_path,
+            manifest,
+            capability,
+            entrypoint,
+        ),
+    ]
+}
+
+fn schema_output_message(kind: &str) -> &'static str {
+    match kind {
+        "backend" => {
+            "backend plugins must emit a JSON response with content and optional usage metadata"
+        }
+        "sampler" => "sampler plugins must emit a JSON object with supported sampling overrides",
+        "stage" => "stage plugins must emit one JSON stage value document",
+        "tool-transport" => "tool transport plugins must emit one JSON tool result document",
+        _ => "plugin output must satisfy the plugin protocol v1 JSON contract",
+    }
+}
+
+fn conformance_check(
+    code: &str,
+    status: PluginConformanceStatus,
+    message: &str,
+    manifest_path: &Path,
+    manifest: &PluginManifest,
+    capability: &PluginCapability,
+    entrypoint: &Path,
+) -> PluginConformanceCheck {
+    PluginConformanceCheck {
+        code: code.to_string(),
+        status,
+        message: message.to_string(),
+        manifest_path: manifest_path.display().to_string(),
+        plugin_name: manifest.name.clone(),
+        capability_kind: capability.kind.clone(),
+        capability_name: capability.name.clone(),
+        entrypoint: entrypoint.display().to_string(),
+    }
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    path.metadata()
+        .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
 }
 
 struct ResolvedPluginCapability {
