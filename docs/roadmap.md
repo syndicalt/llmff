@@ -277,7 +277,7 @@ Goal: make manifests portable, auditable, and predictable before execution.
   checkpoint policy, and known capability constraints before a run.
 - Reproducibility reports now summarize the manifest hash, schema version,
   inline graph syntax version, backend registrations, plugin protocol version,
-  plugin manifests, and execution controls.
+  plugin manifests, stage capability constraints, and execution controls.
 - Keep all inputs and outputs explicit: file inputs, stdin, batch input,
   generated artifacts, and stdout-producing stages should be visible in
   inspection output.

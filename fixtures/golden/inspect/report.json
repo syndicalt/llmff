@@ -45,6 +45,12 @@
       "model": null,
       "sampler": null,
       "plugin": null,
+      "capability_constraints": {
+        "kind": "input",
+        "required_fields": ["input"],
+        "optional_fields": [],
+        "capabilities": ["text-input", "json-input", "stdin"]
+      },
       "cache_policy": null,
       "timeout_ms": null,
       "retry": null,
@@ -62,6 +68,30 @@
       },
       "sampler": null,
       "plugin": null,
+      "capability_constraints": {
+        "kind": "model",
+        "required_fields": ["from", "model"],
+        "optional_fields": [
+          "temperature",
+          "top_p",
+          "max_tokens",
+          "seed",
+          "response_format",
+          "stop",
+          "sampler",
+          "timeout_ms",
+          "retry"
+        ],
+        "capabilities": [
+          "chat-messages",
+          "plugin-sampler",
+          "response-format-json",
+          "sampling",
+          "seed-control",
+          "stop-sequences",
+          "usage-metadata"
+        ]
+      },
       "cache_policy": null,
       "timeout_ms": null,
       "retry": null,

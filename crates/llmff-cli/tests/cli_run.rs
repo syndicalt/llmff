@@ -2890,6 +2890,30 @@ fn inspect_json_reports_reproducible_execution_contract() {
     assert_eq!(report["stages"][3]["id"], "draft");
     assert_eq!(report["stages"][3]["model"]["alias"], "mock");
     assert_eq!(report["stages"][3]["model"]["provider_model"], "bad");
+    assert_eq!(
+        report["stages"][3]["capability_constraints"]["kind"],
+        "model"
+    );
+    assert_eq!(
+        report["stages"][3]["capability_constraints"]["required_fields"],
+        serde_json::json!(["from", "model"])
+    );
+    assert!(
+        report["stages"][3]["capability_constraints"]["capabilities"]
+            .as_array()
+            .expect("capabilities should be an array")
+            .contains(&serde_json::json!("response-format-json"))
+    );
+    assert_eq!(
+        report["stages"][4]["capability_constraints"]["required_fields"],
+        serde_json::json!(["from", "schema|schema_path"])
+    );
+    assert!(
+        report["stages"][6]["capability_constraints"]["capabilities"]
+            .as_array()
+            .expect("route capabilities should be an array")
+            .contains(&serde_json::json!("status-routing"))
+    );
     assert_eq!(report["execution"]["scheduler"], "sequential");
     assert_eq!(report["execution"]["stdout"]["events"], false);
     assert_eq!(report["execution"]["stdout"]["stream_stage"], false);
