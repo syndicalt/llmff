@@ -290,13 +290,10 @@ Goal: make manifests portable, auditable, and predictable before execution.
 
 Goal: make every run inspectable after the fact and monitorable while running.
 
-- The first local exporter slice is implemented on `main`: trace summaries
-  include per-stage timing, output artifact locations, cache artifact
-  locations, token usage, cache behavior, backend error rates, and sanitized
+- Local exporter slices are implemented on `main`: trace summaries include run
+  duration, per-stage timing, retry counts, timeout status, cache behavior,
+  token usage, backend diagnostics, output artifact locations, and sanitized
   failure breakdowns.
-- Extend trace summaries with the fields supervisors need most: run duration,
-  per-stage timing, retry counts, timeout status, cache behavior, token usage,
-  backend diagnostics, and output artifact locations.
 - Keep event and trace schemas stable, additive, and backed by fixtures that
   downstream dashboards can use as compatibility tests.
 - Improve local exporters while keeping telemetry local-first and opt-in:

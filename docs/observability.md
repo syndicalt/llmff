@@ -20,6 +20,7 @@ scripts/trace-to-metrics.sh /tmp/llmff-trace.jsonl
 - run status
 - stage counts and per-stage timing
 - run wall-clock duration and total stage duration
+- retry totals, retrying stage counts, and maximum stage attempts
 - prompt, completion, and total token usage
 - cache hits, misses, and hit rate
 - backend and timeout error counts and rates
@@ -38,6 +39,9 @@ scripts/trace-to-metrics.sh /tmp/llmff-trace.jsonl
 - `llmff_cache_hit_rate`
 - `llmff_backend_errors_total`
 - `llmff_backend_error_rate`
+- `llmff_retries_total`
+- `llmff_retry_stages_total`
+- `llmff_max_stage_attempts`
 - `llmff_failures_total`
 - `llmff_failure_rate`
 - `llmff_timeout_errors_total`

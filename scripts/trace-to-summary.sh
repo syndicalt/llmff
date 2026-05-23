@@ -37,10 +37,19 @@ def timestamp_ms(event):
     value = event.get("timestamp_ms")
     return value if isinstance(value, int) else None
 
+
+def attempts_for(event):
+    value = event.get("attempts", 1)
+    return value if isinstance(value, int) and value > 0 else 1
+
 stage_total = len(stage_events)
 stage_success = sum(1 for event in stage_events if event.get("status") == "success")
 stage_failed = sum(1 for event in stage_events if event.get("status") not in {"success", "skipped"})
 duration_total = sum(int(event.get("duration_ms") or 0) for event in stage_events)
+stage_attempts = [attempts_for(event) for event in stage_events]
+retry_total = sum(max(0, attempts - 1) for attempts in stage_attempts)
+retry_stages = sum(1 for attempts in stage_attempts if attempts > 1)
+max_attempts = max(stage_attempts, default=0)
 run_start_ms = timestamp_ms(run_started)
 run_end_ms = timestamp_ms(last_run)
 run_wall_ms = (
@@ -112,6 +121,7 @@ print(
 )
 print(f"cache hits={cache_hits} misses={cache_misses} hit_rate={cache_rate:.2f}%")
 print(f"backend_errors total={backend_errors} rate={backend_error_rate:.2f}%")
+print(f"retries total={retry_total} stages={retry_stages} max_attempts={max_attempts}")
 print(
     f"failures total={len(failure_events)} backend={backend_errors} timeout={timeout_errors}"
 )

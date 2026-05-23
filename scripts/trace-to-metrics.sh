@@ -46,7 +46,16 @@ def timestamp_ms(event):
     return value if isinstance(value, int) else None
 
 
+def attempts_for(event):
+    value = event.get("attempts", 1)
+    return value if isinstance(value, int) and value > 0 else 1
+
+
 duration_total = sum(int(event.get("duration_ms") or 0) for event in stage_events)
+stage_attempts = [attempts_for(event) for event in stage_events]
+retry_total = sum(max(0, attempts - 1) for attempts in stage_attempts)
+retry_stages = sum(1 for attempts in stage_attempts if attempts > 1)
+max_attempts = max(stage_attempts, default=0)
 run_start_ms = timestamp_ms(run_started)
 run_end_ms = timestamp_ms(last_run)
 run_wall_ms = (
@@ -98,6 +107,12 @@ print(f"llmff_cache_hit_rate {cache_rate:.4f}")
 print("# TYPE llmff_backend_error_rate gauge")
 print(f"llmff_backend_errors_total {backend_errors}")
 print(f"llmff_backend_error_rate {backend_error_rate:.4f}")
+print("# TYPE llmff_retries_total counter")
+print(f"llmff_retries_total {retry_total}")
+print("# TYPE llmff_retry_stages_total gauge")
+print(f"llmff_retry_stages_total {retry_stages}")
+print("# TYPE llmff_max_stage_attempts gauge")
+print(f"llmff_max_stage_attempts {max_attempts}")
 print("# TYPE llmff_failure_rate gauge")
 print(f"llmff_failures_total {failures_total}")
 print(f"llmff_failure_rate {failure_rate:.4f}")

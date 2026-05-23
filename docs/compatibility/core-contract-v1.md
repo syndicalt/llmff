@@ -24,6 +24,9 @@ Future breaking syntax changes require a new inline graph syntax version.
 
 Events and traces are newline-delimited JSON. Consumers should correlate records by `run_id` and `stage_id`, and should treat unknown future fields as additive.
 
+Trace `stage_finished` records may include `attempts` when a retryable stage
+needed more than one attempt. Missing `attempts` means one attempt.
+
 Failure records use `event: "run_failed"` with `failure_kind` and `failure_message` when a writer is available.
 
 Process exit-code meanings are part of the CLI compatibility surface. New
