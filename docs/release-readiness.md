@@ -73,6 +73,9 @@ package-manager channel:
 
 - [ ] `scripts/check-package-manager-metadata.sh` passes for the target release.
 - [ ] `scripts/check-governance-readiness.sh` passes.
+- [ ] `scripts/check-ecosystem-readiness.sh` passes, including the
+  `scripts/check-agent-adoption-guide.sh` and
+  `scripts/check-opentelemetry-bridge.sh` public integration gates.
 - [ ] The target channel is marked support-ready by maintainers in the release
   issue or release notes.
 - [ ] Homebrew, Scoop, winget, and AUR metadata pin immutable GitHub Release

@@ -117,6 +117,9 @@ bash scripts/check-release-publication-wiring.sh
 bash scripts/check-release-signing-wiring.sh
 bash scripts/check-windows-signing-wiring.sh
 bash scripts/check-macos-signing-wiring.sh
+bash scripts/check-ecosystem-readiness.sh
+bash scripts/check-agent-adoption-guide.sh
+bash scripts/check-opentelemetry-bridge.sh
 
 if [ "$check_github_secrets" -eq 1 ]; then
   bash scripts/check-github-release-secrets.sh
