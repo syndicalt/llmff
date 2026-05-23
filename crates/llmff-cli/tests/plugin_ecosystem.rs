@@ -243,3 +243,31 @@ fn release_preflight_runs_ecosystem_readiness_gate() {
     assert!(readiness.contains("scripts/check-agent-adoption-guide.sh"));
     assert!(readiness.contains("scripts/check-opentelemetry-bridge.sh"));
 }
+
+#[test]
+fn release_notes_cover_current_ecosystem_contract() {
+    let root = workspace_root();
+    let notes_path = root.join("docs/release-notes/v0.1.3.md");
+    assert!(notes_path.exists(), "missing v0.1.3 release notes");
+
+    let source = std::fs::read_to_string(&notes_path).expect("release notes should be readable");
+    for required in [
+        "Python subprocess supervisor",
+        "batch supervisor",
+        "Node.js streaming supervisor",
+        "agent runner adoption guide",
+        "OpenTelemetry bridge",
+        "ecosystem readiness",
+        "release preflight",
+    ] {
+        assert!(
+            source.contains(required),
+            "v0.1.3 release notes should cover {required}"
+        );
+    }
+
+    let preflight = std::fs::read_to_string(root.join("scripts/release-preflight.sh"))
+        .expect("release preflight should be readable");
+    assert!(preflight.contains("agent runner adoption guide"));
+    assert!(preflight.contains("OpenTelemetry bridge"));
+}
