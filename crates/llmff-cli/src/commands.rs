@@ -8,12 +8,14 @@ use llmff_core::backend::{
     builtin_backend_families, CommandBackend, MockBackend, OllamaBackend, OpenAiCompatibleBackend,
 };
 use llmff_core::engine::{Engine, RetryPolicy, RunOptions, SchedulerMode};
+use llmff_core::graph::Graph;
 use llmff_core::manifest::Manifest;
 use llmff_core::plugin::{
     discover_plugin_backends, discover_plugin_manifests, validate_plugin_directory,
     validate_plugin_manifests,
 };
 use llmff_core::stage::builtin_stage_metadata;
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AliasValue {
@@ -79,6 +81,8 @@ enum Command {
         input: Option<PathBuf>,
         #[arg(short = 'g', long = "graph")]
         graph: Option<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
         #[arg(long = "plugin-dir")]
         plugin_dir: Vec<PathBuf>,
         #[arg(long = "backend")]
@@ -237,16 +241,18 @@ pub async fn run(cli: Cli) -> Result<()> {
             manifest,
             input,
             graph,
+            format,
             plugin_dir,
             backend,
             ollama,
             api_key_env,
             api_key,
         } => {
-            let (manifest, _) = load_pipeline_manifest(manifest, input, graph)?;
+            let loaded = load_pipeline_manifest(manifest, input, graph)?;
             let engine = build_engine(backend, ollama, api_key_env, api_key, &plugin_dir)?;
-            engine.validate_manifest_with_plugin_dirs(manifest, &plugin_dir)?;
-            println!("ok");
+            let graph =
+                engine.validate_manifest_with_plugin_dirs(loaded.manifest.clone(), &plugin_dir)?;
+            print_inspect_report(format, loaded, graph, &plugin_dir)?;
         }
         Command::Backends {
             command:
@@ -290,6 +296,145 @@ pub async fn run(cli: Cli) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct LoadedManifest {
+    manifest: Manifest,
+    cwd: PathBuf,
+    source: ManifestSource,
+}
+
+#[derive(Debug)]
+struct ManifestSource {
+    kind: &'static str,
+    path: Option<PathBuf>,
+    content: String,
+}
+
+fn print_inspect_report(
+    format: OutputFormat,
+    loaded: LoadedManifest,
+    graph: Graph,
+    plugin_dirs: &[PathBuf],
+) -> Result<()> {
+    match format {
+        OutputFormat::Text => {
+            println!("ok");
+        }
+        OutputFormat::Json => {
+            let report = inspect_report(loaded, graph, plugin_dirs);
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+    }
+
+    Ok(())
+}
+
+fn inspect_report(
+    loaded: LoadedManifest,
+    graph: Graph,
+    plugin_dirs: &[PathBuf],
+) -> serde_json::Value {
+    let stage_order = graph
+        .stages()
+        .iter()
+        .map(|stage| stage.id.clone())
+        .collect::<Vec<_>>();
+    let stages = graph
+        .stages()
+        .iter()
+        .map(inspect_stage_view)
+        .collect::<Vec<_>>();
+    let source_path = loaded
+        .source
+        .path
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string());
+    let plugin_dirs = plugin_dirs
+        .iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "format_version": 1,
+        "manifest": {
+            "version": loaded.manifest.version,
+            "source": {
+                "kind": loaded.source.kind,
+                "path": source_path,
+                "cwd": loaded.cwd.to_string_lossy(),
+            },
+            "hash": format!("sha256:{}", sha256_hex(loaded.source.content.as_bytes())),
+        },
+        "inputs": loaded.manifest.inputs,
+        "outputs": loaded.manifest.outputs,
+        "stage_order": stage_order,
+        "stages": stages,
+        "execution": {
+            "scheduler": "sequential",
+            "max_concurrency": null,
+            "default_timeout_ms": null,
+            "default_retry": {
+                "attempts": 1,
+                "backoff_ms": 0,
+            },
+            "checkpoint": {
+                "enabled": false,
+                "resume": false,
+            },
+            "stdout": {
+                "events": false,
+                "stream_stage": false,
+                "manifest_outputs": loaded.manifest.outputs.values().any(|output| output.path == "-"),
+            },
+        },
+        "plugins": {
+            "directories": plugin_dirs,
+        },
+    })
+}
+
+fn inspect_stage_view(stage: &llmff_core::manifest::StageSpec) -> serde_json::Value {
+    serde_json::json!({
+        "id": stage.id,
+        "op": stage.op,
+        "input": stage.input,
+        "from": stage.from,
+        "model": stage.model.as_ref().map(|model| model_view(model)),
+        "sampler": stage.sampler,
+        "plugin": plugin_stage_view(&stage.op),
+        "cache_policy": stage.cache_policy,
+        "timeout_ms": stage.timeout_ms,
+        "retry": stage.retry,
+        "writes_stdout": stage.op == "write" && stage.path.as_deref() == Some("-"),
+    })
+}
+
+fn model_view(model: &str) -> serde_json::Value {
+    let (alias, provider_model) = model
+        .split_once(':')
+        .map(|(alias, provider_model)| (alias, provider_model))
+        .unwrap_or((model, ""));
+    serde_json::json!({
+        "id": model,
+        "alias": alias,
+        "provider_model": provider_model,
+    })
+}
+
+fn plugin_stage_view(op: &str) -> Option<serde_json::Value> {
+    op.strip_prefix("plugin:").map(|name| {
+        serde_json::json!({
+            "kind": "stage",
+            "name": name,
+        })
+    })
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    format!("{digest:x}")
 }
 
 fn print_backend_report(
@@ -871,7 +1016,9 @@ async fn run_pipeline(
     api_key_env: Vec<String>,
     api_key: Vec<String>,
 ) -> Result<()> {
-    let (manifest, cwd) = load_pipeline_manifest(manifest_path, input_path, inline_graph)?;
+    let loaded = load_pipeline_manifest(manifest_path, input_path, inline_graph)?;
+    let manifest = loaded.manifest;
+    let cwd = loaded.cwd;
     let engine = build_engine(backend, ollama, api_key_env, api_key, &plugin_dir)?;
     if batch_input.is_some() || batch_output_dir.is_some() {
         return run_batch_pipeline(
@@ -1143,7 +1290,7 @@ fn load_pipeline_manifest(
     manifest_path: Option<PathBuf>,
     input_path: Option<PathBuf>,
     inline_graph: Option<String>,
-) -> Result<(Manifest, PathBuf)> {
+) -> Result<LoadedManifest> {
     match (manifest_path, inline_graph) {
         (Some(_), Some(_)) => anyhow::bail!("provide either manifest or --graph, not both"),
         (None, None) => anyhow::bail!("provide either manifest or --graph"),
@@ -1154,12 +1301,28 @@ fn load_pipeline_manifest(
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf();
-            Ok((manifest, cwd))
+            Ok(LoadedManifest {
+                manifest,
+                cwd,
+                source: ManifestSource {
+                    kind: "file",
+                    path: Some(path),
+                    content: source,
+                },
+            })
         }
         (None, Some(graph)) => {
             let input = input_path.map(|path| path.to_string_lossy().to_string());
             let manifest = Manifest::from_inline_graph(&graph, input)?;
-            Ok((manifest, std::env::current_dir()?))
+            Ok(LoadedManifest {
+                manifest,
+                cwd: std::env::current_dir()?,
+                source: ManifestSource {
+                    kind: "inline_graph",
+                    path: None,
+                    content: graph,
+                },
+            })
         }
     }
 }

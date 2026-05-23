@@ -9,6 +9,8 @@ controls, traces, and lifecycle events.
 
 An agent supervisor should treat `llmff run` like any other external tool:
 
+- call `llmff inspect --format json` before execution when the agent needs a
+  reproducibility report or wants to validate stdout/artifact ownership
 - pass the manifest path explicitly
 - pass prompt input through `-i/--input`, manifest inputs, or batch input files
 - keep payload output separate from lifecycle events
@@ -22,6 +24,20 @@ An agent supervisor should treat `llmff run` like any other external tool:
 
 Events and traces are metadata streams. They are safe for supervisors that must
 avoid prompt bodies and model payloads, but they are not a payload log.
+
+## Preflight Inspection
+
+Use `inspect --format json` before dispatching a run when an agent needs a
+machine-readable contract for the pipeline:
+
+```bash
+llmff inspect pipeline.yaml --format json
+```
+
+The report includes the manifest hash, source kind, resolved inputs and
+outputs, execution stage order, model aliases, plugin directories, stdout
+ownership, and default execution controls. Agents can store this report next to
+the trace and checkpoint to explain what was expected to run.
 
 ## Recommended Subprocess Shape
 

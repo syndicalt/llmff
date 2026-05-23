@@ -206,6 +206,12 @@ Inspect the manifest without running model calls:
 llmff inspect examples/json-repair.yaml
 ```
 
+Emit a machine-readable reproducibility report for agents and CI:
+
+```bash
+llmff inspect examples/json-repair.yaml --format json
+```
+
 Inspect an inline graph without running model calls:
 
 ```bash

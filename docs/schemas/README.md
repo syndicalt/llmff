@@ -7,6 +7,7 @@ These JSON Schemas freeze the llmff core contract at version 1:
 - `trace-v1.schema.json`: JSONL trace records written by trace and event writers.
 - `plugin-manifest-v1.schema.json`: `llmff-plugin.yaml` plugin manifests.
 - `plugin-validation-report-v1.schema.json`: JSON output from `llmff plugins validate --format json`.
+- `inspect-report-v1.schema.json`: JSON output from `llmff inspect --format json`.
 
 Schemas use JSON Schema draft 2020-12. YAML fixtures are loaded as normal JSON-compatible data before validation.
 
