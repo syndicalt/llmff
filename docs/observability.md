@@ -15,6 +15,13 @@ scripts/trace-to-summary.sh /tmp/llmff-trace.jsonl
 scripts/trace-to-metrics.sh /tmp/llmff-trace.jsonl
 ```
 
+For a runnable same-run pattern that consumes live events, writes a trace, and
+then exports summary and metrics files, run:
+
+```bash
+examples/supervision/local-observability.sh
+```
+
 `scripts/trace-to-summary.sh` prints:
 
 - run status
