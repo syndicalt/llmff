@@ -41,12 +41,46 @@ python3 -c 'import json,sys; [print(e["stage_id"], e.get("status")) for e in map
 ## Watch For Failed Processes
 
 Events are live progress records, not a replacement for process supervision.
-Keep the CLI exit code:
+`run_failed` gives supervisors a stable failure class when event output is
+available, but the CLI exit code remains the final authority:
 
 ```bash
 set -o pipefail
 if ! llmff run examples/json-repair.yaml --events - > /tmp/llmff-events.jsonl; then
-  echo "llmff failed; inspect /tmp/llmff-events.jsonl" >&2
+  python3 -c 'import json,sys; [print(e["failure_kind"], e["failure_message"]) for e in map(json.loads, open(sys.argv[1])) if e["event"] == "run_failed"]' \
+    /tmp/llmff-events.jsonl >&2
   exit 1
 fi
+```
+
+## Supervise Long-Running Runs
+
+For a long-running pipeline, write events to a file and tail only the lifecycle
+stream. Keep stdout free for the selected stage or final payload:
+
+```bash
+events=/tmp/llmff-events.jsonl
+rm -f "$events"
+
+llmff run examples/json-repair.yaml --events "$events" &
+pid=$!
+
+tail -n 0 -F "$events" \
+  | python3 -c 'import json,sys; [print(e["event"], e.get("stage_id",""), e.get("status","")) for e in map(json.loads, sys.stdin)]' &
+tail_pid=$!
+
+wait "$pid"
+status=$?
+kill "$tail_pid" >/dev/null 2>&1 || true
+exit "$status"
+```
+
+## Supervise Parallel Execution
+
+Parallel runs can interleave independent stage events. Track stages by
+`stage_id`, not by adjacent lines:
+
+```bash
+llmff run examples/json-repair.yaml --parallel --events - \
+  | python3 -c 'import json,sys; state={}; [state.update({e["stage_id"]: e.get("status","started")}) or print(state) for e in map(json.loads, sys.stdin) if e.get("stage_id")]'
 ```

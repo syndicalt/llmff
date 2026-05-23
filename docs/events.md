@@ -29,10 +29,13 @@ Supervisors should treat events as an append-only JSONL protocol:
 | `stage_started` | A stage is about to execute. |
 | `stage_finished` | A stage produced a success, invalid, or skipped status. |
 | `run_finished` | The run completed successfully and outputs were written. |
+| `run_failed` | The run failed before completion. The process still exits non-zero. |
 
-Errors terminate the process with a non-zero exit. A failed process may leave a
-partial event file; supervisors should keep the process exit status as the final
-authority for run failure until a dedicated failure event is added.
+Errors terminate the process with a non-zero exit. When an event writer has
+been opened, `run_failed` is appended before returning the error. Supervisors
+should still keep the process exit status as the final authority for run
+failure because event output can be unavailable if the writer itself cannot be
+created or flushed.
 
 ## Fields
 
@@ -57,6 +60,8 @@ authority for run failure until a dedicated failure event is added.
 | `output_path` | string | write stages | Destination path for a write stage. |
 | `cache_hit` | boolean | cache stages | Whether the cache stage reused an existing value. |
 | `cache_path` | string | cache stages | Cache file path used by the stage. |
+| `failure_kind` | string | `run_failed` | Stable failure class such as `manifest_parse`, `io`, `json`, `graph_validation`, `unknown_stage`, `stage_execution`, `backend`, `config`, or `not_implemented`. |
+| `failure_message` | string | `run_failed` | Stable safe summary for the failure class. It does not include raw prompts, secrets, tool bodies, backend payloads, or provider response bodies. |
 
 ## Example Event
 
@@ -64,11 +69,18 @@ authority for run failure until a dedicated failure event is added.
 {"run_id":"cli-run","event":"stage_finished","stage_id":"draft","op":"infer","status":"success","timestamp_ms":1780000000000,"duration_ms":12,"model":"mock:good","backend":"mock","provider_model":"good"}
 ```
 
+## Example Failure Event
+
+```json
+{"run_id":"cli-run","event":"run_failed","status":"failed","timestamp_ms":1780000000010,"failure_kind":"backend","failure_message":"backend request failed"}
+```
+
 ## Stream Separation
 
 Only one live stream should own stdout. `llmff` rejects `--events -` together
 with `--stream-stage` because both would write to stdout. It also rejects
-`--stream-stage` when manifest outputs write to `"-"`.
+`--events -` when manifest outputs write to `"-"`, and rejects `--stream-stage`
+when manifest outputs write to `"-"`.
 
 Use one of these layouts:
 

@@ -13,6 +13,7 @@ Use plugins with `--plugin-dir plugins`. Validate manifests and entrypoints befo
 
 ```sh
 llmff plugins validate --plugin-dir examples/plugins
+llmff plugins validate --plugin-dir examples/plugins --format json
 llmff plugins list --plugin-dir examples/plugins
 ```
 
@@ -39,6 +40,8 @@ Fields:
 - `capabilities[].entrypoint`: command path. Relative paths resolve from the plugin root containing `llmff-plugin.yaml`; absolute paths are used as written.
 
 ## Command Protocol
+
+The current plugin protocol version is `1`.
 
 Each capability is a separate process. llmff starts the entrypoint, writes one request to stdin, closes stdin, waits for exit, and reads stdout. A non-zero exit status fails the stage or backend call, and stderr is included in the user-facing error.
 
@@ -106,6 +109,60 @@ The request includes the model name, chat messages, and sampling parameters:
   "stop": []
 }
 ```
+
+## Validation Output
+
+`llmff plugins validate --plugin-dir <dir>` preserves the text behavior:
+
+- prints `ok` on success
+- exits non-zero with a human-readable error on failure
+
+Use `--format json` for automation. JSON validation prints a report to stdout and exits non-zero when `valid` is `false`.
+
+```json
+{
+  "format_version": 1,
+  "plugin_protocol_version": 1,
+  "plugin_dir": "examples/plugins",
+  "valid": true,
+  "plugin_count": 0,
+  "plugins": [],
+  "diagnostics": []
+}
+```
+
+Diagnostics are structured records. `code` is stable for automation, `message` is for humans, and capability fields are present when the diagnostic applies to a specific capability.
+
+```json
+{
+  "severity": "error",
+  "code": "missing_entrypoint",
+  "message": "plugin manifest `plugins/example/llmff-plugin.yaml` capability `stage` `text.uppercase` has missing entrypoint `plugins/example/./bin/uppercase`",
+  "manifest_path": "plugins/example/llmff-plugin.yaml",
+  "plugin_name": "example",
+  "capability_kind": "stage",
+  "capability_name": "text.uppercase",
+  "entrypoint": "plugins/example/./bin/uppercase"
+}
+```
+
+Known diagnostic codes:
+
+- `manifest_read_failed`
+- `manifest_parse_failed`
+- `manifest_invalid`
+- `missing_entrypoint`
+
+## Protocol Compatibility
+
+Plugin protocol `1` covers the manifest schema, capability kinds, entrypoint resolution, stdin/stdout process lifecycle, backend and sampler JSON request/response contracts, and validation report schema described above.
+
+Compatibility policy:
+
+- llmff keeps protocol `1` behavior backward compatible within the current major CLI line.
+- Additive changes may add new fields to JSON objects. Plugin authors should ignore fields they do not understand.
+- Breaking changes require a new plugin protocol version and documentation for migration.
+- Signing and trust metadata are intentionally not part of protocol `1`; plugin validation checks structure and local entrypoints only.
 
 ## Security Boundaries
 

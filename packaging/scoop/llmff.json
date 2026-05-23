@@ -1,0 +1,14 @@
+{
+  "version": "0.1.2",
+  "description": "FFmpeg-shaped command-line runner for LLM inference pipelines",
+  "homepage": "https://github.com/syndicalt/llmff",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/syndicalt/llmff/releases/download/v0.1.2/llmff-0.1.2-x86_64-pc-windows-msvc.zip",
+      "hash": "440d428ff34e7e119aaf8f785d980a7b9bd1e6809ee6118c4395873f5adc50ba",
+      "extract_dir": "llmff-0.1.2-x86_64-pc-windows-msvc"
+    }
+  },
+  "bin": "llmff.exe"
+}

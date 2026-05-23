@@ -1,0 +1,14 @@
+pkgbase = llmff-bin
+	pkgdesc = FFmpeg-shaped command-line runner for LLM inference pipelines
+	pkgver = 0.1.2
+	pkgrel = 1
+	url = https://github.com/syndicalt/llmff
+	arch = x86_64
+	license = MIT
+	depends = glibc
+	provides = llmff
+	conflicts = llmff
+	source = llmff-bin-0.1.2.tar.gz::https://github.com/syndicalt/llmff/releases/download/v0.1.2/llmff-0.1.2-x86_64-unknown-linux-gnu.tar.gz
+	sha256sums = 48e290e689af48300af7ca9e3a53e2813a35d1b20c2228feae9c67d7412a1067
+
+pkgname = llmff-bin

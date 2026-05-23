@@ -404,6 +404,58 @@ capabilities:
 }
 
 #[test]
+fn plugins_validate_json_reports_missing_entrypoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let plugin = directory.path().join("broken-plugin");
+    std::fs::create_dir(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: broken-plugin
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: missing-backend
+    entrypoint: ./bin/missing-backend
+"#,
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "validate",
+            "--plugin-dir",
+            directory.path().to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value =
+        serde_json::from_slice(&output).expect("plugin validation should be valid JSON");
+
+    assert_eq!(report["valid"], false);
+    assert_eq!(report["plugin_count"], 1);
+    assert_eq!(report["diagnostics"][0]["code"], "missing_entrypoint");
+    assert_eq!(report["diagnostics"][0]["severity"], "error");
+    assert_eq!(report["diagnostics"][0]["plugin_name"], "broken-plugin");
+    assert_eq!(report["diagnostics"][0]["capability_kind"], "backend");
+    assert_eq!(
+        report["diagnostics"][0]["capability_name"],
+        "missing-backend"
+    );
+    assert!(report["diagnostics"][0]["entrypoint"]
+        .as_str()
+        .unwrap()
+        .ends_with("broken-plugin/./bin/missing-backend"));
+}
+
+#[test]
 fn plugins_validate_reports_malformed_manifest() {
     let directory = tempfile::tempdir().unwrap();
     let plugin = directory.path().join("broken-plugin");
@@ -706,6 +758,67 @@ outputs:
         std::fs::read_to_string(output).unwrap(),
         r#"{"answer":"ok"}"#
     );
+}
+
+#[test]
+fn run_writes_failure_event_to_event_stream_without_stdout_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let events = dir.path().join("events.jsonl");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "do not leak this prompt").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: missing:model
+outputs:
+  final:
+    from: draft
+    path: answer.txt
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    let output = cmd
+        .args([
+            "run",
+            "--events",
+            events.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+
+    assert!(output.stdout.is_empty());
+    let event_text = std::fs::read_to_string(events).unwrap();
+    let event = event_text
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .find(|event| event["event"] == "run_failed")
+        .expect("run_failed event should be emitted");
+
+    assert_eq!(event["status"], "failed");
+    assert_eq!(event["failure_kind"], "backend");
+    assert_eq!(event["failure_message"], "backend request failed");
+    assert!(!event_text.contains("do not leak this prompt"));
+    assert!(!event_text.contains("missing:model"));
 }
 
 #[test]

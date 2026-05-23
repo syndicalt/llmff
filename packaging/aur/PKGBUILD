@@ -1,0 +1,27 @@
+# Maintainer: llmff maintainers <maintainers@llmff.dev>
+
+pkgname=llmff-bin
+pkgver=0.1.2
+pkgrel=1
+pkgdesc='FFmpeg-shaped command-line runner for LLM inference pipelines'
+arch=('x86_64')
+url='https://github.com/syndicalt/llmff'
+license=('MIT')
+depends=('glibc')
+provides=('llmff')
+conflicts=('llmff')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/syndicalt/llmff/releases/download/v0.1.2/llmff-0.1.2-x86_64-unknown-linux-gnu.tar.gz")
+sha256sums=('48e290e689af48300af7ca9e3a53e2813a35d1b20c2228feae9c67d7412a1067')
+
+package() {
+  install -Dm755 "llmff-${pkgver}-x86_64-unknown-linux-gnu/llmff" "${pkgdir}/usr/bin/llmff"
+  install -Dm644 "llmff-${pkgver}-x86_64-unknown-linux-gnu/README.md" "${pkgdir}/usr/share/doc/llmff/README.md"
+
+  if [[ -f "llmff-${pkgver}-x86_64-unknown-linux-gnu/LICENSE" ]]; then
+    install -Dm644 "llmff-${pkgver}-x86_64-unknown-linux-gnu/LICENSE" "${pkgdir}/usr/share/licenses/llmff/LICENSE"
+  fi
+
+  if [[ -f "llmff-${pkgver}-x86_64-unknown-linux-gnu/docs/release-notes/v${pkgver}.md" ]]; then
+    install -Dm644 "llmff-${pkgver}-x86_64-unknown-linux-gnu/docs/release-notes/v${pkgver}.md" "${pkgdir}/usr/share/doc/llmff/release-notes-v${pkgver}.md"
+  fi
+}

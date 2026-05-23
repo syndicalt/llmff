@@ -1,0 +1,38 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: render_extraction_prompt
+    op: template
+    from: load_prompt
+    path: ../prompt.tmpl
+  - id: draft_extraction
+    op: infer
+    from: render_extraction_prompt
+    model: mock:bad
+    temperature: 0.0
+    max_tokens: 512
+    response_format: json
+  - id: validate_extraction
+    op: validate_json
+    from: draft_extraction
+    schema_path: ../answer.schema.json
+  - id: repair_extraction
+    op: repair
+    from: validate_extraction
+    when: invalid
+    model: mock:good
+    response_format: json
+  - id: final_extraction
+    op: route
+    from: validate_extraction
+    on_success: validate_extraction
+    on_invalid: repair_extraction
+outputs:
+  final:
+    from: final_extraction
+    path: ./multi-step-extraction.answer.json

@@ -20,6 +20,11 @@ Do not submit a package-manager source until all of these are true:
 
 Track: tap formula after GitHub Release assets are proven.
 
+Prototype metadata:
+
+- `packaging/homebrew/llmff.rb`
+- Local validation: `scripts/check-package-manager-metadata.sh`
+
 Target source:
 
 - macOS Apple Silicon archive:
@@ -45,6 +50,13 @@ Readiness work:
 Track: submit a Windows Package Manager manifest after the unsigned MSI is
 verified from the GitHub Release.
 
+Prototype metadata:
+
+- `packaging/winget/Syndicalt.Llmff.yaml`
+- `packaging/winget/Syndicalt.Llmff.locale.en-US.yaml`
+- `packaging/winget/Syndicalt.Llmff.installer.yaml`
+- Local validation: `scripts/check-package-manager-metadata.sh`
+
 Target source:
 
 - Windows x86_64 MSI:
@@ -64,6 +76,11 @@ Readiness work:
 Track: add a bucket manifest after the Windows archive is verified from the
 GitHub Release.
 
+Prototype metadata:
+
+- `packaging/scoop/llmff.json`
+- Local validation: `scripts/check-package-manager-metadata.sh`
+
 Target source:
 
 - Windows x86_64 zip:
@@ -81,6 +98,12 @@ Readiness work:
 
 Track: submit an official AUR package after the generated `PKGBUILD` and
 `.SRCINFO` from the release are verified.
+
+Prototype metadata:
+
+- `packaging/aur/PKGBUILD`
+- `packaging/aur/.SRCINFO`
+- Local validation: `scripts/check-package-manager-metadata.sh`
 
 Target source:
 
@@ -103,6 +126,12 @@ Readiness work:
 ## apt Repository
 
 Track: evaluate feasibility after direct `.deb` installation proves reliable.
+
+Prototype status:
+
+- No apt repository metadata is shipped under `packaging/apt`.
+- Local validation fails if unsigned apt repository metadata such as `Release`,
+  `InRelease`, `Packages`, `Sources`, or `Release.gpg` is added.
 
 Target source:
 
