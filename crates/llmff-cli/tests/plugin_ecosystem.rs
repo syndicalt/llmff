@@ -218,3 +218,28 @@ fn adoption_guide_demonstrates_real_agent_integration_patterns() {
             "agent adoption guide validation succeeded",
         ));
 }
+
+#[test]
+fn release_preflight_runs_ecosystem_readiness_gate() {
+    let root = workspace_root();
+    let preflight = root.join("scripts/release-preflight.sh");
+    assert!(preflight.exists(), "missing release preflight script");
+
+    let source = std::fs::read_to_string(&preflight).expect("preflight should be readable");
+    for required in [
+        "scripts/check-ecosystem-readiness.sh",
+        "scripts/check-agent-adoption-guide.sh",
+        "scripts/check-opentelemetry-bridge.sh",
+    ] {
+        assert!(
+            source.contains(required),
+            "release preflight should include {required}"
+        );
+    }
+
+    let readiness = std::fs::read_to_string(root.join("docs/release-readiness.md"))
+        .expect("release readiness should be readable");
+    assert!(readiness.contains("scripts/check-ecosystem-readiness.sh"));
+    assert!(readiness.contains("scripts/check-agent-adoption-guide.sh"));
+    assert!(readiness.contains("scripts/check-opentelemetry-bridge.sh"));
+}
