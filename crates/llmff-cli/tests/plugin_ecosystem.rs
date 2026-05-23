@@ -148,3 +148,36 @@ fn apt_repository_publication_requires_signed_metadata_design() {
             "apt repository design validation succeeded",
         ));
 }
+
+#[test]
+fn opentelemetry_bridge_is_defined_without_default_network_telemetry() {
+    let root = workspace_root();
+    let design = root.join("docs/opentelemetry-bridge.md");
+    assert!(design.exists(), "missing OpenTelemetry bridge design");
+
+    let source = std::fs::read_to_string(&design).expect("design should be readable");
+    for required in [
+        "future OpenTelemetry bridge",
+        "trace-to-metrics.sh",
+        "trace-to-summary.sh",
+        "file-based supervision contract",
+        "no collectors by default",
+        "no network telemetry by default",
+        "deployment-owned bridge",
+        "attribute mapping",
+        "payload exclusion",
+        "support commitment",
+    ] {
+        assert!(
+            source.contains(required),
+            "OpenTelemetry bridge design should cover {required}"
+        );
+    }
+
+    Command::new(root.join("scripts/check-opentelemetry-bridge.sh"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "OpenTelemetry bridge validation succeeded",
+        ));
+}

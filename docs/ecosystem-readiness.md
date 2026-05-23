@@ -10,6 +10,7 @@ smoke gate that protects it.
 | --- | --- | --- | --- |
 | Manifest contracts | `docs/schemas/pipeline-manifest-v1.schema.json`, `docs/manifest-reproducibility.md`, and `examples/*.yaml` | `python3 scripts/check-schema-contract.py` and `scripts/check-manifest-reproducibility.sh` | local |
 | Trace and event streams | `docs/events.md` and `examples/supervision/fixtures/` | `cargo test -p llmff --test cli_run observability_export_scripts_summarize_trace_fixture` | local |
+| OpenTelemetry bridge | `docs/opentelemetry-bridge.md` and local trace exporters | `scripts/check-opentelemetry-bridge.sh` | local |
 | CLI JSON output | `docs/schemas/inspect-report-v1.schema.json` and CLI integration tests | `cargo test -p llmff --test cli_run inspect_json_reports_reproducible_execution_contract` | local |
 | Plugin protocol | `docs/plugins/fixtures/protocol-v1/` and `docs/plugins/registry.v1.json` | `scripts/check-plugin-fixtures.sh` | local |
 | Provider onboarding | `docs/provider-troubleshooting.md`, `docs/provider-smoke-readiness.md`, `docs/providers/`, and `examples/providers/` | `scripts/check-provider-smoke-readiness.sh` and `.github/workflows/live-provider-smoke.yml` | local plus opt-in live smoke |

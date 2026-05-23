@@ -75,6 +75,10 @@ Deployments can run it after a trace is written and feed the resulting text into
 their collector-specific bridge. `llmff` intentionally does not start a
 collector or send telemetry over the network by default.
 
+The bridge boundary, attribute mapping, payload exclusion rules, and support
+commitment are defined in
+[`docs/opentelemetry-bridge.md`](opentelemetry-bridge.md).
+
 ## Supervisor Contract
 
 Supervisors should:
