@@ -84,6 +84,8 @@ require_text "$aur_srcinfo" "pkgver = ${version}"
 require_text "$aur_srcinfo" "source = llmff-bin-${version}.tar.gz::${base_url}/${linux_archive}"
 require_text "$aur_srcinfo" "sha256sums = ${linux_sha256}"
 
+scripts/check-apt-repository-design.sh
+
 require_absent_path "packaging/apt/Release"
 require_absent_path "packaging/apt/InRelease"
 require_absent_path "packaging/apt/Packages"
