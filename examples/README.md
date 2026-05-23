@@ -194,6 +194,11 @@ See [`streaming-supervision.md`](streaming-supervision.md) for examples that
 pipe lifecycle events into shell tools while keeping selected stage payloads on
 a separate output stream.
 
+For agent supervisors, see
+[`../docs/agent-workflows.md`](../docs/agent-workflows.md) and the runnable
+[`examples/agent-workflows/supervisor.py`](agent-workflows/supervisor.py)
+subprocess example.
+
 ## Retrieval Fixtures
 
 Files:

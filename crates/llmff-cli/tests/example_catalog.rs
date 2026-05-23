@@ -254,3 +254,51 @@ fn provider_docs_examples_and_ci_cover_common_gateways() {
     assert!(workflow_source.contains("LLMFF_LIVE_PROVIDER_SMOKE: \"1\""));
     assert!(workflow_source.contains("secrets.OPENAI_API_KEY"));
 }
+
+#[test]
+fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
+    let root = workspace_root();
+    let docs = root.join("docs/agent-workflows.md");
+    let example = root.join("examples/agent-workflows/supervisor.py");
+
+    assert!(docs.exists(), "missing agent workflow docs");
+    assert!(example.exists(), "missing agent supervisor example");
+
+    let readme =
+        std::fs::read_to_string(root.join("README.md")).expect("README should be readable");
+    let examples_readme =
+        std::fs::read_to_string(root.join("examples/README.md")).expect("examples README readable");
+    let observability = std::fs::read_to_string(root.join("docs/observability.md"))
+        .expect("observability readable");
+    let docs_source = std::fs::read_to_string(&docs).expect("agent docs should be readable");
+
+    for required in [
+        "subprocess",
+        "--events",
+        "--trace",
+        "failure_kind",
+        "checkpoint",
+        "exit code",
+    ] {
+        assert!(
+            docs_source.contains(required),
+            "agent docs should cover {required}"
+        );
+    }
+
+    assert!(readme.contains("docs/agent-workflows.md"));
+    assert!(examples_readme.contains("examples/agent-workflows/supervisor.py"));
+    assert!(observability.contains("docs/agent-workflows.md"));
+
+    let temp = tempfile::tempdir().expect("tempdir should be available");
+    Command::new("python3")
+        .arg(example)
+        .arg("--work-dir")
+        .arg(temp.path())
+        .env("LLMFF_BIN", assert_cmd::cargo::cargo_bin("llmff"))
+        .env("LLMFF_MOCK_BAD_RESPONSE", r#"{"wrong":true}"#)
+        .env("LLMFF_MOCK_GOOD_RESPONSE", r#"{"answer":"ok"}"#)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("run_status=ok"));
+}

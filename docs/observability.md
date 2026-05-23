@@ -68,3 +68,7 @@ Supervisors should:
 - treat `run_failed.failure_kind` as a stable failure class
 - use the process exit code as the final authority for run failure
 - store traces and events as metadata, not as a substitute for payload logs
+
+For a complete agent-oriented subprocess pattern, see
+[`docs/agent-workflows.md`](agent-workflows.md) and
+[`examples/agent-workflows/supervisor.py`](../examples/agent-workflows/supervisor.py).
