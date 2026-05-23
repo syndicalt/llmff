@@ -1351,6 +1351,7 @@ fn events_streaming_smoke_fixture_passes() {
 fn observability_export_scripts_summarize_trace_fixture() {
     let root = workspace_root();
     let fixture = root.join("examples/supervision/fixtures/success-trace.jsonl");
+    let failure_fixture = root.join("examples/supervision/fixtures/backend-error-trace.jsonl");
     let summary_script = root.join("scripts/trace-to-summary.sh");
     let metrics_script = root.join("scripts/trace-to-metrics.sh");
 
@@ -1360,9 +1361,16 @@ fn observability_export_scripts_summarize_trace_fixture() {
         .success()
         .stdout(predicate::str::contains("run fixture-run success"))
         .stdout(predicate::str::contains(
-            "stages total=4 success=4 failed=0",
+            "stages total=5 success=5 failed=0",
         ))
-        .stdout(predicate::str::contains("timing total_stage_ms=45"))
+        .stdout(predicate::str::contains("timing total_stage_ms=48"))
+        .stdout(predicate::str::contains("artifacts outputs=1 caches=2"))
+        .stdout(predicate::str::contains(
+            "artifact output stage=write_answer path=examples/out/answer.json",
+        ))
+        .stdout(predicate::str::contains(
+            "artifact cache stage=cached path=.llmff/cache/fixture.json hit=true",
+        ))
         .stdout(predicate::str::contains(
             "tokens prompt=12 completion=8 total=20",
         ))
@@ -1374,10 +1382,25 @@ fn observability_export_scripts_summarize_trace_fixture() {
         ));
 
     Command::new("bash")
+        .args([
+            summary_script.to_str().unwrap(),
+            failure_fixture.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("run fixture-error failed"))
+        .stdout(predicate::str::contains(
+            "failures total=1 backend=1 timeout=0",
+        ))
+        .stdout(predicate::str::contains(
+            "failure kind=backend message=backend request failed",
+        ));
+
+    Command::new("bash")
         .args([metrics_script.to_str().unwrap(), fixture.to_str().unwrap()])
         .assert()
         .success()
-        .stdout(predicate::str::contains("llmff_stage_duration_ms_sum 45"))
+        .stdout(predicate::str::contains("llmff_stage_duration_ms_sum 48"))
         .stdout(predicate::str::contains("llmff_tokens_total 20"))
         .stdout(predicate::str::contains("llmff_cache_hit_rate 0.5000"))
         .stdout(predicate::str::contains("llmff_backend_error_rate 0.0000"));

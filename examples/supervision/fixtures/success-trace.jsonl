@@ -7,4 +7,6 @@
 {"run_id":"fixture-run","event":"stage_finished","timestamp_ms":1780000000040,"stage_id":"cached","op":"cache","status":"success","duration_ms":5,"cache_hit":true,"cache_path":".llmff/cache/fixture.json"}
 {"run_id":"fixture-run","event":"stage_started","timestamp_ms":1780000000041,"stage_id":"cache_miss","op":"cache"}
 {"run_id":"fixture-run","event":"stage_finished","timestamp_ms":1780000000049,"stage_id":"cache_miss","op":"cache","status":"success","duration_ms":8,"cache_hit":false,"cache_path":".llmff/cache/miss.json"}
-{"run_id":"fixture-run","event":"run_finished","timestamp_ms":1780000000050,"status":"success"}
+{"run_id":"fixture-run","event":"stage_started","timestamp_ms":1780000000050,"stage_id":"write_answer","op":"write"}
+{"run_id":"fixture-run","event":"stage_finished","timestamp_ms":1780000000053,"stage_id":"write_answer","op":"write","status":"success","duration_ms":3,"output_path":"examples/out/answer.json"}
+{"run_id":"fixture-run","event":"run_finished","timestamp_ms":1780000000054,"status":"success"}

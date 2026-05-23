@@ -16,18 +16,28 @@ The summary output is intended for humans:
 
 ```text
 run fixture-run success
-stages total=4 success=4 failed=0
-timing total_stage_ms=45
+stages total=5 success=5 failed=0
+timing total_stage_ms=48
+stage load_prompt op=load status=success duration_ms=2
+stage draft op=infer status=success duration_ms=30
+stage cached op=cache status=success duration_ms=5
+stage cache_miss op=cache status=success duration_ms=8
+stage write_answer op=write status=success duration_ms=3
+artifacts outputs=1 caches=2
+artifact output stage=write_answer path=examples/out/answer.json
+artifact cache stage=cached path=.llmff/cache/fixture.json hit=true
+artifact cache stage=cache_miss path=.llmff/cache/miss.json hit=false
 tokens prompt=12 completion=8 total=20
 cache hits=1 misses=1 hit_rate=50.00%
 backend_errors total=0 rate=0.00%
+failures total=0 backend=0 timeout=0
 ```
 
 The metrics output is line-oriented text that can be scraped from a file or
 converted later by a deployment-specific OpenTelemetry bridge:
 
 ```text
-llmff_stage_duration_ms_sum 45
+llmff_stage_duration_ms_sum 48
 llmff_tokens_total 20
 llmff_cache_hit_rate 0.5000
 llmff_backend_error_rate 0.0000
