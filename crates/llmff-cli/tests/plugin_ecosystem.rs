@@ -85,6 +85,40 @@ fn ecosystem_integration_paths_are_readiness_gated() {
 }
 
 #[test]
+fn manifest_reproducibility_policy_is_checked() {
+    let root = workspace_root();
+    let guide = root.join("docs/manifest-reproducibility.md");
+    assert!(guide.exists(), "missing manifest reproducibility guide");
+
+    let source = std::fs::read_to_string(&guide).expect("guide should be readable");
+    for required in [
+        "manifest hash",
+        "resolved inputs",
+        "resolved outputs",
+        "stage order",
+        "backend aliases",
+        "model ids",
+        "plugin dependencies",
+        "cache policy",
+        "checkpoint/resume policy",
+        "manifest lockfile remains parked",
+        "materially improves portability",
+    ] {
+        assert!(
+            source.contains(required),
+            "manifest reproducibility guide should cover {required}"
+        );
+    }
+
+    Command::new(root.join("scripts/check-manifest-reproducibility.sh"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "manifest reproducibility validation succeeded",
+        ));
+}
+
+#[test]
 fn apt_repository_publication_requires_signed_metadata_design() {
     let root = workspace_root();
     let design = root.join("docs/apt-repository-design.md");
