@@ -231,7 +231,10 @@ way that is observable, restartable, and easy to supervise.
 Goal: make `llmff run` fully dependable as a subprocess primitive.
 
 - Keep exit codes stable and documented across successful runs, stage failures,
-  graph/configuration failures, batch failures, and interrupted runs.
+  graph/configuration failures, batch failures, and interrupted runs. Initial
+  stable process codes are implemented for success, CLI usage failures,
+  validation failures, stage failures, provider/runtime failures, local data
+  failures, and intentionally unsupported behavior.
 - Keep stdout, stderr, `--events`, `--trace`, `--stream-stage`, and manifest
   outputs unambiguous so supervisors can safely compose `llmff` in shells,
   daemons, and agent runtimes.

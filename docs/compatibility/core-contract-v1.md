@@ -26,6 +26,10 @@ Events and traces are newline-delimited JSON. Consumers should correlate records
 
 Failure records use `event: "run_failed"` with `failure_kind` and `failure_message` when a writer is available.
 
+Process exit-code meanings are part of the CLI compatibility surface. New
+non-zero codes may be added only when they describe a new broad failure class;
+existing code meanings should not change within core contract v1.
+
 ## Inspect Reports
 
 `llmff inspect --format json` emits an inspect report with

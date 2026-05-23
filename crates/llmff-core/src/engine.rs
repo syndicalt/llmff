@@ -5365,7 +5365,23 @@ outputs:
         let dir = tempfile::tempdir().unwrap();
         let input_path = dir.path().join("input.txt");
         let output_path = dir.path().join("answer.txt");
+        let tool_path = dir.path().join("fail-tool");
         std::fs::write(&input_path, "hello tool").unwrap();
+        std::fs::write(
+            &tool_path,
+            r#"#!/bin/sh
+cat >/dev/null
+exit 7
+"#,
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&tool_path).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(0o755);
+        }
+        std::fs::set_permissions(&tool_path, permissions).unwrap();
 
         let manifest = Manifest::from_yaml_str(&format!(
             r#"
@@ -5380,13 +5396,14 @@ graph:
   - id: call_tool
     op: tool
     from: load_source
-    command: ["/bin/false"]
+    command: [{}]
 outputs:
   final:
     from: call_tool
     path: {}
 "#,
             input_path.display(),
+            tool_path.display(),
             output_path.display()
         ))
         .unwrap();
