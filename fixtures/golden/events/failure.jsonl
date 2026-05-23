@@ -1,0 +1,2 @@
+{"run_id":"cli-run","event":"run_started","timestamp_ms":1780000000010}
+{"run_id":"cli-run","event":"run_failed","status":"failed","timestamp_ms":1780000000011,"failure_kind":"backend","failure_message":"backend request failed"}

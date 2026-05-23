@@ -1,3 +1,6 @@
 .worktrees/
 target/
 dist/
+.codex/
+.env.local
+.eventloom/

@@ -1,0 +1,4 @@
+#!/bin/sh
+python3 -c 'import json, sys
+query = sys.stdin.read()
+print(json.dumps({"query": query, "results": [{"id": "example-doc", "score": 1.0, "text": "Static retrieval result"}]}, separators=(",", ":")))'

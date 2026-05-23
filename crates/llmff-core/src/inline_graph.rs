@@ -303,6 +303,9 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         strategy: None,
         key: None,
         index: None,
+        timeout_ms: None,
+        retry: None,
+        cache_policy: None,
     }
 }
 

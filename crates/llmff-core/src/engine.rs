@@ -2,18 +2,20 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt as _;
+use tokio::process::Command;
 
-use crate::backend::{Backend, InferRequest, UsageMetadata};
+use crate::backend::{Backend, InferRequest, InferResponse, UsageMetadata};
 use crate::error::LlmffError;
 use crate::graph::{stage_dependencies, Graph};
-use crate::manifest::{Manifest, StageSpec};
+use crate::manifest::{Manifest, RetrySpec, StageSpec};
 use crate::plugin::{
     discover_plugin_samplers, discover_plugin_stages, discover_plugin_tool_transports,
     PluginSampler, PluginStage, PluginToolTransport,
@@ -37,6 +39,21 @@ pub struct RunReport {
 pub enum SchedulerMode {
     Sequential,
     Parallel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryPolicy {
+    pub attempts: usize,
+    pub backoff_ms: u64,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            attempts: 1,
+            backoff_ms: 0,
+        }
+    }
 }
 
 struct StageOutcome {
@@ -98,6 +115,12 @@ pub struct RunOptions {
     pub plugin_dirs: Vec<PathBuf>,
     pub stream_stage: Option<String>,
     pub stream_path: Option<PathBuf>,
+    pub max_concurrency: Option<usize>,
+    pub default_timeout_ms: Option<u64>,
+    pub default_retry: RetryPolicy,
+    pub checkpoint_path: Option<PathBuf>,
+    pub resume_path: Option<PathBuf>,
+    pub replay_trace_path: Option<PathBuf>,
 }
 
 impl Default for RunOptions {
@@ -110,6 +133,12 @@ impl Default for RunOptions {
             plugin_dirs: Vec::new(),
             stream_stage: None,
             stream_path: None,
+            max_concurrency: None,
+            default_timeout_ms: None,
+            default_retry: RetryPolicy::default(),
+            checkpoint_path: None,
+            resume_path: None,
+            replay_trace_path: None,
         }
     }
 }
@@ -198,6 +227,14 @@ impl Engine {
         let plugin_tool_transports = load_plugin_tool_transports(&options.plugin_dirs)?;
         let plugin_stages = load_plugin_stages(&options.plugin_dirs)?;
         let plugin_samplers = load_plugin_samplers(&options.plugin_dirs)?;
+        if options.max_concurrency == Some(0) {
+            return Err(LlmffError::Config(
+                "max_concurrency must be greater than 0".to_string(),
+            ));
+        }
+        if let Some(path) = &options.replay_trace_path {
+            validate_replay_trace(path, options.resume_path.is_some())?;
+        }
         let graph = self.validate_manifest_with_plugins(
             manifest.clone(),
             &plugin_stages,
@@ -209,7 +246,12 @@ impl Engine {
             ));
         }
         let mut stream_writer = create_stage_stream_writer(&options, &graph, cwd)?;
-        let mut statuses = BTreeMap::new();
+        let manifest_hash = manifest_fingerprint(&manifest)?;
+        let mut statuses = if let Some(path) = &options.resume_path {
+            read_checkpoint(path, &manifest_hash)?
+        } else {
+            BTreeMap::new()
+        };
 
         write_trace(
             trace,
@@ -251,6 +293,8 @@ impl Engine {
                     &plugin_stages,
                     &plugin_samplers,
                     stream_writer.as_mut(),
+                    &options,
+                    &manifest_hash,
                 )
                 .await?;
             }
@@ -265,6 +309,8 @@ impl Engine {
                     &plugin_tool_transports,
                     &plugin_stages,
                     &plugin_samplers,
+                    &options,
+                    &manifest_hash,
                 )
                 .await?;
             }
@@ -340,11 +386,16 @@ impl Engine {
         plugin_stages: &BTreeMap<String, PluginStage>,
         plugin_samplers: &BTreeMap<String, PluginSampler>,
         mut stream_writer: Option<&mut StageStreamWriter>,
+        options: &RunOptions,
+        manifest_hash: &str,
     ) -> Result<(), LlmffError> {
         for stage in graph.stages() {
+            if statuses.contains_key(&stage.id) {
+                continue;
+            }
             let stage_started = self.start_stage_trace(trace, run_id, stage)?;
             let outcome = self
-                .execute_stage(
+                .execute_stage_with_timeout(
                     manifest,
                     stage,
                     statuses,
@@ -353,10 +404,16 @@ impl Engine {
                     plugin_stages,
                     plugin_samplers,
                     stream_writer.as_deref_mut(),
+                    options,
                 )
                 .await?;
             stream_stage_payload_if_selected(stream_writer.as_deref_mut(), stage, &outcome)?;
             self.finish_stage_trace(trace, run_id, stage, stage_started, outcome, statuses)?;
+            write_checkpoint_if_configured(
+                options.checkpoint_path.as_deref(),
+                statuses,
+                &manifest_hash,
+            )?;
         }
 
         Ok(())
@@ -373,6 +430,8 @@ impl Engine {
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
         plugin_stages: &BTreeMap<String, PluginStage>,
         plugin_samplers: &BTreeMap<String, PluginSampler>,
+        options: &RunOptions,
+        manifest_hash: &str,
     ) -> Result<(), LlmffError> {
         let mut pending = graph.stages().iter().collect::<Vec<_>>();
 
@@ -381,6 +440,9 @@ impl Engine {
             let mut waiting = Vec::new();
 
             for stage in pending {
+                if statuses.contains_key(&stage.id) {
+                    continue;
+                }
                 if stage_dependencies(stage)
                     .iter()
                     .all(|dependency| statuses.contains_key(dependency))
@@ -391,33 +453,45 @@ impl Engine {
                 }
             }
 
+            if ready.is_empty() && waiting.is_empty() {
+                break;
+            }
             if ready.is_empty() {
                 return Err(LlmffError::GraphValidation(
                     "cycle detected in graph".to_string(),
                 ));
             }
 
-            let starts = ready
-                .iter()
-                .map(|stage| self.start_stage_trace(trace, run_id, stage))
-                .collect::<Result<Vec<_>, _>>()?;
-            let status_snapshot = statuses.clone();
-            let outcomes = futures::future::join_all(ready.iter().map(|stage| {
-                self.execute_stage(
-                    manifest,
-                    stage,
-                    &status_snapshot,
-                    cwd,
-                    plugin_tool_transports,
-                    plugin_stages,
-                    plugin_samplers,
-                    None,
-                )
-            }))
-            .await;
+            let max_concurrency = options.max_concurrency.unwrap_or(ready.len()).max(1);
+            for chunk in ready.chunks(max_concurrency) {
+                let starts = chunk
+                    .iter()
+                    .map(|stage| self.start_stage_trace(trace, run_id, stage))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let status_snapshot = statuses.clone();
+                let outcomes = futures::future::join_all(chunk.iter().map(|stage| {
+                    self.execute_stage_with_timeout(
+                        manifest,
+                        stage,
+                        &status_snapshot,
+                        cwd,
+                        plugin_tool_transports,
+                        plugin_stages,
+                        plugin_samplers,
+                        None,
+                        options,
+                    )
+                }))
+                .await;
 
-            for ((stage, started), outcome) in ready.into_iter().zip(starts).zip(outcomes) {
-                self.finish_stage_trace(trace, run_id, stage, started, outcome?, statuses)?;
+                for ((stage, started), outcome) in chunk.iter().zip(starts).zip(outcomes) {
+                    self.finish_stage_trace(trace, run_id, stage, started, outcome?, statuses)?;
+                    write_checkpoint_if_configured(
+                        options.checkpoint_path.as_deref(),
+                        statuses,
+                        &manifest_hash,
+                    )?;
+                }
             }
 
             pending = waiting;
@@ -643,6 +717,42 @@ impl Engine {
         }
     }
 
+    async fn execute_stage_with_timeout(
+        &self,
+        manifest: &Manifest,
+        stage: &StageSpec,
+        statuses: &BTreeMap<String, StageStatus>,
+        cwd: &Path,
+        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
+        plugin_stages: &BTreeMap<String, PluginStage>,
+        plugin_samplers: &BTreeMap<String, PluginSampler>,
+        stream_writer: Option<&mut StageStreamWriter>,
+        options: &RunOptions,
+    ) -> Result<StageOutcome, LlmffError> {
+        let timeout_ms = stage.timeout_ms.or(options.default_timeout_ms);
+        let run = self.execute_stage(
+            manifest,
+            stage,
+            statuses,
+            cwd,
+            plugin_tool_transports,
+            plugin_stages,
+            plugin_samplers,
+            stream_writer,
+            options.default_retry,
+        );
+        if let Some(timeout_ms) = timeout_ms {
+            return tokio::time::timeout(Duration::from_millis(timeout_ms), run)
+                .await
+                .map_err(|_| LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: "stage timed out".to_string(),
+                })?;
+        }
+
+        run.await
+    }
+
     async fn execute_stage(
         &self,
         manifest: &Manifest,
@@ -653,6 +763,7 @@ impl Engine {
         plugin_stages: &BTreeMap<String, PluginStage>,
         plugin_samplers: &BTreeMap<String, PluginSampler>,
         stream_writer: Option<&mut StageStreamWriter>,
+        default_retry: RetryPolicy,
     ) -> Result<StageOutcome, LlmffError> {
         if !should_execute_stage(stage, statuses)? {
             return Ok(StageOutcome::without_usage(StageStatus::Skipped));
@@ -663,8 +774,14 @@ impl Engine {
                 .execute_load(manifest, stage, cwd)
                 .map(StageOutcome::without_usage),
             "infer" => {
-                self.execute_infer(stage, statuses, plugin_samplers, stream_writer)
-                    .await
+                self.execute_infer(
+                    stage,
+                    statuses,
+                    plugin_samplers,
+                    stream_writer,
+                    default_retry,
+                )
+                .await
             }
             "validate_json" | "system" | "template" | "retrieve" | "rerank" => {
                 let input = stage
@@ -675,12 +792,15 @@ impl Engine {
                 execute_deterministic_stage(stage, input, cwd).map(StageOutcome::without_usage)
             }
             "cache" => self.execute_cache(stage, statuses, cwd),
-            "repair" => self.execute_repair(stage, statuses, plugin_samplers).await,
+            "repair" => {
+                self.execute_repair(stage, statuses, plugin_samplers, default_retry)
+                    .await
+            }
             "route" => self
                 .execute_route(stage, statuses)
                 .map(StageOutcome::without_usage),
             "tool" => self
-                .execute_tool(stage, statuses, cwd, plugin_tool_transports)
+                .execute_tool(stage, statuses, cwd, plugin_tool_transports, default_retry)
                 .await
                 .map(StageOutcome::without_usage),
             "write" => self
@@ -696,6 +816,7 @@ impl Engine {
                             plugin_stages,
                             plugin_stage_name,
                         )
+                        .await
                         .map(StageOutcome::without_usage);
                 }
                 Err(LlmffError::UnknownStage(other.to_string()))
@@ -741,6 +862,7 @@ impl Engine {
         statuses: &BTreeMap<String, StageStatus>,
         plugin_samplers: &BTreeMap<String, PluginSampler>,
         stream_writer: Option<&mut StageStreamWriter>,
+        default_retry: RetryPolicy,
     ) -> Result<StageOutcome, LlmffError> {
         let messages = parent_messages(stage, statuses)?;
         let model = required_model(stage)?;
@@ -755,7 +877,7 @@ impl Engine {
             response_format: stage.response_format.clone(),
             stop: stage.stop.clone(),
         };
-        apply_plugin_sampler(stage, plugin_samplers, &mut request)?;
+        apply_plugin_sampler(stage, plugin_samplers, &mut request).await?;
 
         if let Some(writer) = stream_writer {
             if writer.stage_id == stage.id {
@@ -783,7 +905,8 @@ impl Engine {
             }
         }
 
-        let response = resolved.infer(request).await?;
+        let response =
+            infer_with_retry(stage, resolved.backend.as_ref(), request, default_retry).await?;
 
         Ok(StageOutcome::with_usage(
             StageStatus::Success(Value::Text(response.text)),
@@ -796,6 +919,7 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         plugin_samplers: &BTreeMap<String, PluginSampler>,
+        default_retry: RetryPolicy,
     ) -> Result<StageOutcome, LlmffError> {
         let parent = stage
             .from
@@ -831,8 +955,10 @@ impl Engine {
                     response_format: stage.response_format.clone(),
                     stop: stage.stop.clone(),
                 };
-                apply_plugin_sampler(stage, plugin_samplers, &mut request)?;
-                let response = resolved.infer(request).await?;
+                apply_plugin_sampler(stage, plugin_samplers, &mut request).await?;
+                let response =
+                    infer_with_retry(stage, resolved.backend.as_ref(), request, default_retry)
+                        .await?;
 
                 Ok(StageOutcome::with_usage(
                     StageStatus::Success(Value::Text(response.text)),
@@ -886,12 +1012,13 @@ impl Engine {
         statuses: &BTreeMap<String, StageStatus>,
         cwd: &Path,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
+        default_retry: RetryPolicy,
     ) -> Result<StageStatus, LlmffError> {
         if let Some(command) = &stage.command {
-            return execute_command_tool(stage, statuses, cwd, command);
+            return execute_command_tool(stage, statuses, cwd, command).await;
         }
         if stage.url.is_some() {
-            return execute_http_tool(stage, statuses).await;
+            return execute_http_tool_with_retry(stage, statuses, default_retry).await;
         }
         if let Some(transport) = &stage.transport {
             let plugin_transport = plugin_tool_transports.get(transport).ok_or_else(|| {
@@ -905,7 +1032,8 @@ impl Engine {
                 statuses,
                 cwd,
                 &[plugin_transport.entrypoint.to_string_lossy().into_owned()],
-            );
+            )
+            .await;
         }
 
         Err(LlmffError::StageExecution {
@@ -914,7 +1042,7 @@ impl Engine {
         })
     }
 
-    fn execute_plugin_stage(
+    async fn execute_plugin_stage(
         &self,
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
@@ -936,6 +1064,7 @@ impl Engine {
             &[plugin_stage.entrypoint.to_string_lossy().into_owned()],
             "plugin stage",
         )
+        .await
     }
 
     fn execute_write(
@@ -998,8 +1127,17 @@ impl Engine {
             .unwrap_or_else(|| ".llmff/cache".to_string());
         let cache_dir = resolve_path(cwd, &cache_path);
         let cache_file = cache_dir.join(format!("{}.json", cache_digest(stage, value)?));
+        let cache_policy = stage.cache_policy.as_deref().unwrap_or("read");
 
-        if cache_file.exists() {
+        if cache_policy == "bypass" {
+            return Ok(StageOutcome::with_cache(
+                StageStatus::Success(value.clone()),
+                false,
+                cache_path,
+            ));
+        }
+
+        if cache_policy != "refresh" && cache_file.exists() {
             let source = std::fs::read_to_string(&cache_file).map_err(|error| {
                 LlmffError::StageExecution {
                     stage_id: stage.id.clone(),
@@ -1158,6 +1296,21 @@ fn stage_validation_error(stage: &StageSpec, message: impl Into<String>) -> Llmf
     }
 }
 
+fn retry_policy(stage: &StageSpec, default_retry: RetryPolicy) -> RetryPolicy {
+    stage
+        .retry
+        .as_ref()
+        .map(retry_policy_from_spec)
+        .unwrap_or(default_retry)
+}
+
+fn retry_policy_from_spec(spec: &RetrySpec) -> RetryPolicy {
+    RetryPolicy {
+        attempts: spec.attempts.max(1),
+        backoff_ms: spec.backoff_ms.unwrap_or(0),
+    }
+}
+
 fn validate_input_formats(manifest: &Manifest) -> Result<(), LlmffError> {
     for (id, input) in &manifest.inputs {
         if input_format(input.format.as_deref()).is_none() {
@@ -1210,6 +1363,7 @@ fn decode_input(
 }
 
 fn validate_sampling_parameters(stage: &StageSpec) -> Result<(), LlmffError> {
+    validate_execution_options(stage)?;
     if let Some(temperature) = stage.temperature {
         if temperature < 0.0 {
             return Err(stage_validation_error(
@@ -1245,6 +1399,33 @@ fn validate_sampling_parameters(stage: &StageSpec) -> Result<(), LlmffError> {
             stage,
             "stop sequences cannot be empty",
         ));
+    }
+
+    Ok(())
+}
+
+fn validate_execution_options(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.timeout_ms == Some(0) {
+        return Err(stage_validation_error(
+            stage,
+            "timeout_ms must be greater than 0",
+        ));
+    }
+    if let Some(retry) = &stage.retry {
+        if retry.attempts == 0 {
+            return Err(stage_validation_error(
+                stage,
+                "retry attempts must be greater than 0",
+            ));
+        }
+    }
+    if let Some(policy) = stage.cache_policy.as_deref() {
+        if !matches!(policy, "read" | "refresh" | "bypass") {
+            return Err(stage_validation_error(
+                stage,
+                "cache_policy must be read, refresh, or bypass",
+            ));
+        }
     }
 
     Ok(())
@@ -1357,11 +1538,19 @@ fn plugin_stage_name(op: &str) -> Option<&str> {
 }
 
 const CACHE_RECORD_VERSION: u32 = 1;
+const CHECKPOINT_RECORD_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct CacheRecord {
     version: u32,
     value: Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CheckpointRecord {
+    version: u32,
+    manifest_hash: String,
+    statuses: BTreeMap<String, StageStatus>,
 }
 
 fn parent_success_value<'a>(
@@ -1444,6 +1633,93 @@ fn write_cache_file(
             cache_file.display()
         ),
     })?;
+
+    Ok(())
+}
+
+fn read_checkpoint(
+    path: &Path,
+    expected_manifest_hash: &str,
+) -> Result<BTreeMap<String, StageStatus>, LlmffError> {
+    let source = std::fs::read_to_string(path)?;
+    let record: CheckpointRecord = serde_json::from_str(&source)?;
+    if record.version != CHECKPOINT_RECORD_VERSION {
+        return Err(LlmffError::Config(format!(
+            "unsupported checkpoint version {}",
+            record.version
+        )));
+    }
+    if record.manifest_hash != expected_manifest_hash {
+        return Err(LlmffError::Config(
+            "checkpoint manifest hash does not match current manifest".to_string(),
+        ));
+    }
+
+    Ok(record.statuses)
+}
+
+fn write_checkpoint_if_configured(
+    checkpoint_path: Option<&Path>,
+    statuses: &BTreeMap<String, StageStatus>,
+    manifest_hash: &str,
+) -> Result<(), LlmffError> {
+    let Some(path) = checkpoint_path else {
+        return Ok(());
+    };
+    let record = CheckpointRecord {
+        version: CHECKPOINT_RECORD_VERSION,
+        manifest_hash: manifest_hash.to_string(),
+        statuses: statuses.clone(),
+    };
+    let encoded = serde_json::to_vec_pretty(&record).map_err(LlmffError::Json)?;
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    let tmp_file = path.with_extension(format!("tmp.{}.{}", std::process::id(), timestamp_ms()));
+    std::fs::write(&tmp_file, encoded)?;
+    std::fs::rename(&tmp_file, path)?;
+
+    Ok(())
+}
+
+fn manifest_fingerprint(manifest: &Manifest) -> Result<String, LlmffError> {
+    let encoded = serde_json::to_vec(manifest).map_err(LlmffError::Json)?;
+    let mut hasher = Sha256::new();
+    hasher.update(encoded);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn validate_replay_trace(path: &Path, has_checkpoint: bool) -> Result<(), LlmffError> {
+    let source = std::fs::read_to_string(path)?;
+    let mut has_stage_finished = false;
+    for (index, line) in source.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event: serde_json::Value = serde_json::from_str(line).map_err(|error| {
+            LlmffError::Config(format!(
+                "invalid replay trace JSON on line {}: {error}",
+                index + 1
+            ))
+        })?;
+        if event.get("event").and_then(serde_json::Value::as_str) == Some("stage_finished") {
+            has_stage_finished = true;
+        }
+    }
+    if !has_stage_finished {
+        return Err(LlmffError::Config(
+            "replay trace does not contain completed stages".to_string(),
+        ));
+    }
+
+    if !has_checkpoint {
+        return Err(LlmffError::Config(
+            "trace replay requires a checkpoint because traces intentionally omit stage payloads"
+                .to_string(),
+        ));
+    }
 
     Ok(())
 }
@@ -1566,7 +1842,7 @@ struct SamplerOverrides {
     stop: Option<Vec<String>>,
 }
 
-fn apply_plugin_sampler(
+async fn apply_plugin_sampler(
     stage: &StageSpec,
     plugin_samplers: &BTreeMap<String, PluginSampler>,
     request: &mut InferRequest,
@@ -1585,6 +1861,7 @@ fn apply_plugin_sampler(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|error| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
@@ -1599,6 +1876,7 @@ fn apply_plugin_sampler(
         })?;
     stdin
         .write_all(&encoded)
+        .await
         .map_err(|error| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
             message: format!("failed to write plugin sampler `{sampler_name}` request: {error}"),
@@ -1607,6 +1885,7 @@ fn apply_plugin_sampler(
 
     let output = child
         .wait_with_output()
+        .await
         .map_err(|error| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
             message: format!("failed to wait for plugin sampler `{sampler_name}`: {error}"),
@@ -1860,16 +2139,16 @@ fn load_plugin_samplers(
     Ok(samplers)
 }
 
-fn execute_command_tool(
+async fn execute_command_tool(
     stage: &StageSpec,
     statuses: &BTreeMap<String, StageStatus>,
     cwd: &Path,
     command: &[String],
 ) -> Result<StageStatus, LlmffError> {
-    execute_command_stage(stage, statuses, cwd, command, "tool command")
+    execute_command_stage(stage, statuses, cwd, command, "tool command").await
 }
 
-fn execute_command_stage(
+async fn execute_command_stage(
     stage: &StageSpec,
     statuses: &BTreeMap<String, StageStatus>,
     cwd: &Path,
@@ -1887,6 +2166,7 @@ fn execute_command_stage(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|error| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
@@ -1902,6 +2182,7 @@ fn execute_command_stage(
         })?;
     stdin
         .write_all(input.as_bytes())
+        .await
         .map_err(|error| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
             message: format!("failed to write {label} stdin: {error}"),
@@ -1910,6 +2191,7 @@ fn execute_command_stage(
 
     let output = child
         .wait_with_output()
+        .await
         .map_err(|error| LlmffError::StageExecution {
             stage_id: stage.id.clone(),
             message: format!("failed to wait for {label} `{program}`: {error}"),
@@ -2001,6 +2283,66 @@ async fn execute_http_tool(
     }
 
     Ok(StageStatus::Success(Value::Text(body)))
+}
+
+async fn infer_with_retry(
+    stage: &StageSpec,
+    backend: &dyn Backend,
+    request: InferRequest,
+    default_retry: RetryPolicy,
+) -> Result<InferResponse, LlmffError> {
+    let policy = retry_policy(stage, default_retry);
+    let mut attempt = 1usize;
+
+    loop {
+        match backend.infer(request.clone()).await {
+            Ok(response) => return Ok(response),
+            Err(error) if attempt < policy.attempts => {
+                attempt += 1;
+                sleep_for_retry(policy.backoff_ms).await;
+                drop(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+async fn execute_http_tool_with_retry(
+    stage: &StageSpec,
+    statuses: &BTreeMap<String, StageStatus>,
+    default_retry: RetryPolicy,
+) -> Result<StageStatus, LlmffError> {
+    let policy = retry_policy(stage, default_retry);
+    let mut attempt = 1usize;
+
+    loop {
+        match execute_http_tool(stage, statuses).await {
+            Ok(status) => return Ok(status),
+            Err(error) if attempt < policy.attempts && is_retryable_http_tool_error(&error) => {
+                attempt += 1;
+                sleep_for_retry(policy.backoff_ms).await;
+                drop(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn is_retryable_http_tool_error(error: &LlmffError) -> bool {
+    let LlmffError::StageExecution { message, .. } = error else {
+        return false;
+    };
+    message.starts_with("http tool request failed:")
+        || message.contains("http tool returned status 500")
+        || message.contains("http tool returned status 502")
+        || message.contains("http tool returned status 503")
+        || message.contains("http tool returned status 504")
+}
+
+async fn sleep_for_retry(backoff_ms: u64) {
+    if backoff_ms > 0 {
+        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+    }
 }
 
 fn method_allows_body(method: &reqwest::Method) -> bool {
@@ -2282,6 +2624,8 @@ fn failure_kind(error: &LlmffError) -> &'static str {
         LlmffError::Json(_) => "json",
         LlmffError::GraphValidation(_) => "graph_validation",
         LlmffError::UnknownStage(_) => "unknown_stage",
+        LlmffError::StageExecution { message, .. } if message == "stage timed out" => "timeout",
+        LlmffError::StageExecution { message, .. } if message.starts_with("http tool ") => "http",
         LlmffError::StageExecution { .. } => "stage_execution",
         LlmffError::Backend(_) => "backend",
         LlmffError::Config(_) => "config",
@@ -2296,6 +2640,12 @@ fn failure_message(error: &LlmffError) -> &'static str {
         LlmffError::Json(_) => "JSON operation failed",
         LlmffError::GraphValidation(_) => "graph validation failed",
         LlmffError::UnknownStage(_) => "unknown stage operation",
+        LlmffError::StageExecution { message, .. } if message == "stage timed out" => {
+            "stage timed out"
+        }
+        LlmffError::StageExecution { message, .. } if message.starts_with("http tool ") => {
+            "HTTP stage failed"
+        }
         LlmffError::StageExecution { .. } => "stage execution failed",
         LlmffError::Backend(_) => "backend request failed",
         LlmffError::Config(_) => "configuration failed",
@@ -2393,6 +2743,43 @@ mod tests {
             Ok(InferResponse {
                 model: request.model.clone(),
                 text: request.model,
+                usage: None,
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct FlakyBackend {
+        attempts: Arc<AtomicUsize>,
+        failures_before_success: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl Backend for FlakyBackend {
+        async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
+            let attempt = self.attempts.fetch_add(1, Ordering::SeqCst) + 1;
+            if attempt <= self.failures_before_success {
+                return Err(LlmffError::Backend("temporary model failure".to_string()));
+            }
+
+            Ok(InferResponse {
+                model: request.model,
+                text: "retried".to_string(),
+                usage: None,
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct SlowBackend;
+
+    #[async_trait::async_trait]
+    impl Backend for SlowBackend {
+        async fn infer(&self, request: InferRequest) -> Result<InferResponse, LlmffError> {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(InferResponse {
+                model: request.model,
+                text: "too late".to_string(),
                 usage: None,
             })
         }
@@ -2642,6 +3029,524 @@ graph:
             .await
             .expect("second run should read cache");
         assert_eq!(std::fs::read_to_string(&output_path).unwrap(), "first");
+    }
+
+    #[tokio::test]
+    async fn cache_stage_refresh_policy_replaces_existing_value() {
+        let dir = tempdir().unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: cached
+    op: cache
+    from: load_prompt
+    path: .llmff/cache
+    key: answer-v1
+    cache_policy: refresh
+outputs:
+  final:
+    from: cached
+    path: answer.txt
+"#,
+        )
+        .unwrap();
+        let prompt_path = dir.path().join("prompt.txt");
+        let output_path = dir.path().join("answer.txt");
+
+        std::fs::write(&prompt_path, "first").unwrap();
+        Engine::new()
+            .run_manifest(manifest.clone(), dir.path())
+            .await
+            .expect("first run should populate cache");
+        std::fs::write(&prompt_path, "second").unwrap();
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect("refresh run should replace cache");
+
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "second");
+    }
+
+    #[tokio::test]
+    async fn model_stage_retries_before_failing() {
+        let dir = tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, "hello").unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: flaky
+    retry:
+      attempts: 3
+      backoff_ms: 0
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "flaky",
+            Arc::new(FlakyBackend {
+                attempts: attempts.clone(),
+                failures_before_success: 2,
+            }),
+        );
+
+        engine
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect("third model attempt should succeed");
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "retried");
+    }
+
+    #[tokio::test]
+    async fn http_tool_stage_retries_server_failures() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/tool"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("temporary"))
+            .up_to_n_times(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/tool"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+            .mount(&server)
+            .await;
+        let dir = tempdir().unwrap();
+        let input_path = dir.path().join("input.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&input_path, "hello").unwrap();
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: call_tool
+    op: tool
+    from: load_prompt
+    method: POST
+    url: {}/tool
+    retry:
+      attempts: 3
+      backoff_ms: 0
+outputs:
+  final:
+    from: call_tool
+    path: {}
+"#,
+            input_path.display(),
+            server.uri(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect("third HTTP attempt should succeed");
+
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "ok");
+    }
+
+    #[tokio::test]
+    async fn http_tool_stage_does_not_retry_client_failures() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/tool"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let dir = tempdir().unwrap();
+        let input_path = dir.path().join("input.txt");
+        std::fs::write(&input_path, "hello").unwrap();
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: call_tool
+    op: tool
+    from: load_prompt
+    method: POST
+    url: {}/tool
+    retry:
+      attempts: 3
+      backoff_ms: 0
+"#,
+            input_path.display(),
+            server.uri()
+        ))
+        .unwrap();
+
+        let error = Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect_err("client HTTP failure should not retry");
+
+        assert!(error.to_string().contains("http tool returned status 400"));
+    }
+
+    #[tokio::test]
+    async fn stage_timeout_fails_with_safe_failure_kind() {
+        let dir = tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "hello").unwrap();
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: slow
+    timeout_ms: 1
+outputs:
+  final:
+    from: draft
+    path: answer.txt
+"#,
+            prompt_path.display()
+        ))
+        .unwrap();
+        let options = RunOptions {
+            run_id: "timeout-run".to_string(),
+            trace_path: Some(trace_path.clone()),
+            ..RunOptions::default()
+        };
+
+        let error = Engine::new()
+            .with_backend("slow", Arc::new(SlowBackend))
+            .run_manifest_with_options(manifest, dir.path(), options)
+            .await
+            .expect_err("stage should time out");
+
+        assert!(error.to_string().contains("stage timed out"));
+        let events = parse_trace_events(&std::fs::read_to_string(trace_path).unwrap());
+        let failed = events
+            .iter()
+            .find(|event| event["event"] == "run_failed")
+            .expect("run_failed event should exist");
+        assert_eq!(failed["failure_kind"], "timeout");
+        assert_eq!(failed["failure_message"], "stage timed out");
+    }
+
+    #[tokio::test]
+    async fn command_tool_timeout_preempts_blocking_process() {
+        let dir = tempdir().unwrap();
+        let input_path = dir.path().join("input.txt");
+        std::fs::write(&input_path, "hello").unwrap();
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: slow_tool
+    op: tool
+    from: load_prompt
+    command: ["sh", "-c", "sleep 2"]
+    timeout_ms: 10
+outputs:
+  final:
+    from: slow_tool
+    path: answer.txt
+"#,
+            input_path.display()
+        ))
+        .unwrap();
+        let started = Instant::now();
+
+        let error = Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect_err("slow command should time out");
+
+        assert!(error.to_string().contains("stage timed out"));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "timeout should preempt the process"
+        );
+    }
+
+    #[tokio::test]
+    async fn parallel_scheduler_respects_max_concurrency() {
+        let (manifest, dir, active, max_active) = parallel_scheduler_fixture();
+
+        Engine::new()
+            .with_backend(
+                "delay",
+                Arc::new(DelayedBackend {
+                    active,
+                    max_active: max_active.clone(),
+                }),
+            )
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    scheduler: SchedulerMode::Parallel,
+                    max_concurrency: Some(1),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect("parallel run should succeed");
+
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn checkpoint_resume_skips_completed_stages() {
+        let dir = tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.txt");
+        let output_path = dir.path().join("answer.txt");
+        let checkpoint_path = dir.path().join("checkpoint.json");
+        std::fs::write(&prompt_path, "first").unwrap();
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: cached
+    op: cache
+    from: load_prompt
+    path: .llmff/cache
+    key: answer-v1
+outputs:
+  final:
+    from: cached
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest_with_options(
+                manifest.clone(),
+                dir.path(),
+                RunOptions {
+                    checkpoint_path: Some(checkpoint_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect("first run should write checkpoint");
+        std::fs::write(&prompt_path, "second").unwrap();
+        Engine::new()
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    resume_path: Some(checkpoint_path),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect("resume should reuse completed statuses");
+
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "first");
+    }
+
+    #[tokio::test]
+    async fn checkpoint_resume_rejects_mismatched_manifest() {
+        let dir = tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.txt");
+        let checkpoint_path = dir.path().join("checkpoint.json");
+        std::fs::write(&prompt_path, "first").unwrap();
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: answer.txt
+"#,
+            prompt_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest_with_options(
+                manifest.clone(),
+                dir.path(),
+                RunOptions {
+                    checkpoint_path: Some(checkpoint_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect("first run should write checkpoint");
+        let mut changed = manifest;
+        changed.outputs.get_mut("final").unwrap().path = "other.txt".to_string();
+
+        let error = Engine::new()
+            .run_manifest_with_options(
+                changed,
+                dir.path(),
+                RunOptions {
+                    resume_path: Some(checkpoint_path),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect_err("mismatched manifest should reject checkpoint");
+
+        assert!(error
+            .to_string()
+            .contains("checkpoint manifest hash does not match"));
+    }
+
+    #[tokio::test]
+    async fn replay_trace_requires_checkpoint_payloads() {
+        let dir = tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(
+            &trace_path,
+            r#"{"run_id":"test","event":"stage_finished","stage_id":"load_prompt","op":"load","status":"success","timestamp_ms":1}"#,
+        )
+        .unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph: []
+"#,
+        )
+        .unwrap();
+
+        let error = Engine::new()
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    replay_trace_path: Some(trace_path),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect_err("trace-only replay should be rejected safely");
+
+        assert!(error
+            .to_string()
+            .contains("trace replay requires a checkpoint"));
+    }
+
+    #[tokio::test]
+    async fn replay_trace_with_matching_checkpoint_reuses_completed_stages() {
+        let dir = tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.txt");
+        let output_path = dir.path().join("answer.txt");
+        let checkpoint_path = dir.path().join("checkpoint.json");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "first").unwrap();
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest_with_options(
+                manifest.clone(),
+                dir.path(),
+                RunOptions {
+                    checkpoint_path: Some(checkpoint_path.clone()),
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect("first run should write checkpoint and trace");
+        std::fs::write(&prompt_path, "second").unwrap();
+        Engine::new()
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    resume_path: Some(checkpoint_path),
+                    replay_trace_path: Some(trace_path),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect("checkpoint-backed replay should reuse completed status");
+
+        assert_eq!(std::fs::read_to_string(output_path).unwrap(), "first");
     }
 
     #[test]
@@ -3198,6 +4103,12 @@ outputs:
             plugin_dirs: Vec::new(),
             stream_stage: None,
             stream_path: None,
+            max_concurrency: None,
+            default_timeout_ms: None,
+            default_retry: RetryPolicy::default(),
+            checkpoint_path: None,
+            resume_path: None,
+            replay_trace_path: None,
         };
 
         engine
@@ -3247,6 +4158,12 @@ outputs:
             plugin_dirs: Vec::new(),
             stream_stage: None,
             stream_path: None,
+            max_concurrency: None,
+            default_timeout_ms: None,
+            default_retry: RetryPolicy::default(),
+            checkpoint_path: None,
+            resume_path: None,
+            replay_trace_path: None,
         };
 
         Engine::new()
@@ -3302,6 +4219,12 @@ outputs:
             plugin_dirs: Vec::new(),
             stream_stage: None,
             stream_path: None,
+            max_concurrency: None,
+            default_timeout_ms: None,
+            default_retry: RetryPolicy::default(),
+            checkpoint_path: None,
+            resume_path: None,
+            replay_trace_path: None,
         };
 
         let error = Engine::new()
@@ -3394,6 +4317,12 @@ outputs:
                     plugin_dirs: Vec::new(),
                     stream_stage: None,
                     stream_path: None,
+                    max_concurrency: None,
+                    default_timeout_ms: None,
+                    default_retry: RetryPolicy::default(),
+                    checkpoint_path: None,
+                    resume_path: None,
+                    replay_trace_path: None,
                 },
             )
             .await
@@ -3452,6 +4381,12 @@ outputs:
                     plugin_dirs: Vec::new(),
                     stream_stage: None,
                     stream_path: None,
+                    max_concurrency: None,
+                    default_timeout_ms: None,
+                    default_retry: RetryPolicy::default(),
+                    checkpoint_path: None,
+                    resume_path: None,
+                    replay_trace_path: None,
                 },
             )
             .await
@@ -3522,6 +4457,12 @@ outputs:
                     plugin_dirs: Vec::new(),
                     stream_stage: None,
                     stream_path: None,
+                    max_concurrency: None,
+                    default_timeout_ms: None,
+                    default_retry: RetryPolicy::default(),
+                    checkpoint_path: None,
+                    resume_path: None,
+                    replay_trace_path: None,
                 },
             )
             .await
@@ -3584,6 +4525,12 @@ outputs:
                     plugin_dirs: Vec::new(),
                     stream_stage: None,
                     stream_path: None,
+                    max_concurrency: None,
+                    default_timeout_ms: None,
+                    default_retry: RetryPolicy::default(),
+                    checkpoint_path: None,
+                    resume_path: None,
+                    replay_trace_path: None,
                 },
             )
             .await
@@ -3647,6 +4594,12 @@ graph:
                     plugin_dirs: Vec::new(),
                     stream_stage: None,
                     stream_path: None,
+                    max_concurrency: None,
+                    default_timeout_ms: None,
+                    default_retry: RetryPolicy::default(),
+                    checkpoint_path: None,
+                    resume_path: None,
+                    replay_trace_path: None,
                 },
             )
             .await
@@ -3687,6 +4640,12 @@ graph:
                     plugin_dirs: Vec::new(),
                     stream_stage: None,
                     stream_path: None,
+                    max_concurrency: None,
+                    default_timeout_ms: None,
+                    default_retry: RetryPolicy::default(),
+                    checkpoint_path: None,
+                    resume_path: None,
+                    replay_trace_path: None,
                 },
             )
             .await
@@ -3705,6 +4664,12 @@ graph:
                     plugin_dirs: Vec::new(),
                     stream_stage: None,
                     stream_path: None,
+                    max_concurrency: None,
+                    default_timeout_ms: None,
+                    default_retry: RetryPolicy::default(),
+                    checkpoint_path: None,
+                    resume_path: None,
+                    replay_trace_path: None,
                 },
             )
             .await
@@ -4082,6 +5047,12 @@ graph:
                     plugin_dirs: Vec::new(),
                     stream_stage: None,
                     stream_path: None,
+                    max_concurrency: None,
+                    default_timeout_ms: None,
+                    default_retry: RetryPolicy::default(),
+                    checkpoint_path: None,
+                    resume_path: None,
+                    replay_trace_path: None,
                 },
             )
             .await
@@ -4488,6 +5459,12 @@ outputs:
                     plugin_dirs: vec![plugin_dir],
                     stream_stage: None,
                     stream_path: None,
+                    max_concurrency: None,
+                    default_timeout_ms: None,
+                    default_retry: RetryPolicy::default(),
+                    checkpoint_path: None,
+                    resume_path: None,
+                    replay_trace_path: None,
                 },
             )
             .await

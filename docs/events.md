@@ -75,6 +75,32 @@ created or flushed.
 {"run_id":"cli-run","event":"run_failed","status":"failed","timestamp_ms":1780000000010,"failure_kind":"backend","failure_message":"backend request failed"}
 ```
 
+## Published Fixtures
+
+Schema and JSONL fixtures are published for supervisor and dashboard tests:
+
+- `examples/supervision/fixtures/event.schema.json`
+- `examples/supervision/fixtures/success-trace.jsonl`
+- `examples/supervision/fixtures/backend-error-trace.jsonl`
+
+These fixtures cover the stable event envelope, stage timing, token usage,
+cache hit metadata, and backend failure classification. Consumers should use
+them as compatibility fixtures and continue to ignore unknown fields.
+
+## Local Export Hooks
+
+For post-run observability, write a trace and export it locally:
+
+```bash
+llmff run examples/json-repair.yaml --trace /tmp/llmff-trace.jsonl
+scripts/trace-to-summary.sh /tmp/llmff-trace.jsonl
+scripts/trace-to-metrics.sh /tmp/llmff-trace.jsonl
+```
+
+The exporters use only local files, Bash, and Python standard library modules.
+They are safe hooks for later OpenTelemetry bridges because they do not start
+collectors or send telemetry over the network.
+
 ## Stream Separation
 
 Only one live stream should own stdout. `llmff` rejects `--events -` together

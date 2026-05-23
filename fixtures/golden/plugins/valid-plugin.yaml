@@ -1,0 +1,15 @@
+name: contract-plugin
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: text.uppercase
+    entrypoint: ./bin/uppercase
+  - kind: backend
+    name: local-echo
+    entrypoint: ./bin/backend
+  - kind: sampler
+    name: safe-small
+    entrypoint: ./bin/sampler
+  - kind: tool-transport
+    name: stdio-json
+    entrypoint: ./bin/stdio-json

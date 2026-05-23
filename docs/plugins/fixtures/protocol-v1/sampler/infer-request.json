@@ -1,0 +1,15 @@
+{
+  "model": "openai:gpt-4.1-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "answer in one sentence"
+    }
+  ],
+  "temperature": 0.7,
+  "top_p": null,
+  "max_tokens": 256,
+  "seed": null,
+  "response_format": null,
+  "stop": []
+}

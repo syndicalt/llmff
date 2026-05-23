@@ -1,0 +1,28 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: fast_candidate
+    op: infer
+    from: load_prompt
+    model: mock:good
+    temperature: 0.0
+    max_tokens: 128
+  - id: thorough_candidate
+    op: infer
+    from: load_prompt
+    model: mock:good
+    temperature: 0.2
+    max_tokens: 512
+  - id: choose_fast_candidate
+    op: route
+    from: fast_candidate
+    on_success: fast_candidate
+outputs:
+  final:
+    from: choose_fast_candidate
+    path: ./cost-latency-comparison.answer.txt

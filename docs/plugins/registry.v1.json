@@ -1,0 +1,85 @@
+{
+  "format_version": 1,
+  "plugin_protocol_version": 1,
+  "generated_for": "llmff example ecosystem",
+  "plugins": [
+    {
+      "name": "retrieval-static",
+      "version": "0.1.0",
+      "category": "retrieval-provider",
+      "manifest": "../../examples/plugins/retrieval-static/llmff-plugin.yaml",
+      "capabilities": [
+        {
+          "kind": "stage",
+          "name": "retrieval.static"
+        }
+      ],
+      "summary": "Returns deterministic JSON search results for retrieve-style pipelines."
+    },
+    {
+      "name": "reranker-length",
+      "version": "0.1.0",
+      "category": "reranker",
+      "manifest": "../../examples/plugins/reranker-length/llmff-plugin.yaml",
+      "capabilities": [
+        {
+          "kind": "stage",
+          "name": "rerank.length"
+        }
+      ],
+      "summary": "Orders newline-delimited candidate text by descending line length."
+    },
+    {
+      "name": "backend-echo",
+      "version": "0.1.0",
+      "category": "model-backend",
+      "manifest": "../../examples/plugins/backend-echo/llmff-plugin.yaml",
+      "capabilities": [
+        {
+          "kind": "backend",
+          "name": "echo-backend"
+        }
+      ],
+      "summary": "Minimal JSON model backend."
+    },
+    {
+      "name": "sampler-small",
+      "version": "0.1.0",
+      "category": "sampler",
+      "manifest": "../../examples/plugins/sampler-small/llmff-plugin.yaml",
+      "capabilities": [
+        {
+          "kind": "sampler",
+          "name": "small-deterministic"
+        }
+      ],
+      "summary": "Returns deterministic sampling overrides."
+    },
+    {
+      "name": "tool-stdio-cat",
+      "version": "0.1.0",
+      "category": "tool-transport",
+      "manifest": "../../examples/plugins/tool-stdio-cat/llmff-plugin.yaml",
+      "capabilities": [
+        {
+          "kind": "tool-transport",
+          "name": "stdio-cat"
+        }
+      ],
+      "summary": "Echo transport for tool-stage protocol tests."
+    },
+    {
+      "name": "postprocessor-strip",
+      "version": "0.1.0",
+      "category": "postprocessor",
+      "manifest": "../../examples/plugins/postprocessor-strip/llmff-plugin.yaml",
+      "capabilities": [
+        {
+          "kind": "stage",
+          "name": "postprocessor.strip"
+        }
+      ],
+      "summary": "Implements postprocessing as a normal plugin stage."
+    }
+  ]
+}

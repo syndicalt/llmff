@@ -1,0 +1,6 @@
+name: postprocessor-strip
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: postprocessor.strip
+    entrypoint: ./bin/postprocess

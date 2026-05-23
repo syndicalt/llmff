@@ -15,6 +15,11 @@ Do not submit a package-manager source until all of these are true:
 - Each package source verifies SHA-256 checksums from release metadata or embeds
   the known digest in the package definition.
 - Unsigned installer expectations remain documented until paid signing is live.
+- Channel maintainers explicitly decide the channel is support-ready.
+
+Prepared metadata is not publication approval. For Homebrew, Scoop, winget, and
+AUR, publish only when maintainers decide the channel is support-ready and are
+prepared to handle update cadence, user reports, rollback, and security fixes.
 
 ## Homebrew Formula
 
@@ -44,6 +49,8 @@ Readiness work:
   `llmff --version` reports `llmff 0.1.2`.
 - Do not submit or publish the tap before the release asset verification gate
   passes.
+- Publish only when maintainers decide the channel is support-ready for tap
+  ownership, formula updates, and user issue triage.
 
 ## winget
 
@@ -70,6 +77,8 @@ Readiness work:
 - Keep publisher and package identifiers stable before first submission.
 - Expect publisher warnings until Authenticode signing is available; do not
   imply the MSI is signed.
+- Publish only when maintainers decide the channel is support-ready for Windows
+  package-manager issue reports and manifest update reviews.
 
 ## Scoop
 
@@ -93,6 +102,8 @@ Readiness work:
 - Keep `checkver` and `autoupdate` disabled until at least one manual update
   has been completed cleanly.
 - Publish only after the GitHub Release archive path is stable.
+- Publish only when maintainers decide the channel is support-ready for bucket
+  ownership and manual update recovery.
 
 ## AUR
 
@@ -122,6 +133,8 @@ Readiness work:
   update requests.
 - Do not treat generated release metadata as an official AUR submission until
   the maintainer uploads it.
+- Publish only when maintainers decide the channel is support-ready for AUR
+  comments, pinned checksum updates, and rollback communication.
 
 ## apt Repository
 
@@ -147,3 +160,7 @@ Readiness work:
 - Keep direct `.deb` installation as the supported Debian and Ubuntu path until
   repository signing, rotation, hosting, and recovery are designed.
 - Do not publish unsigned apt repository metadata.
+
+apt stays parked until signing, repository metadata, hosting, key rotation, and recovery are designed.
+Do not add apt repository instructions, repository metadata, or key-install
+commands until that design is reviewed.

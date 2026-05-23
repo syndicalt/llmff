@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::LlmffError;
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Manifest {
     pub version: u32,
     #[serde(default)]
@@ -21,19 +21,19 @@ impl Manifest {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct InputSpec {
     pub path: Option<String>,
     pub format: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct OutputSpec {
     pub from: String,
     pub path: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct StageSpec {
     pub id: String,
     pub op: String,
@@ -71,6 +71,15 @@ pub struct StageSpec {
     pub strategy: Option<String>,
     pub key: Option<String>,
     pub index: Option<String>,
+    pub timeout_ms: Option<u64>,
+    pub retry: Option<RetrySpec>,
+    pub cache_policy: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct RetrySpec {
+    pub attempts: usize,
+    pub backoff_ms: Option<u64>,
 }
 
 #[cfg(test)]
@@ -299,5 +308,41 @@ graph:
 
         assert_eq!(stage.path.as_deref(), Some(".llmff/cache"));
         assert_eq!(stage.key.as_deref(), Some("prompt-v1"));
+    }
+
+    #[test]
+    fn parses_execution_maturity_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: draft
+    op: infer
+    from: prompt
+    model: mock:good
+    timeout_ms: 1000
+    retry:
+      attempts: 3
+      backoff_ms: 10
+  - id: cached
+    op: cache
+    from: draft
+    cache_policy: refresh
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+
+        assert_eq!(manifest.graph[0].timeout_ms, Some(1000));
+        assert_eq!(
+            manifest.graph[0].retry.as_ref().map(|retry| retry.attempts),
+            Some(3)
+        );
+        assert_eq!(
+            manifest.graph[0]
+                .retry
+                .as_ref()
+                .and_then(|retry| retry.backoff_ms),
+            Some(10)
+        );
+        assert_eq!(manifest.graph[1].cache_policy.as_deref(), Some("refresh"));
     }
 }

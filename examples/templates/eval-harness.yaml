@@ -1,0 +1,23 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_case
+    op: load
+    input: prompt
+  - id: candidate_answer
+    op: infer
+    from: load_case
+    model: mock:good
+    temperature: 0.0
+    max_tokens: 256
+    response_format: json
+  - id: validate_candidate
+    op: validate_json
+    from: candidate_answer
+    schema_path: ../answer.schema.json
+outputs:
+  final:
+    from: validate_candidate
+    path: ./eval-harness.result.json

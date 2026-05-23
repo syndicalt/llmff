@@ -1,0 +1,34 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: primary_draft
+    op: infer
+    from: load_prompt
+    model: mock:bad
+    temperature: 0.0
+    max_tokens: 256
+    response_format: json
+  - id: validate_primary
+    op: validate_json
+    from: primary_draft
+    schema_path: ../answer.schema.json
+  - id: fallback_draft
+    op: repair
+    from: validate_primary
+    when: invalid
+    model: mock:good
+    response_format: json
+  - id: choose_answer
+    op: route
+    from: validate_primary
+    on_success: validate_primary
+    on_invalid: fallback_draft
+outputs:
+  final:
+    from: choose_answer
+    path: ./multi-provider-fallback.answer.json

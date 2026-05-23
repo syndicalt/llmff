@@ -168,6 +168,101 @@ fn backends_list_json_includes_cli_registered_backend_metadata() {
 }
 
 #[test]
+fn backends_report_json_prints_static_provider_compatibility() {
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+
+    let output = cmd
+        .args([
+            "backends",
+            "report",
+            "--format",
+            "json",
+            "--backend",
+            "openrouter=https://openrouter.ai/api/v1",
+            "--ollama",
+            "local=http://localhost:11434",
+            "--api-key-env",
+            "openrouter=OPENROUTER_API_KEY",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value =
+        serde_json::from_slice(&output).expect("backend report should be valid JSON");
+
+    let openrouter = report
+        .as_array()
+        .expect("backend report should be an array")
+        .iter()
+        .find(|backend| backend["name"] == "openrouter")
+        .expect("OpenRouter-compatible backend should be reported");
+    assert_eq!(openrouter["kind"], "openai-compatible");
+    assert_eq!(openrouter["base_url"], "https://openrouter.ai/api/v1");
+    assert_eq!(openrouter["api_key_configured"], true);
+    assert_eq!(openrouter["capabilities"]["json_mode"]["supported"], true);
+    assert_eq!(openrouter["capabilities"]["streaming"]["supported"], true);
+    assert_eq!(openrouter["capabilities"]["seed"]["supported"], true);
+    assert_eq!(openrouter["capabilities"]["stop"]["supported"], true);
+    assert_eq!(
+        openrouter["capabilities"]["usage_metadata"]["supported"],
+        true
+    );
+    assert_eq!(openrouter["diagnostics"].as_array().unwrap().len(), 0);
+
+    let local = report
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|backend| backend["name"] == "local")
+        .expect("Ollama backend should be reported");
+    assert_eq!(local["kind"], "ollama");
+    assert_eq!(local["api_key_configured"], false);
+    assert_eq!(local["capabilities"]["json_mode"]["supported"], true);
+    assert_eq!(local["capabilities"]["streaming"]["supported"], false);
+    assert!(local["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|diagnostic| diagnostic["code"] == "streaming_not_supported"));
+}
+
+#[test]
+fn backends_report_warns_when_openai_compatible_key_is_not_configured() {
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "backends",
+            "report",
+            "--format",
+            "json",
+            "--backend",
+            "gateway=https://gateway.example.test/v1",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value =
+        serde_json::from_slice(&output).expect("backend report should be valid JSON");
+
+    let gateway = report
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|backend| backend["name"] == "gateway")
+        .expect("registered gateway should be reported");
+    assert_eq!(gateway["api_key_configured"], false);
+    assert!(gateway["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|diagnostic| diagnostic["code"] == "api_key_missing"));
+}
+
+#[test]
 fn backends_list_json_includes_plugin_backend_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let plugin_dir = dir.path().join("plugins");
@@ -639,6 +734,165 @@ outputs:
 }
 
 #[test]
+fn run_accepts_execution_maturity_flags() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.json");
+    let checkpoint = dir.path().join("checkpoint.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--parallel",
+            "--max-concurrency",
+            "1",
+            "--timeout-ms",
+            "1000",
+            "--retry-attempts",
+            "2",
+            "--retry-backoff-ms",
+            "0",
+            "--checkpoint",
+            checkpoint.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .env("LLMFF_MOCK_GOOD_RESPONSE", r#"{"answer":"ok"}"#)
+        .assert()
+        .success();
+
+    assert!(checkpoint.exists());
+    assert_eq!(
+        std::fs::read_to_string(output).unwrap(),
+        r#"{"answer":"ok"}"#
+    );
+}
+
+#[test]
+fn run_batch_input_writes_isolated_item_outputs_and_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let batch_input = dir.path().join("batch.txt");
+    let batch_output = dir.path().join("batch-out");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&batch_input, "first\nsecond\n").unwrap();
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+inputs:
+  prompt:
+    path: placeholder.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: answer.txt
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--batch-input",
+            batch_input.to_str().unwrap(),
+            "--batch-output-dir",
+            batch_output.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert_eq!(
+        std::fs::read_to_string(batch_output.join("items/000000/answer.txt")).unwrap(),
+        "first"
+    );
+    assert_eq!(
+        std::fs::read_to_string(batch_output.join("items/000001/answer.txt")).unwrap(),
+        "second"
+    );
+    let report = std::fs::read_to_string(batch_output.join("batch-report.jsonl")).unwrap();
+    assert!(report.contains(r#""index":0"#));
+    assert!(report.contains(r#""index":1"#));
+    assert!(report.contains(r#""status":"succeeded""#));
+}
+
+#[test]
+fn run_batch_input_rejects_parent_directory_outputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let batch_input = dir.path().join("batch.txt");
+    let batch_output = dir.path().join("batch-out");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&batch_input, "first\nsecond\n").unwrap();
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+inputs:
+  prompt:
+    path: placeholder.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: ../shared.txt
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--batch-input",
+            batch_input.to_str().unwrap(),
+            "--batch-output-dir",
+            batch_output.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "batch mode output paths cannot contain parent directory components",
+        ));
+}
+
+#[test]
 fn run_writes_event_stream_to_file() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");
@@ -1091,6 +1345,42 @@ fn events_streaming_smoke_fixture_passes() {
         .env("LLMFF_BIN", binary)
         .assert()
         .success();
+}
+
+#[test]
+fn observability_export_scripts_summarize_trace_fixture() {
+    let root = workspace_root();
+    let fixture = root.join("examples/supervision/fixtures/success-trace.jsonl");
+    let summary_script = root.join("scripts/trace-to-summary.sh");
+    let metrics_script = root.join("scripts/trace-to-metrics.sh");
+
+    Command::new("bash")
+        .args([summary_script.to_str().unwrap(), fixture.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("run fixture-run success"))
+        .stdout(predicate::str::contains(
+            "stages total=4 success=4 failed=0",
+        ))
+        .stdout(predicate::str::contains("timing total_stage_ms=45"))
+        .stdout(predicate::str::contains(
+            "tokens prompt=12 completion=8 total=20",
+        ))
+        .stdout(predicate::str::contains(
+            "cache hits=1 misses=1 hit_rate=50.00%",
+        ))
+        .stdout(predicate::str::contains(
+            "backend_errors total=0 rate=0.00%",
+        ));
+
+    Command::new("bash")
+        .args([metrics_script.to_str().unwrap(), fixture.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("llmff_stage_duration_ms_sum 45"))
+        .stdout(predicate::str::contains("llmff_tokens_total 20"))
+        .stdout(predicate::str::contains("llmff_cache_hit_rate 0.5000"))
+        .stdout(predicate::str::contains("llmff_backend_error_rate 0.0000"));
 }
 
 #[test]

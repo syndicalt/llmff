@@ -1,0 +1,8 @@
+{
+  "text": "example backend response",
+  "usage": {
+    "prompt_tokens": 1,
+    "completion_tokens": 3,
+    "total_tokens": 4
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "format_version": 1,
+  "plugin_protocol_version": 1,
+  "plugin_dir": "fixtures/golden/plugins",
+  "valid": false,
+  "plugin_count": 1,
+  "plugins": [
+    {
+      "name": "broken-plugin",
+      "version": "0.1.0",
+      "capabilities": [
+        {
+          "kind": "stage",
+          "name": "missing.stage",
+          "entrypoint": "./bin/missing"
+        }
+      ]
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "error",
+      "code": "missing_entrypoint",
+      "message": "plugin manifest `plugins/broken/llmff-plugin.yaml` capability `stage` `missing.stage` has missing entrypoint `plugins/broken/./bin/missing`",
+      "manifest_path": "plugins/broken/llmff-plugin.yaml",
+      "plugin_name": "broken-plugin",
+      "capability_kind": "stage",
+      "capability_name": "missing.stage",
+      "entrypoint": "plugins/broken/./bin/missing"
+    }
+  ]
+}

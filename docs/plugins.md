@@ -17,6 +17,24 @@ llmff plugins validate --plugin-dir examples/plugins --format json
 llmff plugins list --plugin-dir examples/plugins
 ```
 
+Protocol fixtures, a registry format, and trust guidance are published under
+`docs/plugins/`:
+
+- `docs/plugins/fixtures/protocol-v1/`: stdin/stdout examples plugin authors can
+  copy into CI.
+- `docs/plugins/registry.v1.json`: static registry entries for the official
+  example plugins.
+- `docs/plugins/registry.md`: registry schema notes.
+- `docs/plugins/trust.md`: permissions, sandbox expectations, review checklist,
+  and optional future plugin-signing guidance.
+
+Run the fixture and registry checker:
+
+```sh
+scripts/check-plugin-fixtures.sh
+LLMFF_BIN=llmff scripts/check-plugin-fixtures.sh --plugin-dir path/to/plugins
+```
+
 ## Manifest Schema
 
 `llmff-plugin.yaml` is YAML with these fields:
@@ -51,6 +69,11 @@ Stage plugins:
 - Pipeline op: `plugin:<capability-name>`
 - stdin: parent stage text
 - stdout: replacement stage text
+
+Retrieval-provider, reranker, and postprocessor examples currently use this
+generic stage protocol. llmff does not have separate native plugin kinds for
+those stages in protocol `1`; the official examples name the capability for the
+role they fill and document that mapping in the registry.
 
 Tool transport plugins:
 
@@ -175,6 +198,11 @@ Install and run plugins only from trusted sources. Prefer checked-in scripts, pi
 See `examples/plugins` for minimal working examples:
 
 - `stage-uppercase`: `stage` capability.
+- `retrieval-static`: retrieval-provider example implemented as a `stage`
+  capability.
+- `reranker-length`: reranker example implemented as a `stage` capability.
 - `backend-echo`: `backend` capability.
 - `sampler-small`: `sampler` capability.
 - `tool-stdio-cat`: `tool-transport` capability.
+- `postprocessor-strip`: postprocessor example implemented as a `stage`
+  capability.

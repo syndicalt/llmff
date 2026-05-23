@@ -148,21 +148,29 @@ scripts/smoke-ollama-provider.sh
 
 ## Manifest Templates
 
-Reusable workflow templates live in `examples/templates/`:
+Production-ready workflow templates live in `examples/templates/`:
 
-- `summarization.yaml`
-- `structured-extraction.yaml`
-- `multi-step-extraction.yaml`
-- `batch-processing.yaml`
-- `json-repair.yaml`
-- `retrieve-rerank-answer.yaml`
-- `tool-call.yaml`
+- `examples/templates/summarization.yaml`
+- `examples/templates/structured-extraction.yaml`
+- `examples/templates/classification.yaml`
+- `examples/templates/json-repair.yaml`
+- `examples/templates/rag-answer.yaml`
+- `examples/templates/batch-processing.yaml`
+- `examples/templates/tool-calling.yaml`
+- `examples/templates/eval-harness.yaml`
+- `examples/templates/multi-provider-fallback.yaml`
+- `examples/templates/cost-latency-comparison.yaml`
 
 Inspect any template before adapting it:
 
 ```bash
 llmff inspect examples/templates/structured-extraction.yaml
 ```
+
+Copy-this-and-run-it commands for every template are documented in
+[`docs/pipeline-library.md`](../docs/pipeline-library.md). The fallback and
+cost/latency examples are simulations built from currently available stages;
+the pipeline library doc explains exactly what they do.
 
 ## Inline Smoke Examples
 

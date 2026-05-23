@@ -142,28 +142,86 @@ Distribution:
 - Apt repository metadata remains parked until signing, key management,
   hosting, rotation, and recovery are designed.
 
-## Next Product Roadmap
+## Completed Mature Ecosystem Sprint
 
-Provider onboarding:
+Core contract:
 
-- Add provider-specific live smoke jobs in CI once secret policy and runner
-  expectations are settled.
-- Add provider examples for additional OpenAI-compatible gateways.
+- Pipeline manifest schema v1, trace schema v1, event schema v1, plugin
+  manifest schema v1, and plugin validation report schema v1 are published
+  under `docs/schemas/`.
+- Inline graph syntax is documented as syntax version `1` through manifest
+  metadata.
+- Golden fixtures cover compatible manifests, successful and failed event
+  streams, trace records, plugin manifests, and plugin validation reports.
+- `scripts/check-schema-contract.py` and the schema contract integration test
+  validate the machine-readable contracts.
 
-Streaming and supervision:
+Provider confidence:
 
-- Add machine-readable event schema fixtures for downstream supervisor tests.
-- Add richer failure classification only when a concrete consumer needs it.
+- Provider examples now cover OpenAI, Azure OpenAI, LM Studio, vLLM, LocalAI,
+  OpenRouter, Together, Groq, and Anthropic-compatible adapter usage.
+- `.github/workflows/live-provider-smoke.yml` provides opt-in live OpenAI-
+  compatible and Ollama smoke jobs without running on pull requests by default.
+- `llmff backends report` emits provider capability reports for JSON mode,
+  streaming, seed, stop sequences, usage metadata, API key configuration, and
+  backend diagnostics.
 
 Plugin ecosystem:
 
-- Add plugin protocol fixtures that third-party plugin authors can run in their
-  own CI.
-- Add more example plugins once real extension use cases emerge.
+- Plugin protocol v1 fixtures are published under
+  `docs/plugins/fixtures/protocol-v1/`.
+- Official example plugins now cover retrieval provider, reranker, model
+  backend, sampler, tool transport, and postprocessor-as-stage patterns.
+- A static plugin registry format and trust review guidance are documented.
 
-Distribution:
+Pipeline library:
 
+- Production-oriented templates cover summarization, extraction,
+  classification, JSON repair, RAG answer, batch processing, tool calling, eval
+  harness, multi-provider fallback, and cost/latency comparison.
+- Template catalog tests inspect every documented template.
+- `docs/pipeline-library.md` provides copy-and-run commands for each template.
+
+Execution maturity:
+
+- Failure classification includes safe `run_failed` categories for backend,
+  HTTP, timeout, graph, config, schema, and stage failures.
+- Model and HTTP tool stages support retry/backoff policies.
+- Per-stage and default timeouts, concurrency limits, batch input mode,
+  checkpoint/resume, cache refresh/bypass/read policies, and guarded
+  trace-replay validation are implemented and tested.
+
+Observability and supervision:
+
+- Event schema fixtures, supervisor/dashboard examples, and trace-to-summary
+  plus trace-to-metrics exporters are published.
+- Exporters summarize stage timing, token usage, cache hit rate, and backend
+  error rate. The metrics exporter is the local hook for future OpenTelemetry
+  bridges.
+
+Distribution and trust:
+
+- Homebrew, Scoop, winget, and AUR metadata remain validated and support-ready
+  only when maintainers decide to publish each channel.
+- Apt remains parked until signing, repository metadata, hosting, key rotation,
+  and recovery are designed.
+- Authenticode and Apple notarization remain parked until paid credentials are
+  available.
+- SBOM/provenance posture and release trust checks are documented.
+
+Governance:
+
+- Stability, contribution, release compatibility, and deprecation policies now
+  cover manifest schema, plugin protocol, CLI flags, and trace/event fields.
+- `scripts/check-governance-readiness.sh` validates governance readiness docs.
+
+## Next Product Roadmap
+
+- Run live provider smoke jobs once maintainers have decided which secrets and
+  runner expectations are supportable.
+- Use the new plugin fixtures with third-party plugin authors and promote real
+  extensions into the static registry only after review.
+- Generate SBOM/provenance artifacts in CI if release adoption justifies the
+  additional support commitment.
 - Design signed apt repository metadata before documenting apt repository
   installation.
-- Publish package-manager metadata only after maintainers decide each channel is
-  ready for support.

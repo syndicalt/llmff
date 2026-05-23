@@ -62,3 +62,35 @@ published:
 ```bash
 scripts/check-release-assets.sh v0.1.2
 ```
+
+## Ecosystem Compatibility Checklist
+
+Ecosystem compatibility checklist is required before any package-manager
+publication decision.
+
+Use this ecosystem compatibility checklist before publishing or announcing any
+package-manager channel:
+
+- [ ] `scripts/check-package-manager-metadata.sh` passes for the target release.
+- [ ] `scripts/check-governance-readiness.sh` passes.
+- [ ] The target channel is marked support-ready by maintainers in the release
+  issue or release notes.
+- [ ] Homebrew, Scoop, winget, and AUR metadata pin immutable GitHub Release
+  asset URLs and SHA-256 digests before publication.
+- [ ] apt remains parked; no `packaging/apt` repository metadata or
+  `sources.list.d` instructions are shipped.
+- [ ] Unsigned Windows and macOS status is repeated in release notes unless
+  Authenticode signing, Apple Developer ID signing, and notarization are live.
+- [ ] SBOM/provenance posture is explicit: generated artifacts are published
+  and verified, or maintainers record that the channel uses checksum-only
+  verification for this release.
+- [ ] Manifest schema, plugin protocol, CLI flags, and trace/event field changes
+  are additive or have a documented deprecation path.
+- [ ] Deprecated surfaces include replacement guidance, warning behavior when
+  practical, release-note coverage, and removal timing.
+- [ ] Provider, stage, and plugin examples still pass their focused validation
+  gates and do not require live credentials for default tests.
+
+The checklist is a release decision aid, not an automatic publication trigger.
+Publishing remains parked for each channel until maintainers decide that
+channel is support-ready.

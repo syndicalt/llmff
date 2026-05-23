@@ -1,0 +1,3 @@
+{"run_id":"fixture-error","event":"run_started","timestamp_ms":1780000000100}
+{"run_id":"fixture-error","event":"stage_started","timestamp_ms":1780000000101,"stage_id":"draft","op":"infer"}
+{"run_id":"fixture-error","event":"run_failed","timestamp_ms":1780000000105,"status":"failed","failure_kind":"backend","failure_message":"backend request failed"}
