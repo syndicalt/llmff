@@ -551,6 +551,166 @@ capabilities:
 }
 
 #[test]
+fn plugins_validate_json_reports_conformance_checks_without_pipeline_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let plugin = directory.path().join("conformance-plugin");
+    let bin = plugin.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("stage"), "#!/usr/bin/env sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("stage"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+    }
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: conformance-plugin
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: text.clean
+    entrypoint: ./bin/stage
+"#,
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "validate",
+            "--plugin-dir",
+            directory.path().to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value =
+        serde_json::from_slice(&output).expect("plugin validation should be valid JSON");
+
+    assert_eq!(report["valid"], true);
+    assert_eq!(report["diagnostics"], serde_json::json!([]));
+    let checks = report["conformance_checks"]
+        .as_array()
+        .expect("conformance checks should be an array");
+    assert!(checks
+        .iter()
+        .any(|check| { check["code"] == "entrypoint_executable" && check["status"] == "passed" }));
+    assert!(checks
+        .iter()
+        .any(|check| { check["code"] == "schema_output_contract" && check["status"] == "passed" }));
+    assert!(checks.iter().any(|check| {
+        check["code"] == "error_handling_contract" && check["status"] == "passed"
+    }));
+    assert!(checks
+        .iter()
+        .any(|check| { check["code"] == "trust_boundary_review" && check["status"] == "warning" }));
+}
+
+#[test]
+fn plugins_validate_json_rejects_non_executable_entrypoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let plugin = directory.path().join("broken-plugin");
+    let bin = plugin.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("stage"), "#!/usr/bin/env sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("stage"), std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+    }
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: broken-plugin
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: text.clean
+    entrypoint: ./bin/stage
+"#,
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "validate",
+            "--plugin-dir",
+            directory.path().to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure()
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value =
+        serde_json::from_slice(&output).expect("plugin validation should be valid JSON");
+
+    assert_eq!(report["valid"], false);
+    assert_eq!(
+        report["diagnostics"][0]["code"],
+        "entrypoint_not_executable"
+    );
+    assert_eq!(report["diagnostics"][0]["plugin_name"], "broken-plugin");
+    assert!(report["conformance_checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|check| check["code"] == "entrypoint_executable" && check["status"] == "error"));
+}
+
+#[test]
+fn plugins_validate_reports_non_executable_entrypoint_without_pipeline_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let plugin = directory.path().join("broken-plugin");
+    let bin = plugin.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("stage"), "#!/usr/bin/env sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("stage"), std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+    }
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: broken-plugin
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: text.clean
+    entrypoint: ./bin/stage
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "validate",
+            "--plugin-dir",
+            directory.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("non-executable entrypoint"))
+        .stderr(predicate::str::contains("text.clean"));
+}
+
+#[test]
 fn plugins_validate_reports_malformed_manifest() {
     let directory = tempfile::tempdir().unwrap();
     let plugin = directory.path().join("broken-plugin");

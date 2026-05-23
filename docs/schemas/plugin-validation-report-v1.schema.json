@@ -10,6 +10,7 @@
     "valid",
     "plugin_count",
     "plugins",
+    "conformance_checks",
     "diagnostics"
   ],
   "additionalProperties": false,
@@ -22,6 +23,10 @@
     "plugins": {
       "type": "array",
       "items": { "$ref": "#/$defs/plugin" }
+    },
+    "conformance_checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/conformance_check" }
     },
     "diagnostics": {
       "type": "array",
@@ -54,6 +59,40 @@
         }
       }
     },
+    "conformance_check": {
+      "type": "object",
+      "required": [
+        "code",
+        "status",
+        "message",
+        "manifest_path",
+        "plugin_name",
+        "capability_kind",
+        "capability_name",
+        "entrypoint"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "command_protocol_v1",
+            "entrypoint_executable",
+            "error_handling_contract",
+            "schema_output_contract",
+            "trust_boundary_review"
+          ]
+        },
+        "status": { "enum": ["passed", "warning", "error"] },
+        "message": { "type": "string", "minLength": 1 },
+        "manifest_path": { "type": "string", "minLength": 1 },
+        "plugin_name": { "type": "string", "minLength": 1 },
+        "capability_kind": {
+          "enum": ["backend", "sampler", "stage", "tool-transport"]
+        },
+        "capability_name": { "type": "string", "minLength": 1 },
+        "entrypoint": { "type": "string", "minLength": 1 }
+      }
+    },
     "diagnostic": {
       "type": "object",
       "required": ["severity", "code", "message", "manifest_path"],
@@ -65,7 +104,8 @@
             "manifest_read_failed",
             "manifest_parse_failed",
             "manifest_invalid",
-            "missing_entrypoint"
+            "missing_entrypoint",
+            "entrypoint_not_executable"
           ]
         },
         "message": { "type": "string", "minLength": 1 },

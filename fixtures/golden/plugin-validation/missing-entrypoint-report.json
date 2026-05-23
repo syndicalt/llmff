@@ -17,6 +17,58 @@
       ]
     }
   ],
+  "conformance_checks": [
+    {
+      "code": "command_protocol_v1",
+      "status": "passed",
+      "message": "capability kind is covered by plugin protocol v1 stdin/stdout process semantics",
+      "manifest_path": "plugins/broken/llmff-plugin.yaml",
+      "plugin_name": "broken-plugin",
+      "capability_kind": "stage",
+      "capability_name": "missing.stage",
+      "entrypoint": "plugins/broken/./bin/missing"
+    },
+    {
+      "code": "entrypoint_executable",
+      "status": "error",
+      "message": "entrypoint is missing and cannot satisfy the command protocol",
+      "manifest_path": "plugins/broken/llmff-plugin.yaml",
+      "plugin_name": "broken-plugin",
+      "capability_kind": "stage",
+      "capability_name": "missing.stage",
+      "entrypoint": "plugins/broken/./bin/missing"
+    },
+    {
+      "code": "error_handling_contract",
+      "status": "passed",
+      "message": "plugin protocol v1 expects failures to exit non-zero and write diagnostics to stderr",
+      "manifest_path": "plugins/broken/llmff-plugin.yaml",
+      "plugin_name": "broken-plugin",
+      "capability_kind": "stage",
+      "capability_name": "missing.stage",
+      "entrypoint": "plugins/broken/./bin/missing"
+    },
+    {
+      "code": "schema_output_contract",
+      "status": "passed",
+      "message": "stage plugins must emit one JSON stage value document",
+      "manifest_path": "plugins/broken/llmff-plugin.yaml",
+      "plugin_name": "broken-plugin",
+      "capability_kind": "stage",
+      "capability_name": "missing.stage",
+      "entrypoint": "plugins/broken/./bin/missing"
+    },
+    {
+      "code": "trust_boundary_review",
+      "status": "warning",
+      "message": "plugin protocol v1 does not sandbox or sign plugins; review docs/plugins/trust.md before running untrusted code",
+      "manifest_path": "plugins/broken/llmff-plugin.yaml",
+      "plugin_name": "broken-plugin",
+      "capability_kind": "stage",
+      "capability_name": "missing.stage",
+      "entrypoint": "plugins/broken/./bin/missing"
+    }
+  ],
   "diagnostics": [
     {
       "severity": "error",

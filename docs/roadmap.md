@@ -315,9 +315,10 @@ Goal: make external integrations boring.
   authentication, and known diagnostics.
 - Use plugin protocol fixtures with third-party plugin authors and promote real
   extensions into the static registry only after review.
-- Add plugin conformance checks that validate command protocol behavior, schema
-  output, error handling, and trust metadata without requiring a full pipeline
-  run.
+- Plugin validation reports now include static conformance checks for command
+  protocol coverage, schema output expectations, error handling expectations,
+  executable entrypoints, and trust-boundary review without requiring a full
+  pipeline run.
 - Preserve process isolation and explicit trust boundaries for plugin execution;
   do not imply sandboxing unless it exists.
 

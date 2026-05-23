@@ -17,5 +17,57 @@
       ]
     }
   ],
+  "conformance_checks": [
+    {
+      "code": "command_protocol_v1",
+      "status": "passed",
+      "message": "capability kind is covered by plugin protocol v1 stdin/stdout process semantics",
+      "manifest_path": "fixtures/golden/plugins/contract-plugin/llmff-plugin.yaml",
+      "plugin_name": "contract-plugin",
+      "capability_kind": "stage",
+      "capability_name": "text.uppercase",
+      "entrypoint": "fixtures/golden/plugins/contract-plugin/./bin/uppercase"
+    },
+    {
+      "code": "entrypoint_executable",
+      "status": "passed",
+      "message": "entrypoint exists and is executable by the current host",
+      "manifest_path": "fixtures/golden/plugins/contract-plugin/llmff-plugin.yaml",
+      "plugin_name": "contract-plugin",
+      "capability_kind": "stage",
+      "capability_name": "text.uppercase",
+      "entrypoint": "fixtures/golden/plugins/contract-plugin/./bin/uppercase"
+    },
+    {
+      "code": "error_handling_contract",
+      "status": "passed",
+      "message": "plugin protocol v1 expects failures to exit non-zero and write diagnostics to stderr",
+      "manifest_path": "fixtures/golden/plugins/contract-plugin/llmff-plugin.yaml",
+      "plugin_name": "contract-plugin",
+      "capability_kind": "stage",
+      "capability_name": "text.uppercase",
+      "entrypoint": "fixtures/golden/plugins/contract-plugin/./bin/uppercase"
+    },
+    {
+      "code": "schema_output_contract",
+      "status": "passed",
+      "message": "stage plugins must emit one JSON stage value document",
+      "manifest_path": "fixtures/golden/plugins/contract-plugin/llmff-plugin.yaml",
+      "plugin_name": "contract-plugin",
+      "capability_kind": "stage",
+      "capability_name": "text.uppercase",
+      "entrypoint": "fixtures/golden/plugins/contract-plugin/./bin/uppercase"
+    },
+    {
+      "code": "trust_boundary_review",
+      "status": "warning",
+      "message": "plugin protocol v1 does not sandbox or sign plugins; review docs/plugins/trust.md before running untrusted code",
+      "manifest_path": "fixtures/golden/plugins/contract-plugin/llmff-plugin.yaml",
+      "plugin_name": "contract-plugin",
+      "capability_kind": "stage",
+      "capability_name": "text.uppercase",
+      "entrypoint": "fixtures/golden/plugins/contract-plugin/./bin/uppercase"
+    }
+  ],
   "diagnostics": []
 }

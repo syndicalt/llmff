@@ -12,7 +12,7 @@ use llmff_core::graph::Graph;
 use llmff_core::manifest::Manifest;
 use llmff_core::plugin::{
     discover_plugin_backends, discover_plugin_manifests, validate_plugin_directory,
-    validate_plugin_manifests, PLUGIN_PROTOCOL_VERSION,
+    PLUGIN_PROTOCOL_VERSION,
 };
 use llmff_core::stage::builtin_stage_metadata;
 use sha2::{Digest, Sha256};
@@ -1015,7 +1015,16 @@ fn print_plugin_manifests(plugin_dir: &Path, format: OutputFormat) -> Result<()>
 fn validate_plugins(plugin_dir: &Path, format: OutputFormat) -> Result<()> {
     match format {
         OutputFormat::Text => {
-            validate_plugin_manifests(plugin_dir)?;
+            let report = validate_plugin_directory(plugin_dir)?;
+            if !report.valid {
+                let messages = report
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| diagnostic.message.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                anyhow::bail!("{messages}");
+            }
             println!("ok");
         }
         OutputFormat::Json => {

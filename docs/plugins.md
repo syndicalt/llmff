@@ -150,11 +150,17 @@ Use `--format json` for automation. JSON validation prints a report to stdout an
   "valid": true,
   "plugin_count": 0,
   "plugins": [],
+  "conformance_checks": [],
   "diagnostics": []
 }
 ```
 
 Diagnostics are structured records. `code` is stable for automation, `message` is for humans, and capability fields are present when the diagnostic applies to a specific capability.
+`conformance_checks` is a static checklist for each capability. It records
+whether the entrypoint is executable, which plugin protocol contract applies,
+which JSON output contract the capability must satisfy, how failures should be
+reported, and the explicit trust-boundary warning. These checks do not execute
+plugin code.
 
 ```json
 {
@@ -175,6 +181,15 @@ Known diagnostic codes:
 - `manifest_parse_failed`
 - `manifest_invalid`
 - `missing_entrypoint`
+- `entrypoint_not_executable`
+
+Known conformance check codes:
+
+- `command_protocol_v1`
+- `entrypoint_executable`
+- `schema_output_contract`
+- `error_handling_contract`
+- `trust_boundary_review`
 
 ## Protocol Compatibility
 
@@ -185,13 +200,15 @@ Compatibility policy:
 - llmff keeps protocol `1` behavior backward compatible within the current major CLI line.
 - Additive changes may add new fields to JSON objects. Plugin authors should ignore fields they do not understand.
 - Breaking changes require a new plugin protocol version and documentation for migration.
-- Signing and trust metadata are intentionally not part of protocol `1`; plugin validation checks structure and local entrypoints only.
+- Signing is intentionally not part of protocol `1`. Plugin validation reports
+  the trust boundary explicitly and checks structure, local entrypoints, and
+  host executability without running plugin code.
 
 ## Security Boundaries
 
 Plugins are local executables. llmff does not sandbox them. A plugin can read files available to the user, spawn processes, use the network, and write output wherever its OS permissions allow.
 
-Install and run plugins only from trusted sources. Prefer checked-in scripts, pinned dependencies, and reviewable source. Avoid manifests that point at mutable global commands unless that is intentional. Use `llmff plugins validate` to catch malformed manifests and missing entrypoints before a run; it is not a security scanner.
+Install and run plugins only from trusted sources. Prefer checked-in scripts, pinned dependencies, and reviewable source. Avoid manifests that point at mutable global commands unless that is intentional. Use `llmff plugins validate` to catch malformed manifests, missing entrypoints, non-executable entrypoints, and static conformance warnings before a run; it is not a security scanner.
 
 ## Examples
 
