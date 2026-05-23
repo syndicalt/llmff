@@ -1624,6 +1624,9 @@ fn observability_export_scripts_summarize_trace_fixture() {
         ))
         .stdout(predicate::str::contains(
             "backend_errors total=0 rate=0.00%",
+        ))
+        .stdout(predicate::str::contains(
+            "retries total=2 stages=1 max_attempts=3",
         ));
 
     Command::new("bash")
@@ -1653,6 +1656,9 @@ fn observability_export_scripts_summarize_trace_fixture() {
         .stdout(predicate::str::contains("llmff_tokens_total 20"))
         .stdout(predicate::str::contains("llmff_cache_hit_rate 0.5000"))
         .stdout(predicate::str::contains("llmff_failures_total 0"))
+        .stdout(predicate::str::contains("llmff_retries_total 2"))
+        .stdout(predicate::str::contains("llmff_retry_stages_total 1"))
+        .stdout(predicate::str::contains("llmff_max_stage_attempts 3"))
         .stdout(predicate::str::contains("llmff_timeout_errors_total 0"))
         .stdout(predicate::str::contains("llmff_timeout_error_rate 0.0000"))
         .stdout(predicate::str::contains("llmff_backend_error_rate 0.0000"));

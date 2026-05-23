@@ -30,6 +30,7 @@ artifact cache stage=cache_miss path=.llmff/cache/miss.json hit=false
 tokens prompt=12 completion=8 total=20
 cache hits=1 misses=1 hit_rate=50.00%
 backend_errors total=0 rate=0.00%
+retries total=2 stages=1 max_attempts=3
 failures total=0 backend=0 timeout=0
 ```
 
@@ -42,6 +43,9 @@ llmff_stage_duration_ms_sum 48
 llmff_tokens_total 20
 llmff_cache_hit_rate 0.5000
 llmff_backend_error_rate 0.0000
+llmff_retries_total 2
+llmff_retry_stages_total 1
+llmff_max_stage_attempts 3
 llmff_failures_total 0
 llmff_timeout_error_rate 0.0000
 ```

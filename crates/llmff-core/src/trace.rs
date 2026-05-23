@@ -17,6 +17,8 @@ pub struct TraceEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u128>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempts: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,

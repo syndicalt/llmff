@@ -13,6 +13,7 @@
     "status": { "type": "string", "minLength": 1 },
     "timestamp_ms": { "type": "integer", "minimum": 0 },
     "duration_ms": { "type": "integer", "minimum": 0 },
+    "attempts": { "type": "integer", "minimum": 1 },
     "model": { "type": "string", "minLength": 1 },
     "backend": { "type": "string", "minLength": 1 },
     "provider_model": { "type": "string", "minLength": 1 },

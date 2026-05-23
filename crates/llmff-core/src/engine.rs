@@ -61,7 +61,18 @@ struct StageOutcome {
     usage: Option<UsageMetadata>,
     cache_hit: Option<bool>,
     cache_path: Option<String>,
+    attempts: Option<usize>,
     stream_written: bool,
+}
+
+struct InferAttemptResult {
+    response: InferResponse,
+    attempts: usize,
+}
+
+struct ToolAttemptResult {
+    status: StageStatus,
+    attempts: usize,
 }
 
 impl StageOutcome {
@@ -71,16 +82,22 @@ impl StageOutcome {
             usage: None,
             cache_hit: None,
             cache_path: None,
+            attempts: None,
             stream_written: false,
         }
     }
 
-    fn with_usage(status: StageStatus, usage: Option<UsageMetadata>) -> Self {
+    fn with_usage_attempts(
+        status: StageStatus,
+        usage: Option<UsageMetadata>,
+        attempts: usize,
+    ) -> Self {
         Self {
             status,
             usage,
             cache_hit: None,
             cache_path: None,
+            attempts: (attempts > 1).then_some(attempts),
             stream_written: false,
         }
     }
@@ -91,6 +108,7 @@ impl StageOutcome {
             usage,
             cache_hit: None,
             cache_path: None,
+            attempts: None,
             stream_written: true,
         }
     }
@@ -101,6 +119,7 @@ impl StageOutcome {
             usage: None,
             cache_hit: Some(cache_hit),
             cache_path: Some(cache_path),
+            attempts: None,
             stream_written: false,
         }
     }
@@ -263,6 +282,7 @@ impl Engine {
                 status: None,
                 timestamp_ms: timestamp_ms(),
                 duration_ms: None,
+                attempts: None,
                 model: None,
                 backend: None,
                 provider_model: None,
@@ -354,6 +374,7 @@ impl Engine {
                 status: Some("succeeded".to_string()),
                 timestamp_ms: timestamp_ms(),
                 duration_ms: None,
+                attempts: None,
                 model: None,
                 backend: None,
                 provider_model: None,
@@ -517,6 +538,7 @@ impl Engine {
                 status: None,
                 timestamp_ms: timestamp_ms(),
                 duration_ms: None,
+                attempts: None,
                 model: None,
                 backend: None,
                 provider_model: None,
@@ -550,6 +572,7 @@ impl Engine {
         let metadata = self.trace_metadata(stage, &status, outcome.usage.as_ref());
         let cache_hit = outcome.cache_hit;
         let cache_path = outcome.cache_path;
+        let attempts = outcome.attempts;
         statuses.insert(stage.id.clone(), status);
         write_trace(
             trace,
@@ -561,6 +584,7 @@ impl Engine {
                 status: Some(status_name),
                 timestamp_ms: timestamp_ms(),
                 duration_ms: Some(stage_started.elapsed().as_millis()),
+                attempts,
                 model: metadata.model,
                 backend: metadata.backend,
                 provider_model: metadata.provider_model,
@@ -799,10 +823,10 @@ impl Engine {
             "route" => self
                 .execute_route(stage, statuses)
                 .map(StageOutcome::without_usage),
-            "tool" => self
-                .execute_tool(stage, statuses, cwd, plugin_tool_transports, default_retry)
-                .await
-                .map(StageOutcome::without_usage),
+            "tool" => {
+                self.execute_tool(stage, statuses, cwd, plugin_tool_transports, default_retry)
+                    .await
+            }
             "write" => self
                 .execute_write(stage, statuses, cwd)
                 .map(StageOutcome::without_usage),
@@ -905,12 +929,13 @@ impl Engine {
             }
         }
 
-        let response =
+        let result =
             infer_with_retry(stage, resolved.backend.as_ref(), request, default_retry).await?;
 
-        Ok(StageOutcome::with_usage(
-            StageStatus::Success(Value::Text(response.text)),
-            response.usage,
+        Ok(StageOutcome::with_usage_attempts(
+            StageStatus::Success(Value::Text(result.response.text)),
+            result.response.usage,
+            result.attempts,
         ))
     }
 
@@ -956,13 +981,14 @@ impl Engine {
                     stop: stage.stop.clone(),
                 };
                 apply_plugin_sampler(stage, plugin_samplers, &mut request).await?;
-                let response =
+                let result =
                     infer_with_retry(stage, resolved.backend.as_ref(), request, default_retry)
                         .await?;
 
-                Ok(StageOutcome::with_usage(
-                    StageStatus::Success(Value::Text(response.text)),
-                    response.usage,
+                Ok(StageOutcome::with_usage_attempts(
+                    StageStatus::Success(Value::Text(result.response.text)),
+                    result.response.usage,
+                    result.attempts,
                 ))
             }
         }
@@ -1013,12 +1039,19 @@ impl Engine {
         cwd: &Path,
         plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
         default_retry: RetryPolicy,
-    ) -> Result<StageStatus, LlmffError> {
+    ) -> Result<StageOutcome, LlmffError> {
         if let Some(command) = &stage.command {
-            return execute_command_tool(stage, statuses, cwd, command).await;
+            return execute_command_tool(stage, statuses, cwd, command)
+                .await
+                .map(StageOutcome::without_usage);
         }
         if stage.url.is_some() {
-            return execute_http_tool_with_retry(stage, statuses, default_retry).await;
+            let result = execute_http_tool_with_retry(stage, statuses, default_retry).await?;
+            return Ok(StageOutcome::with_usage_attempts(
+                result.status,
+                None,
+                result.attempts,
+            ));
         }
         if let Some(transport) = &stage.transport {
             let plugin_transport = plugin_tool_transports.get(transport).ok_or_else(|| {
@@ -1033,7 +1066,8 @@ impl Engine {
                 cwd,
                 &[plugin_transport.entrypoint.to_string_lossy().into_owned()],
             )
-            .await;
+            .await
+            .map(StageOutcome::without_usage);
         }
 
         Err(LlmffError::StageExecution {
@@ -2293,13 +2327,18 @@ async fn infer_with_retry(
     backend: &dyn Backend,
     request: InferRequest,
     default_retry: RetryPolicy,
-) -> Result<InferResponse, LlmffError> {
+) -> Result<InferAttemptResult, LlmffError> {
     let policy = retry_policy(stage, default_retry);
     let mut attempt = 1usize;
 
     loop {
         match backend.infer(request.clone()).await {
-            Ok(response) => return Ok(response),
+            Ok(response) => {
+                return Ok(InferAttemptResult {
+                    response,
+                    attempts: attempt,
+                })
+            }
             Err(error) if attempt < policy.attempts => {
                 attempt += 1;
                 sleep_for_retry(policy.backoff_ms).await;
@@ -2314,13 +2353,18 @@ async fn execute_http_tool_with_retry(
     stage: &StageSpec,
     statuses: &BTreeMap<String, StageStatus>,
     default_retry: RetryPolicy,
-) -> Result<StageStatus, LlmffError> {
+) -> Result<ToolAttemptResult, LlmffError> {
     let policy = retry_policy(stage, default_retry);
     let mut attempt = 1usize;
 
     loop {
         match execute_http_tool(stage, statuses).await {
-            Ok(status) => return Ok(status),
+            Ok(status) => {
+                return Ok(ToolAttemptResult {
+                    status,
+                    attempts: attempt,
+                })
+            }
             Err(error) if attempt < policy.attempts && is_retryable_http_tool_error(&error) => {
                 attempt += 1;
                 sleep_for_retry(policy.backoff_ms).await;
@@ -2595,6 +2639,7 @@ fn write_run_failed(
             status: Some("failed".to_string()),
             timestamp_ms: timestamp_ms(),
             duration_ms: None,
+            attempts: None,
             model: None,
             backend: None,
             provider_model: None,
@@ -3128,6 +3173,66 @@ outputs:
     }
 
     #[tokio::test]
+    async fn trace_events_include_retry_attempts() {
+        let dir = tempdir().unwrap();
+        let prompt_path = dir.path().join("prompt.txt");
+        let output_path = dir.path().join("answer.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "hello").unwrap();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: flaky
+    retry:
+      attempts: 3
+      backoff_ms: 0
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "flaky",
+            Arc::new(FlakyBackend {
+                attempts: attempts.clone(),
+                failures_before_success: 2,
+            }),
+        );
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect("third model attempt should succeed");
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let draft_finished = trace_stage_finished(&events, "draft");
+        assert_eq!(draft_finished["attempts"], 3);
+    }
+
+    #[tokio::test]
     async fn http_tool_stage_retries_server_failures() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -3144,6 +3249,7 @@ outputs:
         let dir = tempdir().unwrap();
         let input_path = dir.path().join("input.txt");
         let output_path = dir.path().join("answer.txt");
+        let trace_path = dir.path().join("trace.jsonl");
         std::fs::write(&input_path, "hello").unwrap();
         let manifest = Manifest::from_yaml_str(&format!(
             r#"
@@ -3175,11 +3281,22 @@ outputs:
         .unwrap();
 
         Engine::new()
-            .run_manifest(manifest, dir.path())
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
             .await
             .expect("third HTTP attempt should succeed");
 
         assert_eq!(std::fs::read_to_string(output_path).unwrap(), "ok");
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let call_tool_finished = trace_stage_finished(&events, "call_tool");
+        assert_eq!(call_tool_finished["attempts"], 3);
     }
 
     #[tokio::test]
