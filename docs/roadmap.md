@@ -301,8 +301,8 @@ Goal: make every run inspectable after the fact and monitorable while running.
   no collectors, network calls, or external services by default.
 - Define a clear bridge point for future OpenTelemetry integration without
   changing the current file-based supervision contract.
-- Add examples that demonstrate live event consumption, post-run summaries, and
-  metrics export from the same run.
+- Same-run observability examples now demonstrate live event consumption,
+  post-run summaries, and metrics export from one local execution.
 
 ### Provider And Plugin Confidence
 

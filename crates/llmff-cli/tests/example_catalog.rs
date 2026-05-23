@@ -334,3 +334,37 @@ fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
         .stdout(predicates::str::contains("event_count="))
         .stdout(predicates::str::contains("output_exists=true"));
 }
+
+#[test]
+fn observability_docs_link_to_a_runnable_same_run_example() {
+    let root = workspace_root();
+    let script = root.join("examples/supervision/local-observability.sh");
+    let docs = std::fs::read_to_string(root.join("docs/observability.md"))
+        .expect("observability readable");
+    let dashboard = std::fs::read_to_string(root.join("examples/supervision/dashboard.md"))
+        .expect("dashboard docs readable");
+
+    assert!(script.exists(), "missing local observability example");
+    assert!(docs.contains("examples/supervision/local-observability.sh"));
+    assert!(dashboard.contains("examples/supervision/local-observability.sh"));
+
+    let temp = tempfile::tempdir().expect("tempdir should be available");
+    Command::new("bash")
+        .arg(script)
+        .arg("--work-dir")
+        .arg(temp.path())
+        .env("LLMFF_BIN", assert_cmd::cargo::cargo_bin("llmff"))
+        .env("LLMFF_MOCK_BAD_RESPONSE", r#"{"wrong":true}"#)
+        .env("LLMFF_MOCK_GOOD_RESPONSE", r#"{"answer":"ok"}"#)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("run_status=ok"))
+        .stdout(predicates::str::contains("live_event_count="))
+        .stdout(predicates::str::contains("trace="))
+        .stdout(predicates::str::contains("events="))
+        .stdout(predicates::str::contains("summary="))
+        .stdout(predicates::str::contains("metrics="))
+        .stdout(predicates::str::contains("summary_has_timing=true"))
+        .stdout(predicates::str::contains("metrics_has_run_duration=true"))
+        .stdout(predicates::str::contains("output_exists=true"));
+}

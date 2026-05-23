@@ -12,6 +12,13 @@ scripts/trace-to-summary.sh "$trace"
 scripts/trace-to-metrics.sh "$trace"
 ```
 
+To exercise the full local pattern in one command, including live event
+consumption and post-run exporter output, run:
+
+```bash
+examples/supervision/local-observability.sh
+```
+
 The summary output is intended for humans:
 
 ```text
