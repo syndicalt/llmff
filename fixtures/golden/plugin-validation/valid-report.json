@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "plugin_protocol_version": 1,
+  "plugin_dir": "fixtures/golden/plugins",
+  "valid": true,
+  "plugin_count": 1,
+  "plugins": [
+    {
+      "name": "contract-plugin",
+      "version": "0.1.0",
+      "capabilities": [
+        {
+          "kind": "stage",
+          "name": "text.uppercase",
+          "entrypoint": "./bin/uppercase"
+        }
+      ]
+    }
+  ],
+  "diagnostics": []
+}

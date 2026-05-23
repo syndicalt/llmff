@@ -34,7 +34,7 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             name: "cache",
             kind: "storage",
             required_fields: &["from"],
-            optional_fields: &["path", "key"],
+            optional_fields: &["path", "key", "cache_policy"],
             capabilities: &["persistent-cache"],
         },
         StageMetadata {
@@ -88,6 +88,8 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
                 "response_format",
                 "stop",
                 "sampler",
+                "timeout_ms",
+                "retry",
             ],
             capabilities: &[
                 "chat-messages",
@@ -118,6 +120,8 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
                 "response_format",
                 "stop",
                 "sampler",
+                "timeout_ms",
+                "retry",
             ],
             capabilities: &[
                 "json-repair",
@@ -146,7 +150,7 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             name: "tool",
             kind: "integration",
             required_fields: &["from", "command|url|transport"],
-            optional_fields: &["method", "headers"],
+            optional_fields: &["method", "headers", "timeout_ms", "retry"],
             capabilities: &["command-tool", "http-tool", "plugin-tool-transport"],
         },
         StageMetadata {
@@ -1196,6 +1200,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1246,6 +1253,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1300,6 +1310,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1351,6 +1364,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let error = execute_deterministic_stage(
@@ -1411,6 +1427,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1480,6 +1499,9 @@ mod tests {
             strategy: Some("embedding".to_string()),
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let output =
@@ -1543,6 +1565,9 @@ mod tests {
             strategy: Some("embedding".to_string()),
             key: None,
             index: Some(".llmff/retrieve/context.index.json".to_string()),
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let first =
@@ -1619,6 +1644,9 @@ mod tests {
             strategy: Some("embedding".to_string()),
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
         let input = Value::Json(serde_json::json!({
             "query": "rust",
@@ -1688,6 +1716,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1749,6 +1780,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1810,6 +1844,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1866,6 +1903,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1924,6 +1964,9 @@ mod tests {
             strategy: None,
             key: None,
             index: None,
+            timeout_ms: None,
+            retry: None,
+            cache_policy: None,
         };
 
         let error = execute_deterministic_stage(

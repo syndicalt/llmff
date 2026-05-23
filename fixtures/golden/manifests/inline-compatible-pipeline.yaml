@@ -1,0 +1,27 @@
+version: 1
+metadata:
+  inline_graph_syntax_version: 1
+inputs:
+  prompt:
+    path: ./question.txt
+graph:
+  - id: prompt
+    op: load
+    input: prompt
+  - id: cached
+    op: cache
+    from: prompt
+    path: ./.llmff/cache
+    key: prompt-v1
+  - id: docs
+    op: retrieve
+    from: cached
+    documents:
+      - ./docs/rust.txt
+      - ./docs/python.txt
+    top_k: 1
+    strategy: lexical
+  - id: save
+    op: write
+    from: docs
+    path: ./matches.json

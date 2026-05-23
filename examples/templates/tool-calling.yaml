@@ -1,0 +1,23 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: call_local_tool
+    op: tool
+    from: load_prompt
+    command:
+      - /bin/cat
+  - id: summarize_tool_result
+    op: infer
+    from: call_local_tool
+    model: mock:good
+    temperature: 0.1
+    max_tokens: 256
+outputs:
+  final:
+    from: summarize_tool_result
+    path: ./tool-calling.answer.txt

@@ -84,3 +84,20 @@ Parallel runs can interleave independent stage events. Track stages by
 llmff run examples/json-repair.yaml --parallel --events - \
   | python3 -c 'import json,sys; state={}; [state.update({e["stage_id"]: e.get("status","started")}) or print(state) for e in map(json.loads, sys.stdin) if e.get("stage_id")]'
 ```
+
+## Export A Post-Run Dashboard
+
+Use `--trace` for post-run summaries and metrics. The exporters read only local
+JSONL files and do not contact external services:
+
+```bash
+trace=/tmp/llmff-trace.jsonl
+llmff run examples/json-repair.yaml --trace "$trace"
+
+scripts/trace-to-summary.sh "$trace"
+scripts/trace-to-metrics.sh "$trace" > /tmp/llmff-metrics.prom
+```
+
+The summary includes stage timing, token usage, cache hit rate, and backend
+error rate. See `examples/supervision/dashboard.md` and
+`examples/supervision/supervisor.md` for complete local patterns.

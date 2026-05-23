@@ -1,4 +1,5 @@
-use std::path::{Path, PathBuf};
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -6,7 +7,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use llmff_core::backend::{
     builtin_backend_families, CommandBackend, MockBackend, OllamaBackend, OpenAiCompatibleBackend,
 };
-use llmff_core::engine::{Engine, RunOptions, SchedulerMode};
+use llmff_core::engine::{Engine, RetryPolicy, RunOptions, SchedulerMode};
 use llmff_core::manifest::Manifest;
 use llmff_core::plugin::{
     discover_plugin_backends, discover_plugin_manifests, validate_plugin_directory,
@@ -41,6 +42,24 @@ enum Command {
         events: Option<PathBuf>,
         #[arg(long)]
         parallel: bool,
+        #[arg(long = "max-concurrency")]
+        max_concurrency: Option<usize>,
+        #[arg(long = "timeout-ms")]
+        timeout_ms: Option<u64>,
+        #[arg(long = "retry-attempts")]
+        retry_attempts: Option<usize>,
+        #[arg(long = "retry-backoff-ms")]
+        retry_backoff_ms: Option<u64>,
+        #[arg(long = "checkpoint")]
+        checkpoint: Option<PathBuf>,
+        #[arg(long = "resume")]
+        resume: Option<PathBuf>,
+        #[arg(long = "replay-trace")]
+        replay_trace: Option<PathBuf>,
+        #[arg(long = "batch-input")]
+        batch_input: Option<PathBuf>,
+        #[arg(long = "batch-output-dir")]
+        batch_output_dir: Option<PathBuf>,
         #[arg(long = "plugin-dir")]
         plugin_dir: Vec<PathBuf>,
         #[arg(long = "stream-stage")]
@@ -112,6 +131,20 @@ enum BackendsCommand {
         #[arg(long = "plugin-dir")]
         plugin_dir: Vec<PathBuf>,
     },
+    Report {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+        #[arg(long = "backend")]
+        backend: Vec<String>,
+        #[arg(long = "ollama")]
+        ollama: Vec<String>,
+        #[arg(long = "api-key-env")]
+        api_key_env: Vec<String>,
+        #[arg(long = "api-key")]
+        api_key: Vec<String>,
+        #[arg(long = "plugin-dir")]
+        plugin_dir: Vec<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -159,6 +192,15 @@ pub async fn run(cli: Cli) -> Result<()> {
             trace,
             events,
             parallel,
+            max_concurrency,
+            timeout_ms,
+            retry_attempts,
+            retry_backoff_ms,
+            checkpoint,
+            resume,
+            replay_trace,
+            batch_input,
+            batch_output_dir,
             plugin_dir,
             stream_stage,
             backend,
@@ -173,6 +215,15 @@ pub async fn run(cli: Cli) -> Result<()> {
                 trace,
                 events,
                 parallel,
+                max_concurrency,
+                timeout_ms,
+                retry_attempts,
+                retry_backoff_ms,
+                checkpoint,
+                resume,
+                replay_trace,
+                batch_input,
+                batch_output_dir,
                 plugin_dir,
                 stream_stage,
                 backend,
@@ -206,6 +257,17 @@ pub async fn run(cli: Cli) -> Result<()> {
                     plugin_dir,
                 },
         } => print_backend_families(format, backend, ollama, plugin_dir)?,
+        Command::Backends {
+            command:
+                BackendsCommand::Report {
+                    format,
+                    backend,
+                    ollama,
+                    api_key_env,
+                    api_key,
+                    plugin_dir,
+                },
+        } => print_backend_report(format, backend, ollama, api_key_env, api_key, plugin_dir)?,
         Command::Models {
             command:
                 ModelsCommand::List {
@@ -228,6 +290,197 @@ pub async fn run(cli: Cli) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_backend_report(
+    format: OutputFormat,
+    backend: Vec<String>,
+    ollama: Vec<String>,
+    api_key_env: Vec<String>,
+    api_key: Vec<String>,
+    plugin_dir: Vec<PathBuf>,
+) -> Result<()> {
+    let report = backend_report_views(backend, ollama, api_key_env, api_key, plugin_dir)?;
+    match format {
+        OutputFormat::Text => {
+            for backend in report {
+                let name = backend["name"].as_str().unwrap_or("unknown");
+                let kind = backend["kind"].as_str().unwrap_or("unknown");
+                println!("{name} ({kind})");
+                for capability in ["json_mode", "streaming", "seed", "stop", "usage_metadata"] {
+                    let supported = backend["capabilities"][capability]["supported"]
+                        .as_bool()
+                        .unwrap_or(false);
+                    println!("  {capability}: {supported}");
+                }
+                if let Some(diagnostics) = backend["diagnostics"].as_array() {
+                    for diagnostic in diagnostics {
+                        if let Some(message) = diagnostic["message"].as_str() {
+                            println!("  diagnostic: {message}");
+                        }
+                    }
+                }
+            }
+        }
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+    }
+
+    Ok(())
+}
+
+fn backend_report_views(
+    backend: Vec<String>,
+    ollama: Vec<String>,
+    api_key_env: Vec<String>,
+    api_key: Vec<String>,
+    plugin_dir: Vec<PathBuf>,
+) -> Result<Vec<serde_json::Value>> {
+    let api_key_env = parse_alias_value_map(api_key_env)?;
+    let api_key = parse_alias_value_map(api_key)?;
+    let mut report = Vec::new();
+
+    for family in builtin_backend_families() {
+        let aliases = if family.model_aliases.is_empty() {
+            vec![family.name.to_string()]
+        } else {
+            family
+                .model_aliases
+                .iter()
+                .map(|alias| (*alias).to_string())
+                .collect()
+        };
+        report.push(provider_report(
+            family.name,
+            family.kind,
+            "built-in",
+            None,
+            family.requires_api_key,
+            false,
+            aliases,
+        ));
+    }
+
+    for backend in parse_alias_value_list(backend)? {
+        let key_configured =
+            api_key.contains_key(&backend.alias) || api_key_env.contains_key(&backend.alias);
+        report.push(provider_report(
+            &backend.alias,
+            "openai-compatible",
+            "cli",
+            Some(&backend.value),
+            true,
+            key_configured,
+            vec![format!("{}:<model>", backend.alias)],
+        ));
+    }
+
+    for backend in parse_alias_value_list(ollama)? {
+        report.push(provider_report(
+            &backend.alias,
+            "ollama",
+            "cli",
+            Some(&backend.value),
+            false,
+            false,
+            vec![format!("{}:<model>", backend.alias)],
+        ));
+    }
+
+    for plugin_dir in plugin_dir {
+        for backend in discover_plugin_backends(&plugin_dir)? {
+            report.push(provider_report(
+                &backend.name,
+                "plugin-command",
+                "plugin",
+                None,
+                false,
+                false,
+                vec![format!("{}:<model>", backend.name)],
+            ));
+        }
+    }
+
+    Ok(report)
+}
+
+fn provider_report(
+    name: &str,
+    kind: &str,
+    source: &str,
+    base_url: Option<&str>,
+    requires_api_key: bool,
+    api_key_configured: bool,
+    model_aliases: Vec<String>,
+) -> serde_json::Value {
+    let mut diagnostics = Vec::new();
+    if requires_api_key && !api_key_configured && source == "cli" {
+        diagnostics.push(serde_json::json!({
+            "severity": "warning",
+            "code": "api_key_missing",
+            "message": format!("backend `{name}` requires an API key; configure --api-key-env {name}=ENV_NAME or --api-key {name}=VALUE"),
+        }));
+    }
+    if kind == "ollama" {
+        diagnostics.push(serde_json::json!({
+            "severity": "info",
+            "code": "streaming_not_supported",
+            "message": "llmff uses Ollama through the non-streaming chat path",
+        }));
+    }
+
+    serde_json::json!({
+        "name": name,
+        "kind": kind,
+        "source": source,
+        "base_url": base_url,
+        "requires_api_key": requires_api_key,
+        "api_key_configured": api_key_configured,
+        "model_aliases": model_aliases,
+        "capabilities": provider_capabilities(kind),
+        "diagnostics": diagnostics,
+    })
+}
+
+fn provider_capabilities(kind: &str) -> serde_json::Value {
+    match kind {
+        "remote-chat" | "openai-compatible" => serde_json::json!({
+            "json_mode": capability(true, "response_format json_object"),
+            "streaming": capability(true, "server-sent chat completion chunks"),
+            "seed": capability(true, "seed request field"),
+            "stop": capability(true, "stop request field"),
+            "usage_metadata": capability(true, "usage response field"),
+        }),
+        "local-chat" | "ollama" => serde_json::json!({
+            "json_mode": capability(true, "format json"),
+            "streaming": capability(false, "Ollama streaming is not wired through llmff yet"),
+            "seed": capability(true, "options.seed request field"),
+            "stop": capability(true, "options.stop request field"),
+            "usage_metadata": capability(true, "prompt_eval_count and eval_count response fields"),
+        }),
+        "plugin-command" => serde_json::json!({
+            "json_mode": capability(false, "plugin-specific"),
+            "streaming": capability(false, "command backends are request-response"),
+            "seed": capability(false, "plugin-specific"),
+            "stop": capability(false, "plugin-specific"),
+            "usage_metadata": capability(true, "optional usage response field"),
+        }),
+        _ => serde_json::json!({
+            "json_mode": capability(false, "not applicable"),
+            "streaming": capability(false, "not applicable"),
+            "seed": capability(false, "not applicable"),
+            "stop": capability(false, "not applicable"),
+            "usage_metadata": capability(false, "not applicable"),
+        }),
+    }
+}
+
+fn capability(supported: bool, detail: &str) -> serde_json::Value {
+    serde_json::json!({
+        "supported": supported,
+        "detail": detail,
+    })
 }
 
 fn print_stage_metadata(format: OutputFormat) -> Result<()> {
@@ -602,6 +855,15 @@ async fn run_pipeline(
     trace: Option<PathBuf>,
     events: Option<PathBuf>,
     parallel: bool,
+    max_concurrency: Option<usize>,
+    timeout_ms: Option<u64>,
+    retry_attempts: Option<usize>,
+    retry_backoff_ms: Option<u64>,
+    checkpoint: Option<PathBuf>,
+    resume: Option<PathBuf>,
+    replay_trace: Option<PathBuf>,
+    batch_input: Option<PathBuf>,
+    batch_output_dir: Option<PathBuf>,
     plugin_dir: Vec<PathBuf>,
     stream_stage: Option<String>,
     backend: Vec<String>,
@@ -611,6 +873,22 @@ async fn run_pipeline(
 ) -> Result<()> {
     let (manifest, cwd) = load_pipeline_manifest(manifest_path, input_path, inline_graph)?;
     let engine = build_engine(backend, ollama, api_key_env, api_key, &plugin_dir)?;
+    if batch_input.is_some() || batch_output_dir.is_some() {
+        return run_batch_pipeline(
+            manifest,
+            &cwd,
+            &engine,
+            batch_input,
+            batch_output_dir,
+            parallel,
+            max_concurrency,
+            timeout_ms,
+            retry_attempts,
+            retry_backoff_ms,
+            plugin_dir,
+        )
+        .await;
+    }
     if stream_stage.is_some() && events.as_deref() == Some(Path::new("-")) {
         anyhow::bail!("stream-stage cannot write to stdout while events stream to stdout");
     }
@@ -630,8 +908,23 @@ async fn run_pipeline(
     {
         anyhow::bail!("stream-stage cannot write to stdout while manifest outputs write to stdout");
     }
+    if max_concurrency == Some(0) {
+        anyhow::bail!("max-concurrency must be greater than 0");
+    }
+    if timeout_ms == Some(0) {
+        anyhow::bail!("timeout-ms must be greater than 0");
+    }
+    if retry_attempts == Some(0) {
+        anyhow::bail!("retry-attempts must be greater than 0");
+    }
 
     let stream_path = stream_stage.as_ref().map(|_| PathBuf::from("-"));
+    let default_retry = retry_attempts
+        .map(|attempts| RetryPolicy {
+            attempts,
+            backoff_ms: retry_backoff_ms.unwrap_or(0),
+        })
+        .unwrap_or_default();
     let options = RunOptions {
         run_id: "cli-run".to_string(),
         trace_path: trace,
@@ -644,11 +937,157 @@ async fn run_pipeline(
         plugin_dirs: plugin_dir,
         stream_stage,
         stream_path,
+        max_concurrency,
+        default_timeout_ms: timeout_ms,
+        default_retry,
+        checkpoint_path: checkpoint,
+        resume_path: resume,
+        replay_trace_path: replay_trace,
+        ..RunOptions::default()
     };
 
     engine
         .run_manifest_with_options(manifest, &cwd, options)
         .await?;
+
+    Ok(())
+}
+
+async fn run_batch_pipeline(
+    manifest: Manifest,
+    cwd: &Path,
+    engine: &Engine,
+    batch_input: Option<PathBuf>,
+    batch_output_dir: Option<PathBuf>,
+    parallel: bool,
+    max_concurrency: Option<usize>,
+    timeout_ms: Option<u64>,
+    retry_attempts: Option<usize>,
+    retry_backoff_ms: Option<u64>,
+    plugin_dirs: Vec<PathBuf>,
+) -> Result<()> {
+    let batch_input =
+        batch_input.ok_or_else(|| anyhow::anyhow!("batch mode requires --batch-input"))?;
+    let batch_output_dir = batch_output_dir
+        .ok_or_else(|| anyhow::anyhow!("batch mode requires --batch-output-dir"))?;
+    if manifest.inputs.len() != 1 {
+        anyhow::bail!("batch mode requires a manifest with exactly one input");
+    }
+    if manifest
+        .outputs
+        .values()
+        .any(|output| output.path.as_str() == "-")
+    {
+        anyhow::bail!("batch mode requires file outputs, not stdout outputs");
+    }
+    if max_concurrency == Some(0) {
+        anyhow::bail!("max-concurrency must be greater than 0");
+    }
+    if timeout_ms == Some(0) {
+        anyhow::bail!("timeout-ms must be greater than 0");
+    }
+    if retry_attempts == Some(0) {
+        anyhow::bail!("retry-attempts must be greater than 0");
+    }
+
+    std::fs::create_dir_all(batch_output_dir.join("inputs"))?;
+    std::fs::create_dir_all(batch_output_dir.join("items"))?;
+    let report_path = batch_output_dir.join("batch-report.jsonl");
+    let mut report = std::io::BufWriter::new(std::fs::File::create(&report_path)?);
+    let batch_source = std::fs::read_to_string(&batch_input)?;
+    let input_name = manifest
+        .inputs
+        .keys()
+        .next()
+        .expect("input length checked above")
+        .clone();
+    let default_retry = retry_attempts
+        .map(|attempts| RetryPolicy {
+            attempts,
+            backoff_ms: retry_backoff_ms.unwrap_or(0),
+        })
+        .unwrap_or_default();
+    let mut failed = false;
+
+    for (index, item) in batch_source.lines().enumerate() {
+        let item_id = format!("{index:06}");
+        let item_input_path = batch_output_dir
+            .join("inputs")
+            .join(format!("{item_id}.txt"));
+        let item_output_dir = batch_output_dir.join("items").join(&item_id);
+        std::fs::create_dir_all(&item_output_dir)?;
+        std::fs::write(&item_input_path, item)?;
+
+        let mut item_manifest = manifest.clone();
+        item_manifest
+            .inputs
+            .get_mut(&input_name)
+            .expect("input key should exist")
+            .path = Some(item_input_path.to_string_lossy().into_owned());
+        for output in item_manifest.outputs.values_mut() {
+            let path = Path::new(&output.path);
+            if path.is_absolute() {
+                anyhow::bail!("batch mode requires relative output paths");
+            }
+            if path
+                .components()
+                .any(|component| matches!(component, Component::ParentDir))
+            {
+                anyhow::bail!("batch mode output paths cannot contain parent directory components");
+            }
+            output.path = item_output_dir.join(path).to_string_lossy().into_owned();
+            if let Some(parent) = Path::new(&output.path).parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+
+        let options = RunOptions {
+            run_id: format!("cli-batch-{item_id}"),
+            scheduler: if parallel {
+                SchedulerMode::Parallel
+            } else {
+                SchedulerMode::Sequential
+            },
+            plugin_dirs: plugin_dirs.clone(),
+            max_concurrency,
+            default_timeout_ms: timeout_ms,
+            default_retry,
+            ..RunOptions::default()
+        };
+
+        match engine
+            .run_manifest_with_options(item_manifest, cwd, options)
+            .await
+        {
+            Ok(_) => {
+                writeln!(
+                    report,
+                    "{}",
+                    serde_json::json!({"index": index, "status": "succeeded"})
+                )?;
+            }
+            Err(error) => {
+                failed = true;
+                writeln!(
+                    report,
+                    "{}",
+                    serde_json::json!({
+                        "index": index,
+                        "status": "failed",
+                        "message": error.to_string()
+                    })
+                )?;
+            }
+        }
+    }
+    report.flush()?;
+
+    if failed {
+        anyhow::bail!(
+            "one or more batch items failed; see {}",
+            report_path.display()
+        );
+    }
 
     Ok(())
 }

@@ -81,6 +81,23 @@ format options. If a run fails with a 400-level response, remove
 `response_format: json`, keep a strict system prompt, and validate the output
 with `validate_json` plus a `repair` stage.
 
+## Static compatibility reports
+
+Use `llmff backends report` before a live run to see the deterministic
+capability matrix for registered providers:
+
+```bash
+llmff backends report \
+  --backend openrouter=https://openrouter.ai/api/v1 \
+  --api-key-env openrouter=OPENROUTER_API_KEY \
+  --ollama local=http://localhost:11434
+```
+
+The report covers JSON mode, streaming, seed, stop, and usage metadata. It does
+not probe live endpoints; it reports what llmff will send or read for each
+backend family and adds diagnostics for missing API-key wiring or unsupported
+streaming paths.
+
 ## token streaming support
 
 OpenAI-compatible backends support streaming inference with `--stream-stage`.

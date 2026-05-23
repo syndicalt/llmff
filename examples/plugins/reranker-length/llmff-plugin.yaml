@@ -1,0 +1,6 @@
+name: reranker-length
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: rerank.length
+    entrypoint: ./bin/rerank

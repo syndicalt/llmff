@@ -1,0 +1,70 @@
+name: live provider smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Provider smoke target
+        required: true
+        default: openai-compatible
+        type: choice
+        options:
+          - openai-compatible
+          - ollama
+          - both
+
+permissions:
+  contents: read
+
+jobs:
+  openai-compatible:
+    name: OpenAI-compatible live smoke
+    if: ${{ github.event.inputs.provider == 'openai-compatible' || github.event.inputs.provider == 'both' }}
+    runs-on: ubuntu-latest
+    env:
+      LLMFF_LIVE_PROVIDER_SMOKE: "1"
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build llmff
+        run: cargo build --locked -p llmff
+
+      - name: Run OpenAI-compatible smoke
+        run: scripts/smoke-openai-compatible-provider.sh
+        env:
+          LLMFF_BIN: target/debug/llmff
+
+  ollama:
+    name: Ollama live smoke
+    if: ${{ github.event.inputs.provider == 'ollama' || github.event.inputs.provider == 'both' }}
+    runs-on: ubuntu-latest
+    env:
+      LLMFF_LIVE_PROVIDER_SMOKE: "1"
+      OLLAMA_BASE_URL: http://localhost:11434
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Start Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 5
+          ollama pull llama3.1
+
+      - name: Build llmff
+        run: cargo build --locked -p llmff
+
+      - name: Run Ollama smoke
+        run: scripts/smoke-ollama-provider.sh
+        env:
+          LLMFF_BIN: target/debug/llmff

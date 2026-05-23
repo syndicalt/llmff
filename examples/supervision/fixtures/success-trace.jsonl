@@ -1,0 +1,10 @@
+{"run_id":"fixture-run","event":"run_started","timestamp_ms":1780000000000}
+{"run_id":"fixture-run","event":"stage_started","timestamp_ms":1780000000001,"stage_id":"load_prompt","op":"load"}
+{"run_id":"fixture-run","event":"stage_finished","timestamp_ms":1780000000003,"stage_id":"load_prompt","op":"load","status":"success","duration_ms":2}
+{"run_id":"fixture-run","event":"stage_started","timestamp_ms":1780000000004,"stage_id":"draft","op":"infer"}
+{"run_id":"fixture-run","event":"stage_finished","timestamp_ms":1780000000034,"stage_id":"draft","op":"infer","status":"success","duration_ms":30,"model":"openai:gpt-test","backend":"openai","provider_model":"gpt-test","prompt_tokens":12,"completion_tokens":8,"total_tokens":20}
+{"run_id":"fixture-run","event":"stage_started","timestamp_ms":1780000000035,"stage_id":"cached","op":"cache"}
+{"run_id":"fixture-run","event":"stage_finished","timestamp_ms":1780000000040,"stage_id":"cached","op":"cache","status":"success","duration_ms":5,"cache_hit":true,"cache_path":".llmff/cache/fixture.json"}
+{"run_id":"fixture-run","event":"stage_started","timestamp_ms":1780000000041,"stage_id":"cache_miss","op":"cache"}
+{"run_id":"fixture-run","event":"stage_finished","timestamp_ms":1780000000049,"stage_id":"cache_miss","op":"cache","status":"success","duration_ms":8,"cache_hit":false,"cache_path":".llmff/cache/miss.json"}
+{"run_id":"fixture-run","event":"run_finished","timestamp_ms":1780000000050,"status":"success"}

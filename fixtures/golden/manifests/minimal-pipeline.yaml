@@ -1,0 +1,26 @@
+version: 1
+metadata:
+  inline_graph_syntax_version: 1
+inputs:
+  prompt:
+    path: ./question.txt
+    format: text
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+    temperature: 0
+    top_p: 1
+    max_tokens: 64
+    seed: 7
+    response_format: json
+    stop:
+      - END
+outputs:
+  answer:
+    from: draft
+    path: ./answer.json

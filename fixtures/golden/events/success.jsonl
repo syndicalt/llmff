@@ -1,0 +1,4 @@
+{"run_id":"cli-run","event":"run_started","timestamp_ms":1780000000000}
+{"run_id":"cli-run","event":"stage_started","stage_id":"load_prompt","op":"load","timestamp_ms":1780000000001}
+{"run_id":"cli-run","event":"stage_finished","stage_id":"load_prompt","op":"load","status":"success","timestamp_ms":1780000000002,"duration_ms":1}
+{"run_id":"cli-run","event":"run_finished","status":"success","timestamp_ms":1780000000003}

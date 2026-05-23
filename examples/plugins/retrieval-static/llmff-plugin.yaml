@@ -1,0 +1,6 @@
+name: retrieval-static
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: retrieval.static
+    entrypoint: ./bin/retrieve

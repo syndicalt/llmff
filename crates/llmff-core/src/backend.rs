@@ -2,10 +2,11 @@ use async_trait::async_trait;
 use futures::{stream, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
+use tokio::io::AsyncWriteExt as _;
+use tokio::process::Command;
 
 use crate::error::LlmffError;
 use crate::value::Message;
@@ -68,6 +69,7 @@ impl Backend for CommandBackend {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .kill_on_drop(true)
             .spawn()
             .map_err(|error| {
                 LlmffError::Backend(format!(
@@ -81,7 +83,7 @@ impl Backend for CommandBackend {
                 self.alias
             ))
         })?;
-        stdin.write_all(&encoded).map_err(|error| {
+        stdin.write_all(&encoded).await.map_err(|error| {
             LlmffError::Backend(format!(
                 "failed to write plugin backend `{}` request: {error}",
                 self.alias
@@ -89,7 +91,7 @@ impl Backend for CommandBackend {
         })?;
         drop(stdin);
 
-        let output = child.wait_with_output().map_err(|error| {
+        let output = child.wait_with_output().await.map_err(|error| {
             LlmffError::Backend(format!(
                 "failed to wait for plugin backend `{}`: {error}",
                 self.alias

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmff.dev/schemas/plugin-validation-report-v1.schema.json",
+  "title": "llmff plugin validation report v1",
+  "type": "object",
+  "required": [
+    "format_version",
+    "plugin_protocol_version",
+    "plugin_dir",
+    "valid",
+    "plugin_count",
+    "plugins",
+    "diagnostics"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format_version": { "const": 1 },
+    "plugin_protocol_version": { "const": 1 },
+    "plugin_dir": { "type": "string" },
+    "valid": { "type": "boolean" },
+    "plugin_count": { "type": "integer", "minimum": 0 },
+    "plugins": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/plugin" }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    }
+  },
+  "$defs": {
+    "plugin": {
+      "type": "object",
+      "required": ["name", "version", "capabilities"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["kind", "name", "entrypoint"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "enum": ["backend", "sampler", "stage", "tool-transport"]
+              },
+              "name": { "type": "string", "minLength": 1 },
+              "entrypoint": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": ["severity", "code", "message", "manifest_path"],
+      "additionalProperties": false,
+      "properties": {
+        "severity": { "enum": ["error"] },
+        "code": {
+          "enum": [
+            "manifest_read_failed",
+            "manifest_parse_failed",
+            "manifest_invalid",
+            "missing_entrypoint"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "manifest_path": { "type": "string", "minLength": 1 },
+        "plugin_name": { "type": "string", "minLength": 1 },
+        "capability_kind": {
+          "enum": ["backend", "sampler", "stage", "tool-transport"]
+        },
+        "capability_name": { "type": "string", "minLength": 1 },
+        "entrypoint": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

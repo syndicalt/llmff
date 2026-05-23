@@ -1,0 +1,15 @@
+{
+  "model": "echo-backend:test",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello"
+    }
+  ],
+  "temperature": null,
+  "top_p": null,
+  "max_tokens": null,
+  "seed": null,
+  "response_format": null,
+  "stop": []
+}
