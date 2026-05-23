@@ -260,9 +260,14 @@ fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
     let root = workspace_root();
     let docs = root.join("docs/agent-workflows.md");
     let example = root.join("examples/agent-workflows/supervisor.py");
+    let node_example = root.join("examples/agent-workflows/node-supervisor.mjs");
 
     assert!(docs.exists(), "missing agent workflow docs");
     assert!(example.exists(), "missing agent supervisor example");
+    assert!(
+        node_example.exists(),
+        "missing Node agent supervisor example"
+    );
 
     let readme =
         std::fs::read_to_string(root.join("README.md")).expect("README should be readable");
@@ -292,7 +297,9 @@ fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
 
     assert!(readme.contains("docs/agent-workflows.md"));
     assert!(examples_readme.contains("examples/agent-workflows/supervisor.py"));
+    assert!(examples_readme.contains("examples/agent-workflows/node-supervisor.mjs"));
     assert!(observability.contains("docs/agent-workflows.md"));
+    assert!(docs_source.contains("node examples/agent-workflows/node-supervisor.mjs"));
 
     let temp = tempfile::tempdir().expect("tempdir should be available");
     Command::new("python3")
@@ -308,5 +315,22 @@ fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
         .stdout(predicates::str::contains("manifest_hash=sha256:"))
         .stdout(predicates::str::contains("stdout_manifest_outputs=false"))
         .stdout(predicates::str::contains("run_status=ok"))
+        .stdout(predicates::str::contains("output_exists=true"));
+
+    let node_temp = tempfile::tempdir().expect("tempdir should be available");
+    Command::new("node")
+        .arg(node_example)
+        .arg("--work-dir")
+        .arg(node_temp.path())
+        .env("LLMFF_BIN", assert_cmd::cargo::cargo_bin("llmff"))
+        .env("LLMFF_MOCK_BAD_RESPONSE", r#"{"wrong":true}"#)
+        .env("LLMFF_MOCK_GOOD_RESPONSE", r#"{"answer":"ok"}"#)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("inspect_format_version=1"))
+        .stdout(predicates::str::contains("manifest_hash=sha256:"))
+        .stdout(predicates::str::contains("stdout_manifest_outputs=false"))
+        .stdout(predicates::str::contains("run_status=ok"))
+        .stdout(predicates::str::contains("event_count="))
         .stdout(predicates::str::contains("output_exists=true"));
 }

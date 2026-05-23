@@ -189,3 +189,24 @@ LLMFF_BIN=target/debug/llmff python3 examples/agent-workflows/supervisor.py
 
 The example uses mock backend responses by default, so it does not need provider
 credentials or network access.
+
+## Node.js Streaming Supervisor
+
+The Node.js example uses `child_process.spawn` so a JavaScript or TypeScript
+agent host can consume lifecycle events while the process is still running. It
+uses the same offline JSON repair fixture, inspect preflight, trace, checkpoint,
+and exit-code preservation pattern as the Python supervisor:
+
+```bash
+node examples/agent-workflows/node-supervisor.mjs
+```
+
+To point the example at a development binary:
+
+```bash
+LLMFF_BIN=target/debug/llmff node examples/agent-workflows/node-supervisor.mjs
+```
+
+Use this shape when the agent host needs live JSONL event consumption from
+stdout. Keep manifest payload outputs file-backed so stdout belongs to
+`--events -`.
