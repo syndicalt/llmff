@@ -2570,6 +2570,10 @@ fn inspect_json_reports_reproducible_execution_contract() {
             "json",
             "--plugin-dir",
             "examples/plugins",
+            "--backend",
+            "gateway=https://gateway.example/v1",
+            "--ollama",
+            "local=http://localhost:11434",
         ])
         .current_dir(&root)
         .assert()
@@ -2592,6 +2596,10 @@ fn inspect_json_reports_reproducible_execution_contract() {
         .as_str()
         .expect("manifest hash should be a string")
         .starts_with("sha256:"));
+    assert_eq!(report["compatibility"]["pipeline_manifest_schema"], 1);
+    assert_eq!(report["compatibility"]["inspect_report_schema"], 1);
+    assert_eq!(report["compatibility"]["inline_graph_syntax"], 1);
+    assert_eq!(report["compatibility"]["plugin_protocol"], 1);
 
     assert_eq!(report["inputs"]["prompt"]["path"], "./question.txt");
     assert_eq!(report["outputs"]["final"]["from"], "choose_final");
@@ -2614,9 +2622,29 @@ fn inspect_json_reports_reproducible_execution_contract() {
     assert_eq!(report["execution"]["scheduler"], "sequential");
     assert_eq!(report["execution"]["stdout"]["events"], false);
     assert_eq!(report["execution"]["stdout"]["stream_stage"], false);
+    assert_eq!(report["backends"]["registrations"][0]["name"], "mock");
+    assert_eq!(report["backends"]["registrations"][0]["source"], "built-in");
+    assert_eq!(report["backends"]["registrations"][3]["name"], "gateway");
+    assert_eq!(report["backends"]["registrations"][3]["source"], "cli");
+    assert_eq!(
+        report["backends"]["registrations"][3]["base_url"],
+        "https://gateway.example/v1"
+    );
+    assert_eq!(report["backends"]["registrations"][4]["name"], "local");
+    assert_eq!(report["backends"]["registrations"][4]["kind"], "ollama");
+    assert_eq!(
+        report["backends"]["registrations"][5]["kind"],
+        "plugin-command"
+    );
     assert_eq!(
         report["plugins"]["directories"],
         serde_json::json!(["examples/plugins"])
+    );
+    assert_eq!(report["plugins"]["protocol_version"], 1);
+    assert_eq!(report["plugins"]["manifests"][0]["name"], "backend-echo");
+    assert_eq!(
+        report["plugins"]["manifests"][0]["capabilities"][0]["kind"],
+        "backend"
     );
 }
 

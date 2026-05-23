@@ -5,17 +5,43 @@
   "type": "object",
   "required": [
     "format_version",
+    "compatibility",
     "manifest",
     "inputs",
     "outputs",
     "stage_order",
     "stages",
     "execution",
+    "backends",
     "plugins"
   ],
   "properties": {
     "format_version": {
       "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "required": [
+        "pipeline_manifest_schema",
+        "inspect_report_schema",
+        "inline_graph_syntax",
+        "plugin_protocol"
+      ],
+      "properties": {
+        "pipeline_manifest_schema": {
+          "const": 1
+        },
+        "inspect_report_schema": {
+          "const": 1
+        },
+        "inline_graph_syntax": {
+          "const": 1
+        },
+        "plugin_protocol": {
+          "const": 1
+        }
+      },
+      "additionalProperties": true
     },
     "manifest": {
       "type": "object",
@@ -140,14 +166,79 @@
       },
       "additionalProperties": true
     },
+    "backends": {
+      "type": "object",
+      "required": ["registrations"],
+      "properties": {
+        "registrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "kind",
+              "source",
+              "registration_flag",
+              "base_url",
+              "requires_api_key",
+              "model_aliases",
+              "capabilities"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string"
+              },
+              "registration_flag": {
+                "type": "string"
+              },
+              "base_url": {
+                "type": ["string", "null"]
+              },
+              "requires_api_key": {
+                "type": "boolean"
+              },
+              "model_aliases": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "plugins": {
       "type": "object",
-      "required": ["directories"],
+      "required": ["directories", "protocol_version", "manifests"],
       "properties": {
         "directories": {
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "protocol_version": {
+          "const": 1
+        },
+        "manifests": {
+          "type": "array",
+          "items": {
+            "type": "object"
           }
         }
       },
