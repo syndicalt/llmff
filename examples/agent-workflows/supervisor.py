@@ -40,6 +40,27 @@ def run_pipeline(work_dir: Path) -> int:
     env.setdefault("LLMFF_MOCK_BAD_RESPONSE", '{"wrong":true}')
     env.setdefault("LLMFF_MOCK_GOOD_RESPONSE", '{"answer":"ok"}')
 
+    inspect = subprocess.run(
+        [llmff, "inspect", str(manifest), "--format", "json"],
+        cwd=work_dir,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if inspect.returncode != 0:
+        if inspect.stderr:
+            print(inspect.stderr, file=sys.stderr, end="")
+        return inspect.returncode
+
+    report = json.loads(inspect.stdout)
+    print(f"inspect_format_version={report['format_version']}")
+    print(f"manifest_hash={report['manifest']['hash']}")
+    print(
+        "stdout_manifest_outputs="
+        f"{str(report['execution']['stdout']['manifest_outputs']).lower()}"
+    )
+
     completed = subprocess.run(
         [
             llmff,
@@ -73,7 +94,9 @@ def run_pipeline(work_dir: Path) -> int:
     print(f"event_count={len(events)}")
     print(f"trace={trace}")
     print(f"checkpoint={checkpoint}")
-    print(f"output={work_dir / 'answer.json'}")
+    output = work_dir / "answer.json"
+    print(f"output={output}")
+    print(f"output_exists={str(output.exists()).lower()}")
 
     if failures:
         failure = failures[-1]
