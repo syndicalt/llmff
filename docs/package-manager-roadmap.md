@@ -1,6 +1,6 @@
 # Package Manager Roadmap
 
-Package-manager publication starts after v0.1.2 proves that GitHub Release
+Package-manager publication starts after v0.1.3 proves that GitHub Release
 assets are complete, checksum-verifiable, and smoke-tested. This page tracks
 the production path without publishing anything early.
 
@@ -8,8 +8,8 @@ the production path without publishing anything early.
 
 Do not submit a package-manager source until all of these are true:
 
-- `scripts/release-preflight.sh v0.1.2` passes before the release tag is pushed.
-- `scripts/check-release-assets.sh v0.1.2` passes against the published GitHub
+- `scripts/release-preflight.sh v0.1.3` passes before the release tag is pushed.
+- `scripts/check-release-assets.sh v0.1.3` passes against the published GitHub
   Release.
 - Each package source downloads immutable release assets by version.
 - Each package source verifies SHA-256 checksums from release metadata or embeds
@@ -33,11 +33,11 @@ Prototype metadata:
 Target source:
 
 - macOS Apple Silicon archive:
-  `llmff-0.1.2-aarch64-apple-darwin.tar.gz`
+  `llmff-0.1.3-aarch64-apple-darwin.tar.gz`
 - macOS Intel archive:
-  `llmff-0.1.2-x86_64-apple-darwin.tar.gz`
+  `llmff-0.1.3-x86_64-apple-darwin.tar.gz`
 - Linux x86_64 archive:
-  `llmff-0.1.2-x86_64-unknown-linux-gnu.tar.gz`
+  `llmff-0.1.3-x86_64-unknown-linux-gnu.tar.gz`
 
 Readiness work:
 
@@ -46,7 +46,7 @@ Readiness work:
 - Use release archive URLs, fixed version strings, and checked-in SHA-256
   values.
 - Keep the formula test direct: install `bin/"llmff"` and assert
-  `llmff --version` reports `llmff 0.1.2`.
+  `llmff --version` reports `llmff 0.1.3`.
 - Do not submit or publish the tap before the release asset verification gate
   passes.
 - Publish only when maintainers decide the channel is support-ready for tap
@@ -67,7 +67,7 @@ Prototype metadata:
 Target source:
 
 - Windows x86_64 MSI:
-  `llmff-0.1.2-x86_64-pc-windows-msvc.msi`
+  `llmff-0.1.3-x86_64-pc-windows-msvc.msi`
 
 Readiness work:
 
@@ -93,7 +93,7 @@ Prototype metadata:
 Target source:
 
 - Windows x86_64 zip:
-  `llmff-0.1.2-x86_64-pc-windows-msvc.zip`
+  `llmff-0.1.3-x86_64-pc-windows-msvc.zip`
 
 Readiness work:
 
@@ -119,10 +119,10 @@ Prototype metadata:
 Target source:
 
 - Linux x86_64 archive:
-  `llmff-0.1.2-x86_64-unknown-linux-gnu.tar.gz`
+  `llmff-0.1.3-x86_64-unknown-linux-gnu.tar.gz`
 - Release-generated metadata:
   `PKGBUILD`
-  `llmff-0.1.2-arch.SRCINFO`
+  `llmff-0.1.3-arch.SRCINFO`
 
 Readiness work:
 
@@ -151,7 +151,7 @@ Prototype status:
 Target source:
 
 - Debian package:
-  `llmff_0.1.2_amd64.deb`
+  `llmff_0.1.3_amd64.deb`
 
 Readiness work:
 
