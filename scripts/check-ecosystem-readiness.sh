@@ -37,6 +37,7 @@ require_file "docs/schemas/pipeline-manifest-v1.schema.json"
 require_file "docs/manifest-reproducibility.md"
 require_file "docs/schemas/inspect-report-v1.schema.json"
 require_file "docs/events.md"
+require_file "docs/opentelemetry-bridge.md"
 require_file "docs/plugins/registry.v1.json"
 require_file "docs/provider-troubleshooting.md"
 require_file "docs/provider-smoke-readiness.md"
@@ -47,6 +48,7 @@ require_file "docs/distribution-trust.md"
 for integration in \
   "Manifest contracts" \
   "Trace and event streams" \
+  "OpenTelemetry bridge" \
   "CLI JSON output" \
   "Plugin protocol" \
   "Provider onboarding" \
@@ -61,6 +63,7 @@ for gate in \
   "python3 scripts/check-schema-contract.py" \
   "scripts/check-manifest-reproducibility.sh" \
   "cargo test -p llmff --test cli_run observability_export_scripts_summarize_trace_fixture" \
+  "scripts/check-opentelemetry-bridge.sh" \
   "cargo test -p llmff --test cli_run inspect_json_reports_reproducible_execution_contract" \
   "scripts/check-plugin-fixtures.sh" \
   "scripts/check-provider-smoke-readiness.sh" \
@@ -76,6 +79,7 @@ require_text "$guide" "support commitments"
 require_text "$guide" "explicitly opt-in"
 require_text "docs/manifest-reproducibility.md" "manifest lockfile remains parked"
 require_text "docs/provider-smoke-readiness.md" "certification is a support commitment"
+require_text "docs/opentelemetry-bridge.md" "no network telemetry by default"
 require_text "docs/roadmap.md" "Keep every public integration path covered by a local validation gate or a"
 
 printf 'ecosystem readiness validation succeeded\n'
