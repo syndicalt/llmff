@@ -1,0 +1,6 @@
+name: tool-stdio-cat
+version: 0.1.0
+capabilities:
+  - kind: tool-transport
+    name: stdio-cat
+    entrypoint: ./bin/stdio-cat

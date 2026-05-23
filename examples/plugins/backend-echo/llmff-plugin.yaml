@@ -1,0 +1,6 @@
+name: backend-echo
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: echo-backend
+    entrypoint: ./bin/backend

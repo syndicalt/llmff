@@ -1,0 +1,6 @@
+name: stage-uppercase
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: text.uppercase
+    entrypoint: ./bin/uppercase

@@ -1,0 +1,23 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: extract
+    op: infer
+    from: load_prompt
+    model: mock:good
+    temperature: 0.0
+    max_tokens: 256
+    response_format: json
+  - id: validate
+    op: validate_json
+    from: extract
+    schema: '{"type":"object","required":["answer"],"properties":{"answer":{"type":"string"}},"additionalProperties":false}'
+outputs:
+  final:
+    from: validate
+    path: ./structured-extraction.answer.json

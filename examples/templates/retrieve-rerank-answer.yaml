@@ -1,0 +1,30 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: retrieve_docs
+    op: retrieve
+    from: load_prompt
+    documents:
+      - ../retrieval/python.txt
+      - ../retrieval/rust.txt
+    top_k: 2
+  - id: rerank_docs
+    op: rerank
+    from: retrieve_docs
+    strategy: lexical
+    top_k: 1
+  - id: answer
+    op: infer
+    from: rerank_docs
+    model: mock:good
+    temperature: 0.2
+    max_tokens: 256
+outputs:
+  final:
+    from: answer
+    path: ./retrieve-rerank-answer.txt

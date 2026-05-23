@@ -66,19 +66,51 @@ pub fn discover_plugin_manifests(
             continue;
         }
 
-        let source = std::fs::read_to_string(&manifest_path).map_err(|error| {
+        manifests.push(read_plugin_manifest(&manifest_path)?);
+    }
+
+    manifests.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(manifests)
+}
+
+pub fn validate_plugin_manifests(
+    directory: impl AsRef<Path>,
+) -> Result<Vec<PluginManifest>, LlmffError> {
+    let directory = directory.as_ref();
+    let entries = std::fs::read_dir(directory).map_err(|error| {
+        LlmffError::Config(format!(
+            "failed to read plugin directory `{}`: {error}",
+            directory.display()
+        ))
+    })?;
+    let mut manifests = Vec::new();
+
+    for entry in entries {
+        let entry = entry.map_err(|error| {
             LlmffError::Config(format!(
-                "failed to read plugin manifest `{}`: {error}",
-                manifest_path.display()
+                "failed to read plugin directory entry in `{}`: {error}",
+                directory.display()
             ))
         })?;
-        let manifest: PluginManifest = serde_yaml::from_str(&source).map_err(|error| {
-            LlmffError::Config(format!(
-                "failed to parse plugin manifest `{}`: {error}",
-                manifest_path.display()
-            ))
-        })?;
-        manifest.validate(&manifest_path)?;
+        let plugin_root = entry.path();
+        let manifest_path = plugin_root.join("llmff-plugin.yaml");
+        if !manifest_path.is_file() {
+            continue;
+        }
+
+        let manifest = read_plugin_manifest(&manifest_path)?;
+        for capability in &manifest.capabilities {
+            let entrypoint = resolve_entrypoint(&plugin_root, &capability.entrypoint);
+            if !entrypoint.is_file() {
+                return Err(LlmffError::Config(format!(
+                    "plugin manifest `{}` capability `{}` `{}` has missing entrypoint `{}`",
+                    manifest_path.display(),
+                    capability.kind,
+                    capability.name,
+                    entrypoint.display()
+                )));
+            }
+        }
         manifests.push(manifest);
     }
 
@@ -194,6 +226,32 @@ fn require_non_empty(field: &str, value: &str, path: &Path) -> Result<(), LlmffE
     Ok(())
 }
 
+fn read_plugin_manifest(manifest_path: &Path) -> Result<PluginManifest, LlmffError> {
+    let source = std::fs::read_to_string(manifest_path).map_err(|error| {
+        LlmffError::Config(format!(
+            "failed to read plugin manifest `{}`: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let manifest: PluginManifest = serde_yaml::from_str(&source).map_err(|error| {
+        LlmffError::Config(format!(
+            "failed to parse plugin manifest `{}`: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    manifest.validate(manifest_path)?;
+    Ok(manifest)
+}
+
+fn resolve_entrypoint(plugin_root: &Path, entrypoint: &str) -> PathBuf {
+    let entrypoint = PathBuf::from(entrypoint);
+    if entrypoint.is_absolute() {
+        entrypoint
+    } else {
+        plugin_root.join(entrypoint)
+    }
+}
+
 struct ResolvedPluginCapability {
     name: String,
     entrypoint: PathBuf,
@@ -223,30 +281,13 @@ fn discover_plugin_capabilities(
         if !manifest_path.is_file() {
             continue;
         }
-        let source = std::fs::read_to_string(&manifest_path).map_err(|error| {
-            LlmffError::Config(format!(
-                "failed to read plugin manifest `{}`: {error}",
-                manifest_path.display()
-            ))
-        })?;
-        let manifest: PluginManifest = serde_yaml::from_str(&source).map_err(|error| {
-            LlmffError::Config(format!(
-                "failed to parse plugin manifest `{}`: {error}",
-                manifest_path.display()
-            ))
-        })?;
-        manifest.validate(&manifest_path)?;
+        let manifest = read_plugin_manifest(&manifest_path)?;
 
         for capability in manifest.capabilities {
             if capability.kind != kind {
                 continue;
             }
-            let entrypoint = PathBuf::from(&capability.entrypoint);
-            let entrypoint = if entrypoint.is_absolute() {
-                entrypoint
-            } else {
-                plugin_root.join(entrypoint)
-            };
+            let entrypoint = resolve_entrypoint(&plugin_root, &capability.entrypoint);
             capabilities.push(ResolvedPluginCapability {
                 name: capability.name,
                 entrypoint,
@@ -328,6 +369,31 @@ capabilities:
         assert!(error
             .to_string()
             .contains("unknown capability kind `widget`"));
+    }
+
+    #[test]
+    fn validation_reports_missing_entrypoints() {
+        let directory = tempfile::tempdir().unwrap();
+        let plugin_root = directory.path().join("bad");
+        std::fs::create_dir(&plugin_root).unwrap();
+        std::fs::write(
+            plugin_root.join("llmff-plugin.yaml"),
+            r#"
+name: bad
+version: 0.1.0
+capabilities:
+  - kind: stage
+    name: missing.stage
+    entrypoint: ./bin/missing
+"#,
+        )
+        .unwrap();
+
+        let error = validate_plugin_manifests(directory.path()).unwrap_err();
+
+        assert!(error.to_string().contains("missing entrypoint"));
+        assert!(error.to_string().contains("missing.stage"));
+        assert!(error.to_string().contains("bad/./bin/missing"));
     }
 
     #[test]

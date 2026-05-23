@@ -13,7 +13,9 @@ cargo install --git https://github.com/syndicalt/llmff --tag v0.1.2 llmff
 ```
 
 If you downloaded a release archive instead, unpack it and put the `llmff`
-binary on your `PATH`.
+binary on your `PATH`. Platform-specific release asset installation and
+checksum verification are documented in
+[`docs/github-release-installation.md`](github-release-installation.md).
 
 Verify the binary:
 
@@ -156,6 +158,10 @@ does not include full prompts, tool bodies, headers, cached values, or secrets.
 ## Next Steps
 
 - See [`examples/README.md`](../examples/README.md) for the example catalog.
+- See [`docs/provider-troubleshooting.md`](provider-troubleshooting.md) for
+  OpenAI-compatible and Ollama setup notes.
 - See [`README.md`](../README.md) for the CLI reference and stage semantics.
 - See [`docs/platform-support.md`](platform-support.md) for release artifacts
   and installer assumptions.
+- See [`docs/github-release-installation.md`](github-release-installation.md)
+  for direct GitHub Release installation.
