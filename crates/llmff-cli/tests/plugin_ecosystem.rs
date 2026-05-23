@@ -271,3 +271,55 @@ fn release_notes_cover_current_ecosystem_contract() {
     assert!(preflight.contains("agent runner adoption guide"));
     assert!(preflight.contains("OpenTelemetry bridge"));
 }
+
+#[test]
+fn package_manager_metadata_tracks_current_release_version() {
+    let root = workspace_root();
+    let version = env!("CARGO_PKG_VERSION");
+    let tag = format!("v{version}");
+
+    let checker = std::fs::read_to_string(root.join("scripts/check-package-manager-metadata.sh"))
+        .expect("checker should be readable");
+    assert!(checker.contains(&format!("version=\"{version}\"")));
+    assert!(checker.contains("tag=\"v${version}\""));
+
+    for path in [
+        "packaging/homebrew/llmff.rb",
+        "packaging/scoop/llmff.json",
+        "packaging/winget/Syndicalt.Llmff.installer.yaml",
+        "packaging/aur/PKGBUILD",
+        "packaging/aur/.SRCINFO",
+    ] {
+        let source = std::fs::read_to_string(root.join(path)).expect("file should be readable");
+        assert!(
+            source.contains(version),
+            "{path} should reference current version {version}"
+        );
+        assert!(
+            source.contains(&tag),
+            "{path} should reference current tag {tag}"
+        );
+    }
+
+    for path in [
+        "packaging/winget/Syndicalt.Llmff.yaml",
+        "packaging/winget/Syndicalt.Llmff.locale.en-US.yaml",
+    ] {
+        let source = std::fs::read_to_string(root.join(path)).expect("file should be readable");
+        assert!(
+            source.contains(version),
+            "{path} should reference current version {version}"
+        );
+    }
+
+    let roadmap = std::fs::read_to_string(root.join("docs/package-manager-roadmap.md")).unwrap();
+    assert!(roadmap.contains(&format!("scripts/release-preflight.sh {tag}")));
+    assert!(roadmap.contains(&format!("scripts/check-release-assets.sh {tag}")));
+
+    Command::new(root.join("scripts/check-package-manager-metadata.sh"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(format!(
+            "package-manager metadata validation succeeded for {tag}"
+        )));
+}

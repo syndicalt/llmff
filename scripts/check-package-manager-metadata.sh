@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
 
-version="0.1.2"
+version="0.1.3"
 tag="v${version}"
 base_url="https://github.com/syndicalt/llmff/releases/download/${tag}"
 
@@ -14,11 +14,11 @@ macos_intel_archive="llmff-${version}-x86_64-apple-darwin.tar.gz"
 windows_zip="llmff-${version}-x86_64-pc-windows-msvc.zip"
 windows_msi="llmff-${version}-x86_64-pc-windows-msvc.msi"
 
-linux_sha256="48e290e689af48300af7ca9e3a53e2813a35d1b20c2228feae9c67d7412a1067"
-macos_arm_sha256="7b15b3d8510aaebe88c5d273c2b8f92e33e80d0b9a1e5a87492d1488116445ee"
-macos_intel_sha256="89780bd77f30584b06dfaf8b8179070fb87bdc497b4b3c1ca4f427eeb7dfe7ca"
-windows_zip_sha256="440d428ff34e7e119aaf8f785d980a7b9bd1e6809ee6118c4395873f5adc50ba"
-windows_msi_sha256="d034981db3d6c134cbbe5c98e17cb855c428e025952f0ce7861d1c3ebd02e6e9"
+linux_sha256="e83fe32cf6bc88acc426acadc893e9015a4d58bc47ac8726a21b54b685b7950c"
+macos_arm_sha256="d3ceb2cb6714ad27e18c8ab52b2f5265fc7424615a5a6ceb38ad95cff63d3e4d"
+macos_intel_sha256="a97900222ac7a59c550ee4648998824c54a1a70d195173150ab4db6bb7c663aa"
+windows_zip_sha256="1b34abddc30f715ee91440e7550c516ab15b915d111722c4993a945623859a94"
+windows_msi_sha256="e7aa934de84746d3d445b3fbbd442ec9a50a566b56b94696dcf8f1299e3d65fe"
 
 require_file() {
   local path="$1"

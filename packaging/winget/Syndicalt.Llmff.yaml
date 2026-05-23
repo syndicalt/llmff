@@ -1,6 +1,6 @@
 # Prototype only. Do not submit until maintainers intentionally publish.
 PackageIdentifier: Syndicalt.Llmff
-PackageVersion: 0.1.2
+PackageVersion: 0.1.3
 DefaultLocale: en-US
 ManifestType: version
 ManifestVersion: 1.9.0

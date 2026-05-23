@@ -1,10 +1,10 @@
 # Prototype only. Do not submit until maintainers intentionally publish.
 PackageIdentifier: Syndicalt.Llmff
-PackageVersion: 0.1.2
+PackageVersion: 0.1.3
 InstallerType: wix
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/syndicalt/llmff/releases/download/v0.1.2/llmff-0.1.2-x86_64-pc-windows-msvc.msi
-    InstallerSha256: d034981db3d6c134cbbe5c98e17cb855c428e025952f0ce7861d1c3ebd02e6e9
+    InstallerUrl: https://github.com/syndicalt/llmff/releases/download/v0.1.3/llmff-0.1.3-x86_64-pc-windows-msvc.msi
+    InstallerSha256: e7aa934de84746d3d445b3fbbd442ec9a50a566b56b94696dcf8f1299e3d65fe
 ManifestType: installer
 ManifestVersion: 1.9.0
