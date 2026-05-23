@@ -108,12 +108,19 @@
     },
     "checkpoint": {
       "enabled": false,
-      "resume": false
+      "resume": false,
+      "path": null,
+      "resume_path": null
     },
     "stdout": {
       "events": false,
       "stream_stage": false,
       "manifest_outputs": false
+    },
+    "artifacts": {
+      "trace": null,
+      "events": null,
+      "stream_stage": null
     }
   },
   "backends": {

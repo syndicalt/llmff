@@ -81,6 +81,26 @@ enum Command {
         input: Option<PathBuf>,
         #[arg(short = 'g', long = "graph")]
         graph: Option<String>,
+        #[arg(long)]
+        trace: Option<PathBuf>,
+        #[arg(long = "events")]
+        events: Option<PathBuf>,
+        #[arg(long)]
+        parallel: bool,
+        #[arg(long = "max-concurrency")]
+        max_concurrency: Option<usize>,
+        #[arg(long = "timeout-ms")]
+        timeout_ms: Option<u64>,
+        #[arg(long = "retry-attempts")]
+        retry_attempts: Option<usize>,
+        #[arg(long = "retry-backoff-ms")]
+        retry_backoff_ms: Option<u64>,
+        #[arg(long = "checkpoint")]
+        checkpoint: Option<PathBuf>,
+        #[arg(long = "resume")]
+        resume: Option<PathBuf>,
+        #[arg(long = "stream-stage")]
+        stream_stage: Option<String>,
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
         #[arg(long = "plugin-dir")]
@@ -241,6 +261,16 @@ pub async fn run(cli: Cli) -> Result<()> {
             manifest,
             input,
             graph,
+            trace,
+            events,
+            parallel,
+            max_concurrency,
+            timeout_ms,
+            retry_attempts,
+            retry_backoff_ms,
+            checkpoint,
+            resume,
+            stream_stage,
             format,
             plugin_dir,
             backend,
@@ -258,7 +288,28 @@ pub async fn run(cli: Cli) -> Result<()> {
             )?;
             let graph =
                 engine.validate_manifest_with_plugin_dirs(loaded.manifest.clone(), &plugin_dir)?;
-            print_inspect_report(format, loaded, graph, &plugin_dir, &backend, &ollama)?;
+            let inspect_options = InspectExecutionOptions::new(
+                trace,
+                events,
+                parallel,
+                max_concurrency,
+                timeout_ms,
+                retry_attempts,
+                retry_backoff_ms,
+                checkpoint,
+                resume,
+                stream_stage,
+            )?;
+            inspect_options.validate_stdout_ownership(&loaded.manifest)?;
+            print_inspect_report(
+                format,
+                loaded,
+                graph,
+                &plugin_dir,
+                &backend,
+                &ollama,
+                inspect_options,
+            )?;
         }
         Command::Backends {
             command:
@@ -318,6 +369,85 @@ struct ManifestSource {
     content: String,
 }
 
+#[derive(Debug)]
+struct InspectExecutionOptions {
+    trace: Option<PathBuf>,
+    events: Option<PathBuf>,
+    parallel: bool,
+    max_concurrency: Option<usize>,
+    timeout_ms: Option<u64>,
+    retry_attempts: Option<usize>,
+    retry_backoff_ms: Option<u64>,
+    checkpoint: Option<PathBuf>,
+    resume: Option<PathBuf>,
+    stream_stage: Option<String>,
+}
+
+impl InspectExecutionOptions {
+    fn new(
+        trace: Option<PathBuf>,
+        events: Option<PathBuf>,
+        parallel: bool,
+        max_concurrency: Option<usize>,
+        timeout_ms: Option<u64>,
+        retry_attempts: Option<usize>,
+        retry_backoff_ms: Option<u64>,
+        checkpoint: Option<PathBuf>,
+        resume: Option<PathBuf>,
+        stream_stage: Option<String>,
+    ) -> Result<Self> {
+        if max_concurrency == Some(0) {
+            anyhow::bail!("max-concurrency must be greater than 0");
+        }
+        if timeout_ms == Some(0) {
+            anyhow::bail!("timeout-ms must be greater than 0");
+        }
+        if retry_attempts == Some(0) {
+            anyhow::bail!("retry-attempts must be greater than 0");
+        }
+        Ok(Self {
+            trace,
+            events,
+            parallel,
+            max_concurrency,
+            timeout_ms,
+            retry_attempts,
+            retry_backoff_ms,
+            checkpoint,
+            resume,
+            stream_stage,
+        })
+    }
+
+    fn default_retry(&self) -> RetryPolicy {
+        self.retry_attempts
+            .map(|attempts| RetryPolicy {
+                attempts,
+                backoff_ms: self.retry_backoff_ms.unwrap_or(0),
+            })
+            .unwrap_or_default()
+    }
+
+    fn validate_stdout_ownership(&self, manifest: &Manifest) -> Result<()> {
+        let manifest_writes_stdout = manifest
+            .outputs
+            .values()
+            .any(|output| output.path.as_str() == "-");
+        if self.stream_stage.is_some() && self.events.as_deref() == Some(Path::new("-")) {
+            anyhow::bail!("stream-stage cannot write to stdout while events stream to stdout");
+        }
+        if self.events.as_deref() == Some(Path::new("-")) && manifest_writes_stdout {
+            anyhow::bail!("events cannot stream to stdout while manifest outputs write to stdout");
+        }
+        if self.stream_stage.is_some() && manifest_writes_stdout {
+            anyhow::bail!(
+                "stream-stage cannot write to stdout while manifest outputs write to stdout"
+            );
+        }
+        Ok(())
+    }
+}
+
 fn print_inspect_report(
     format: OutputFormat,
     loaded: LoadedManifest,
@@ -325,13 +455,14 @@ fn print_inspect_report(
     plugin_dirs: &[PathBuf],
     backend: &[String],
     ollama: &[String],
+    options: InspectExecutionOptions,
 ) -> Result<()> {
     match format {
         OutputFormat::Text => {
             println!("ok");
         }
         OutputFormat::Json => {
-            let report = inspect_report(loaded, graph, plugin_dirs, backend, ollama)?;
+            let report = inspect_report(loaded, graph, plugin_dirs, backend, ollama, &options)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
     }
@@ -345,6 +476,7 @@ fn inspect_report(
     plugin_dirs: &[PathBuf],
     backend: &[String],
     ollama: &[String],
+    options: &InspectExecutionOptions,
 ) -> Result<serde_json::Value> {
     let stage_order = graph
         .stages()
@@ -368,6 +500,7 @@ fn inspect_report(
     let backend_registrations =
         inspect_backend_registrations(backend, ollama, plugin_dirs.iter().map(PathBuf::from))?;
     let plugin_manifests = inspect_plugin_manifests(plugin_dirs.iter().map(PathBuf::from))?;
+    let default_retry = options.default_retry();
 
     Ok(serde_json::json!({
         "format_version": 1,
@@ -391,21 +524,28 @@ fn inspect_report(
         "stage_order": stage_order,
         "stages": stages,
         "execution": {
-            "scheduler": "sequential",
-            "max_concurrency": null,
-            "default_timeout_ms": null,
+            "scheduler": if options.parallel { "parallel" } else { "sequential" },
+            "max_concurrency": options.max_concurrency,
+            "default_timeout_ms": options.timeout_ms,
             "default_retry": {
-                "attempts": 1,
-                "backoff_ms": 0,
+                "attempts": default_retry.attempts,
+                "backoff_ms": default_retry.backoff_ms,
             },
             "checkpoint": {
-                "enabled": false,
-                "resume": false,
+                "enabled": options.checkpoint.is_some(),
+                "resume": options.resume.is_some(),
+                "path": options.checkpoint.as_ref().map(|path| path.to_string_lossy().to_string()),
+                "resume_path": options.resume.as_ref().map(|path| path.to_string_lossy().to_string()),
             },
             "stdout": {
-                "events": false,
-                "stream_stage": false,
+                "events": options.events.as_deref() == Some(Path::new("-")),
+                "stream_stage": options.stream_stage.is_some(),
                 "manifest_outputs": loaded.manifest.outputs.values().any(|output| output.path == "-"),
+            },
+            "artifacts": {
+                "trace": options.trace.as_ref().map(|path| path.to_string_lossy().to_string()),
+                "events": options.events.as_ref().map(|path| path.to_string_lossy().to_string()),
+                "stream_stage": options.stream_stage.as_ref(),
             },
         },
         "backends": {
