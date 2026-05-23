@@ -2478,6 +2478,64 @@ fn inspect_example_manifest_succeeds() {
 }
 
 #[test]
+fn process_exit_codes_are_stable_for_supervisors() {
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args(["inspect", "examples/json-repair.yaml"])
+        .current_dir(workspace_root())
+        .assert()
+        .code(0);
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args(["inspect", "-g", "load | write"])
+        .assert()
+        .code(10)
+        .stderr(predicate::str::contains("graph validation"));
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args(["run", "-g", "load | infer(model=missing:model) | write(-)"])
+        .assert()
+        .code(21)
+        .stderr(predicate::str::contains("backend"));
+}
+
+#[test]
+fn process_exit_code_reports_stage_execution_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let tool = dir.path().join("fail-tool");
+    std::fs::write(
+        &tool,
+        r#"#!/bin/sh
+cat >/dev/null
+printf 'tool failed\n' >&2
+exit 7
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&tool).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+    }
+    std::fs::set_permissions(&tool, permissions).unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "-g",
+            &format!("load | tool(command={}) | write(-)", tool.to_string_lossy()),
+        ])
+        .write_stdin("payload")
+        .assert()
+        .code(20)
+        .stderr(predicate::str::contains("tool command exited with status"));
+}
+
+#[test]
 fn inspect_json_reports_reproducible_execution_contract() {
     let root = workspace_root();
     let output = Command::cargo_bin("llmff")

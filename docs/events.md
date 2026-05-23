@@ -37,6 +37,24 @@ should still keep the process exit status as the final authority for run
 failure because event output can be unavailable if the writer itself cannot be
 created or flushed.
 
+## Process Exit Codes
+
+Supervisors should treat the process exit code as the final authority:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Run or inspection completed successfully. |
+| `1` | Unclassified internal failure. |
+| `2` | Invalid CLI invocation or unsupported option combination. |
+| `10` | Manifest, graph, configuration, or static validation failure before model/tool execution. |
+| `20` | Stage execution failure or batch item failure. |
+| `21` | Backend, provider, HTTP tool, or timeout failure. |
+| `22` | Local I/O or JSON processing failure. |
+| `30` | Selected behavior is intentionally not implemented. |
+
+When a `run_failed` event is available, use `failure_kind` for the stable
+machine-readable failure class and the exit code for the process outcome.
+
 ## Fields
 
 | Field | Type | Events | Description |

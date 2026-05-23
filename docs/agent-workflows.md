@@ -69,7 +69,15 @@ with `--stream-stage`, write events to a file instead of `--events -`.
 The exit code is the primary contract:
 
 - `0`: the pipeline completed and declared outputs were written
-- non-zero: the pipeline failed or a batch item failed
+- `2`: the CLI invocation is invalid, such as conflicting stdout owners,
+  invalid flags, or unsupported batch options
+- `10`: manifest, graph, configuration, or static validation failed before
+  model/tool execution
+- `20`: a stage or batch item failed during execution
+- `21`: a backend, provider, HTTP tool, or timeout failure occurred
+- `22`: local I/O or JSON processing failed
+- `30`: the selected behavior is intentionally not implemented
+- `1`: unclassified internal failure
 
 When events are available, use `failure_kind` to decide the agent response:
 
