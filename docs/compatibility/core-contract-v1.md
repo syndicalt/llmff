@@ -33,6 +33,10 @@ Process exit-code meanings are part of the CLI compatibility surface. New
 non-zero codes may be added only when they describe a new broad failure class;
 existing code meanings should not change within core contract v1.
 
+Interrupted runs use exit code `130`. A signal can arrive before event writers
+flush a final failure event, so supervisors should treat that exit code as the
+authoritative interrupted-run outcome.
+
 ## Inspect Reports
 
 `llmff inspect --format json` emits an inspect report with

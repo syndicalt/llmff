@@ -51,9 +51,12 @@ Supervisors should treat the process exit code as the final authority:
 | `21` | Backend, provider, HTTP tool, or timeout failure. |
 | `22` | Local I/O or JSON processing failure. |
 | `30` | Selected behavior is intentionally not implemented. |
+| `130` | The process received an interrupt or termination signal before completion. |
 
 When a `run_failed` event is available, use `failure_kind` for the stable
-machine-readable failure class and the exit code for the process outcome.
+machine-readable failure class and the exit code for the process outcome. An
+interrupted process may not emit `run_failed`; supervisors should rely on exit
+code `130` for that case.
 
 ## Fields
 

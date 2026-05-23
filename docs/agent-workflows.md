@@ -136,6 +136,8 @@ The exit code is the primary contract:
 - `21`: a backend, provider, HTTP tool, or timeout failure occurred
 - `22`: local I/O or JSON processing failed
 - `30`: the selected behavior is intentionally not implemented
+- `130`: the process received an interrupt or termination signal before
+  completion
 - `1`: unclassified internal failure
 
 When events are available, use `failure_kind` to decide the agent response:
