@@ -274,6 +274,10 @@ fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
 
     for required in [
         "subprocess",
+        "Short Jobs",
+        "Long Jobs",
+        "Batch Jobs",
+        "Streaming Jobs",
         "--events",
         "--trace",
         "failure_kind",
@@ -300,5 +304,9 @@ fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
         .env("LLMFF_MOCK_GOOD_RESPONSE", r#"{"answer":"ok"}"#)
         .assert()
         .success()
-        .stdout(predicates::str::contains("run_status=ok"));
+        .stdout(predicates::str::contains("inspect_format_version=1"))
+        .stdout(predicates::str::contains("manifest_hash=sha256:"))
+        .stdout(predicates::str::contains("stdout_manifest_outputs=false"))
+        .stdout(predicates::str::contains("run_status=ok"))
+        .stdout(predicates::str::contains("output_exists=true"));
 }

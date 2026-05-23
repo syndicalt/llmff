@@ -252,9 +252,12 @@ Goal: make it trivial for agents to call `llmff` safely.
 - Promote `docs/agent-workflows.md` into a complete embedding guide with
   canonical subprocess patterns for short jobs, long jobs, batch jobs, and
   streaming jobs.
-- Add reference integrations for common agent host languages, starting with the
-  existing Python supervisor and expanding only where the integration contract
-  is genuinely different.
+- The Python supervisor reference now performs inspect JSON preflight, runs the
+  deterministic offline pipeline, captures events, writes trace/checkpoint
+  artifacts, and preserves the `llmff` process exit code.
+- Add more reference integrations for common agent host languages only where
+  the integration contract is genuinely different from the Python subprocess
+  pattern.
 - Document retry, timeout, checkpoint, trace, event, and artifact ownership
   patterns for agent supervisors.
 - Provide copyable examples that show how an agent should interpret

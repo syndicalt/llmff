@@ -65,6 +65,64 @@ llmff run pipeline.yaml --events - --trace .llmff/runs/job-42/trace.jsonl
 Do not combine multiple stdout owners. If an agent needs streamed stage payloads
 with `--stream-stage`, write events to a file instead of `--events -`.
 
+### Short Jobs
+
+For a bounded single request, inspect first, run once, and treat the process
+exit code as authoritative:
+
+```bash
+llmff inspect pipeline.yaml --format json > .llmff/runs/job-42/inspect.json
+llmff run pipeline.yaml \
+  --trace .llmff/runs/job-42/trace.jsonl \
+  --events .llmff/runs/job-42/events.jsonl
+```
+
+The agent should read payload artifacts from declared output paths, not from
+trace or event metadata.
+
+### Long Jobs
+
+For jobs that may be interrupted, add a checkpoint path on the first run and
+reuse the same path with `--resume` only after verifying the manifest has not
+changed:
+
+```bash
+llmff run pipeline.yaml \
+  --checkpoint .llmff/runs/job-42/checkpoint.json \
+  --trace .llmff/runs/job-42/trace.jsonl \
+  --events .llmff/runs/job-42/events.jsonl
+```
+
+### Batch Jobs
+
+For batch work, keep item inputs and item outputs in explicit directories so
+the agent can retry failed items without mixing payloads:
+
+```bash
+llmff run pipeline.yaml \
+  --batch-input .llmff/runs/job-42/items.jsonl \
+  --batch-output-dir .llmff/runs/job-42/items \
+  --trace .llmff/runs/job-42/trace.jsonl
+```
+
+### Streaming Jobs
+
+For live supervision, stream events only when manifest outputs write to files:
+
+```bash
+llmff run pipeline.yaml \
+  --events - \
+  --trace .llmff/runs/job-42/trace.jsonl
+```
+
+For streamed model or stage payloads, keep lifecycle events file-backed:
+
+```bash
+llmff run pipeline.yaml \
+  --stream-stage draft \
+  --events .llmff/runs/job-42/events.jsonl
+```
+
 ## Failure Handling
 
 The exit code is the primary contract:
@@ -114,8 +172,8 @@ reused after the graph changes.
 ## Runnable Supervisor Example
 
 The local Python example runs the deterministic JSON repair pipeline, captures
-events, writes a trace and checkpoint, exports a summary, and exits with the
-same status as `llmff`:
+an inspect JSON preflight report, captures events, writes a trace and
+checkpoint, exports a summary, and exits with the same status as `llmff`:
 
 ```bash
 python3 examples/agent-workflows/supervisor.py
