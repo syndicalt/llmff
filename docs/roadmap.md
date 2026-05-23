@@ -240,6 +240,8 @@ Goal: make `llmff run` fully dependable as a subprocess primitive.
   daemons, and agent runtimes.
 - Strengthen checkpoint/resume semantics for interrupted and long-running jobs,
   including clearer operator diagnostics when a checkpoint cannot be reused.
+  Checkpoint manifest mismatches now report the checkpoint path, saved hash,
+  current manifest hash, and inspect hint.
 - Expand failure classification only through additive `failure_kind` values
   with schema fixtures and compatibility notes.
 - Add focused contract tests for process behavior that external supervisors are

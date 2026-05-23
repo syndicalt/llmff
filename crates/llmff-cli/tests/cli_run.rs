@@ -957,6 +957,89 @@ outputs:
 }
 
 #[test]
+fn run_resume_reports_actionable_checkpoint_mismatch() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.json");
+    let checkpoint = dir.path().join("checkpoint.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--checkpoint",
+            checkpoint.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: changed-answer.json
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--resume",
+            checkpoint.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(10)
+        .stderr(predicate::str::contains(
+            "checkpoint manifest hash does not match current manifest",
+        ))
+        .stderr(predicate::str::contains(checkpoint.to_str().unwrap()))
+        .stderr(predicate::str::contains("checkpoint_hash="))
+        .stderr(predicate::str::contains("current_manifest_hash="))
+        .stderr(predicate::str::contains("run inspect --format json"));
+}
+
+#[test]
 fn run_batch_input_writes_isolated_item_outputs_and_report() {
     let dir = tempfile::tempdir().unwrap();
     let batch_input = dir.path().join("batch.txt");
