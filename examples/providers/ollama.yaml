@@ -1,0 +1,31 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: render_prompt
+    op: template
+    from: load_prompt
+    path: ../prompt.tmpl
+  - id: apply_policy
+    op: system
+    from: render_prompt
+    path: ../policy.md
+  - id: draft
+    op: infer
+    from: apply_policy
+    model: ollama:llama3.1
+    temperature: 0.2
+    max_tokens: 256
+    response_format: json
+  - id: validate
+    op: validate_json
+    from: draft
+    schema_path: ../answer.schema.json
+outputs:
+  final:
+    from: validate
+    path: ./ollama.answer.json

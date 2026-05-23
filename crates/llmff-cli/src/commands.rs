@@ -8,7 +8,9 @@ use llmff_core::backend::{
 };
 use llmff_core::engine::{Engine, RunOptions, SchedulerMode};
 use llmff_core::manifest::Manifest;
-use llmff_core::plugin::{discover_plugin_backends, discover_plugin_manifests};
+use llmff_core::plugin::{
+    discover_plugin_backends, discover_plugin_manifests, validate_plugin_manifests,
+};
 use llmff_core::stage::builtin_stage_metadata;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +135,10 @@ enum PluginsCommand {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
+    Validate {
+        #[arg(long = "plugin-dir")]
+        plugin_dir: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -212,6 +218,9 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::Plugins {
             command: PluginsCommand::List { plugin_dir, format },
         } => print_plugin_manifests(&plugin_dir, format)?,
+        Command::Plugins {
+            command: PluginsCommand::Validate { plugin_dir },
+        } => validate_plugins(&plugin_dir)?,
         Command::Trace { path } => summarize_trace(&path)?,
     }
 
@@ -478,6 +487,12 @@ fn print_plugin_manifests(plugin_dir: &Path, format: OutputFormat) -> Result<()>
     Ok(())
 }
 
+fn validate_plugins(plugin_dir: &Path) -> Result<()> {
+    validate_plugin_manifests(plugin_dir)?;
+    println!("ok");
+    Ok(())
+}
+
 fn summarize_trace(path: &Path) -> Result<()> {
     let source = std::fs::read_to_string(path)?;
     for (index, line) in source.lines().enumerate() {
@@ -583,6 +598,14 @@ async fn run_pipeline(
     let engine = build_engine(backend, ollama, api_key_env, api_key, &plugin_dir)?;
     if stream_stage.is_some() && events.as_deref() == Some(Path::new("-")) {
         anyhow::bail!("stream-stage cannot write to stdout while events stream to stdout");
+    }
+    if events.as_deref() == Some(Path::new("-"))
+        && manifest
+            .outputs
+            .values()
+            .any(|output| output.path.as_str() == "-")
+    {
+        anyhow::bail!("events cannot stream to stdout while manifest outputs write to stdout");
     }
     if stream_stage.is_some()
         && manifest

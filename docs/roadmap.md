@@ -59,19 +59,14 @@ implemented on `main`:
 
 ## Release Stabilization
 
-The immediate release goal is `v0.1.2`: the first release cut after packaged
-artifact publication landed, with Windows and macOS artifacts explicitly
-published unsigned.
+The `v0.1.2` package-publication release is complete. The published GitHub
+Release carries Linux, macOS, and Windows archives, checksums, Debian package
+assets, Arch package metadata, Windows MSI, and macOS `.pkg` installers.
 
 Required before broad native-installer announcement:
 
-- Run `scripts/release-preflight.sh v0.1.2` on the tag candidate.
-- Push the `v0.1.2` tag and verify GitHub Actions creates the release.
-- Confirm release assets include Linux/macOS/Windows archives, checksums,
-  Debian package, Arch metadata, Windows MSI, and macOS `.pkg` files.
-- Run `scripts/check-release-assets.sh v0.1.2` to verify published assets,
-  checksums, and host-compatible package smoke tests.
-- Smoke test at least the source-build install path from the published tag.
+- Run `scripts/check-release-assets.sh v0.1.2` against the published GitHub
+  Release from a host that can smoke-test at least one native artifact.
 - Smoke test native packages on their target platforms before describing them
   as broadly verified.
 
@@ -80,40 +75,65 @@ Trusted signing and notarization remain a future paid distribution track:
 - Windows Authenticode signing remains a future paid distribution track.
 - Apple Developer ID signing and notarization remain a future paid distribution track.
 
-## Next Product Roadmap
+## Completed Product Sprint
 
 Provider onboarding:
 
-- Add runnable OpenAI-compatible and Ollama examples that pair manifests with
-  documented environment variables and mock fallbacks.
-- Add provider troubleshooting docs for API key lookup, base URL normalization,
+- Runnable OpenAI-compatible and Ollama examples pair manifests with documented
+  environment variables and mock fallbacks.
+- Provider troubleshooting docs cover API key lookup, base URL normalization,
   JSON response-format support, token streaming support, and common HTTP
   failure modes.
-- Add reusable manifest templates for summarization, structured extraction,
+- Reusable manifest templates cover summarization, structured extraction,
   JSON repair, retrieve-rerank-answer, and tool-call workflows.
 
 Streaming and supervision:
 
-- Add a documented event schema reference with compatibility expectations for
+- The event schema reference documents compatibility expectations for
   supervisors and dashboards.
-- Add a CLI smoke fixture that exercises `--events -`, `--events <path>`, and
+- The CLI smoke fixture exercises `--events -`, `--events <path>`, and
   `--stream-stage` against deterministic mock and streaming backend paths.
-- Add examples for piping lifecycle events into common shell tooling without
+- Streaming examples show piping lifecycle events into shell tooling without
   interleaving stage payload output.
 
 Plugin ecosystem:
 
-- Add a plugin author guide covering manifest schema, command protocol,
+- The plugin author guide covers manifest schema, command protocol,
   working-directory expectations, stdin/stdout JSON contracts, and security
   boundaries.
-- Add example plugins for one stage, one backend, one sampler, and one tool
+- Example plugins cover one stage, one backend, one sampler, and one tool
   transport, each covered by CLI smoke tests.
-- Add plugin validation diagnostics that identify malformed manifests and
+- `llmff plugins validate` identifies malformed manifests and
   missing entrypoints without requiring a pipeline run.
 
 Distribution:
 
-- Add Homebrew formula, winget/Scoop manifest, official AUR submission, and
-  apt repository feasibility tracks after `v0.1.2` proves GitHub Release assets.
-- Document per-platform installation from GitHub Release assets, including
+- Per-platform installation from GitHub Release assets is documented, including
   checksum verification and installer trust expectations.
+- Homebrew formula, winget, Scoop, official AUR submission, and apt repository
+  feasibility tracks are documented for post-release package-manager work.
+
+## Next Product Roadmap
+
+Provider onboarding:
+
+- Add provider-specific smoke tests against opt-in live OpenAI-compatible and
+  Ollama endpoints.
+- Add more reusable templates for multi-step extraction and batch processing.
+
+Streaming and supervision:
+
+- Add a dedicated failure event once the error contract is designed.
+- Add supervisor examples for long-running processes and parallel execution.
+
+Plugin ecosystem:
+
+- Add structured machine-readable plugin validation output.
+- Add versioned plugin protocol compatibility docs.
+
+Distribution:
+
+- Produce and validate package-manager metadata for Homebrew, winget, Scoop, and
+  AUR without publishing it.
+- Design signed apt repository metadata before documenting apt repository
+  installation.

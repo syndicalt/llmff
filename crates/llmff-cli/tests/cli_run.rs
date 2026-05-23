@@ -372,6 +372,115 @@ capabilities:
 }
 
 #[test]
+fn plugins_validate_reports_missing_entrypoint_without_pipeline_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let plugin = directory.path().join("broken-plugin");
+    std::fs::create_dir(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: broken-plugin
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: missing-backend
+    entrypoint: ./bin/missing-backend
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "validate",
+            "--plugin-dir",
+            directory.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("missing entrypoint"))
+        .stderr(predicate::str::contains("missing-backend"));
+}
+
+#[test]
+fn plugins_validate_reports_malformed_manifest() {
+    let directory = tempfile::tempdir().unwrap();
+    let plugin = directory.path().join("broken-plugin");
+    std::fs::create_dir(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        "name: [broken\nversion: 0.1.0\n",
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "validate",
+            "--plugin-dir",
+            directory.path().to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("failed to parse plugin manifest"))
+        .stderr(predicate::str::contains("llmff-plugin.yaml"));
+}
+
+#[test]
+fn plugins_validate_accepts_example_plugins() {
+    let plugin_dir = workspace_root().join("examples/plugins");
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "validate",
+            "--plugin-dir",
+            plugin_dir.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ok"));
+}
+
+#[test]
+fn plugins_list_covers_example_plugin_capability_kinds() {
+    let plugin_dir = workspace_root().join("examples/plugins");
+
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "list",
+            "--plugin-dir",
+            plugin_dir.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plugins: serde_json::Value =
+        serde_json::from_slice(&output).expect("plugin list should be valid JSON");
+    let capability_kinds = plugins
+        .as_array()
+        .expect("plugin list should be an array")
+        .iter()
+        .flat_map(|plugin| plugin["capabilities"].as_array().unwrap())
+        .map(|capability| capability["kind"].as_str().unwrap())
+        .collect::<Vec<_>>();
+
+    assert!(capability_kinds.contains(&"stage"));
+    assert!(capability_kinds.contains(&"backend"));
+    assert!(capability_kinds.contains(&"sampler"));
+    assert!(capability_kinds.contains(&"tool-transport"));
+}
+
+#[test]
 fn run_executes_manifest_with_mock_backends() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");
@@ -651,6 +760,48 @@ outputs:
 }
 
 #[test]
+fn run_rejects_events_stdout_with_output_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "Say hello").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+outputs:
+  final:
+    from: draft
+    path: "-"
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", "--events", "-", manifest.to_str().unwrap()])
+        .env("LLMFF_MOCK_GOOD_RESPONSE", "hello")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "events cannot stream to stdout while manifest outputs write to stdout",
+        ));
+}
+
+#[test]
 fn run_rejects_stream_stage_with_output_stdout() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");
@@ -814,6 +965,19 @@ outputs:
         std::fs::read_to_string(output).unwrap(),
         String::from_utf8(stdout).unwrap()
     );
+}
+
+#[test]
+fn events_streaming_smoke_fixture_passes() {
+    let root = workspace_root();
+    let script = root.join("scripts/smoke-events-streaming.sh");
+    let binary = assert_cmd::cargo::cargo_bin("llmff");
+
+    Command::new("bash")
+        .arg(script)
+        .env("LLMFF_BIN", binary)
+        .assert()
+        .success();
 }
 
 #[test]

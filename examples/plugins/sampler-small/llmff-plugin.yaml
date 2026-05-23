@@ -1,0 +1,6 @@
+name: sampler-small
+version: 0.1.0
+capabilities:
+  - kind: sampler
+    name: small-deterministic
+    entrypoint: ./bin/sampler

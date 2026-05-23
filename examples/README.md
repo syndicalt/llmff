@@ -77,6 +77,64 @@ llmff run examples/json-repair.yaml \
   --ollama ollama=http://localhost:11434
 ```
 
+## Provider Examples
+
+OpenAI-compatible and Ollama manifests live in `examples/providers/`. Each real
+provider manifest has a mock fallback that runs without network access.
+
+OpenAI-compatible:
+
+```bash
+export OPENAI_API_KEY='...'
+export OPENAI_BASE_URL='https://api.openai.com/v1'
+
+llmff run examples/providers/openai-compatible.yaml \
+  --backend openai="$OPENAI_BASE_URL" \
+  --api-key-env openai=OPENAI_API_KEY
+```
+
+Mock fallback:
+
+```bash
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
+llmff run examples/providers/openai-compatible.mock.yaml
+```
+
+Ollama:
+
+```bash
+export OLLAMA_BASE_URL='http://localhost:11434'
+
+llmff run examples/providers/ollama.yaml \
+  --ollama ollama="$OLLAMA_BASE_URL"
+```
+
+Mock fallback:
+
+```bash
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
+llmff run examples/providers/ollama.mock.yaml
+```
+
+Provider setup and failure handling are documented in
+[`docs/provider-troubleshooting.md`](../docs/provider-troubleshooting.md).
+
+## Manifest Templates
+
+Reusable workflow templates live in `examples/templates/`:
+
+- `summarization.yaml`
+- `structured-extraction.yaml`
+- `json-repair.yaml`
+- `retrieve-rerank-answer.yaml`
+- `tool-call.yaml`
+
+Inspect any template before adapting it:
+
+```bash
+llmff inspect examples/templates/structured-extraction.yaml
+```
+
 ## Inline Smoke Examples
 
 Run a one-line mock pipeline:
@@ -92,6 +150,12 @@ Inspect a one-line pipeline without model calls:
 ```bash
 llmff inspect -g 'load | infer(model=mock:good) | write(-)'
 ```
+
+## Streaming And Supervision
+
+See [`streaming-supervision.md`](streaming-supervision.md) for examples that
+pipe lifecycle events into shell tools while keeping selected stage payloads on
+a separate output stream.
 
 ## Retrieval Fixtures
 

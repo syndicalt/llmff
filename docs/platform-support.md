@@ -4,6 +4,10 @@ This page describes the release artifacts `llmff` intends to publish and the
 assumptions each artifact makes about the target system. Cargo remains the
 source-build fallback for users who are outside the prebuilt artifact set.
 
+For per-platform GitHub Release installation commands, checksum verification,
+and unsigned installer expectations, see
+[`docs/github-release-installation.md`](github-release-installation.md).
+
 ## Supported Release Targets
 
 | Target triple | Operating systems | Artifacts | Notes |
@@ -56,6 +60,11 @@ host that can run at least one packaged artifact:
 ```bash
 scripts/check-release-assets.sh v0.1.2
 ```
+
+Package-manager publication is intentionally deferred until the GitHub Release
+asset lane is proven. The Homebrew, winget, Scoop, AUR, and apt repository
+tracks are documented in
+[`docs/package-manager-roadmap.md`](package-manager-roadmap.md).
 
 ## Source-Build Fallback
 
