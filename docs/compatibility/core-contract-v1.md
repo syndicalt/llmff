@@ -39,8 +39,9 @@ existing code meanings should not change within core contract v1.
 `format_version: 1`. Existing fields keep their meaning within this contract.
 Consumers should ignore unknown future fields and use the manifest hash,
 schema compatibility versions, resolved inputs, resolved outputs, stage order,
-backend registrations, plugin protocol metadata, plugin manifests, and stdout
-ownership fields as preflight metadata rather than payload logs.
+stage capability constraints, backend registrations, plugin protocol metadata,
+plugin manifests, and stdout ownership fields as preflight metadata rather than
+payload logs.
 
 ## Plugin Protocol
 

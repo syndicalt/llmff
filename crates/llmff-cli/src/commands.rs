@@ -528,10 +528,44 @@ fn inspect_stage_view(stage: &llmff_core::manifest::StageSpec) -> serde_json::Va
         "model": stage.model.as_ref().map(|model| model_view(model)),
         "sampler": stage.sampler,
         "plugin": plugin_stage_view(&stage.op),
+        "capability_constraints": stage_capability_constraints(&stage.op),
         "cache_policy": stage.cache_policy,
         "timeout_ms": stage.timeout_ms,
         "retry": stage.retry,
         "writes_stdout": stage.op == "write" && stage.path.as_deref() == Some("-"),
+    })
+}
+
+fn stage_capability_constraints(op: &str) -> serde_json::Value {
+    if let Some(metadata) = builtin_stage_metadata()
+        .iter()
+        .find(|metadata| metadata.name == op)
+    {
+        return serde_json::json!({
+            "kind": metadata.kind,
+            "required_fields": metadata.required_fields,
+            "optional_fields": metadata.optional_fields,
+            "capabilities": metadata.capabilities,
+        });
+    }
+
+    if let Some(name) = op.strip_prefix("plugin:") {
+        return serde_json::json!({
+            "kind": "plugin-stage",
+            "required_fields": ["from"],
+            "optional_fields": [],
+            "capabilities": ["plugin-stage"],
+            "plugin": {
+                "name": name,
+            },
+        });
+    }
+
+    serde_json::json!({
+        "kind": "unknown",
+        "required_fields": [],
+        "optional_fields": [],
+        "capabilities": [],
     })
 }
 

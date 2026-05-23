@@ -89,7 +89,14 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "op", "model", "plugin", "writes_stdout"],
+        "required": [
+          "id",
+          "op",
+          "model",
+          "plugin",
+          "capability_constraints",
+          "writes_stdout"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -124,6 +131,42 @@
           },
           "plugin": {
             "type": ["object", "null"]
+          },
+          "capability_constraints": {
+            "type": "object",
+            "required": [
+              "kind",
+              "required_fields",
+              "optional_fields",
+              "capabilities"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "required_fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "optional_fields": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "capabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "plugin": {
+                "type": "object"
+              }
+            },
+            "additionalProperties": true
           },
           "cache_policy": {
             "type": ["string", "null"]
