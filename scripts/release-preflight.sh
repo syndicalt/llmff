@@ -107,6 +107,8 @@ require_text ".github/workflows/release-artifacts.yml" 'RELEASE_REPOSITORY: synd
 require_text ".github/workflows/release-artifacts.yml" '--repo "$RELEASE_REPOSITORY"'
 require_text ".github/workflows/release-artifacts.yml" 'find release-assets -maxdepth 1 -type f'
 require_text ".github/workflows/release-artifacts.yml" 'release assets already uploaded for %s'
+require_text ".github/workflows/release-artifacts.yml" 'scripts/generate-release-trust-manifest.sh'
+require_text ".github/workflows/release-artifacts.yml" 'release-trust.json'
 
 bash scripts/check-wix-tooling.sh
 bash scripts/check-platform-support-doc.sh

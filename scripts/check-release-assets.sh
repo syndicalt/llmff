@@ -116,7 +116,12 @@ expected_assets=(
   "llmff-${version}-arch.SRCINFO"
 )
 
+trust_manifest="llmff-${version}-release-trust.json"
 asset_list="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')"
+
+if grep -Fxq "$trust_manifest" <<<"$asset_list"; then
+  expected_assets+=("$trust_manifest")
+fi
 
 for asset in "${expected_assets[@]}"; do
   if ! grep -Fxq "$asset" <<<"$asset_list"; then
@@ -143,6 +148,34 @@ while IFS= read -r checksum; do
   [ -n "$checksum" ] || continue
   (cd "$download_dir" && "${checksum_tool[@]}" "$(basename "$checksum")")
 done < <(find "$download_dir" -maxdepth 1 -type f -name '*.sha256' | sort)
+
+if [ -f "$download_dir/$trust_manifest" ]; then
+  python3 - "$download_dir" "$version" "${expected_assets[@]}" <<'PY'
+import json
+import pathlib
+import sys
+
+download_dir = pathlib.Path(sys.argv[1])
+version = sys.argv[2]
+expected_assets = set(sys.argv[3:])
+manifest_path = download_dir / f"llmff-{version}-release-trust.json"
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+if manifest.get("format_version") != 1:
+    raise SystemExit("release trust manifest format_version must be 1")
+if manifest.get("version") != version:
+    raise SystemExit("release trust manifest version mismatch")
+posture = manifest.get("trust_posture", {})
+if posture.get("verification") != "sha256-checksum-only":
+    raise SystemExit("release trust manifest must declare checksum-only verification")
+asset_names = {asset.get("name") for asset in manifest.get("assets", [])}
+missing = expected_assets - asset_names - {manifest_path.name}
+if missing:
+    raise SystemExit(
+        "release trust manifest missing assets: " + ", ".join(sorted(missing))
+    )
+PY
+fi
 
 if [ "$skip_smoke" -eq 1 ]; then
   printf 'release asset verification succeeded for %s\n' "$tag"

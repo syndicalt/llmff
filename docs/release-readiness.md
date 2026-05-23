@@ -81,9 +81,10 @@ package-manager channel:
   `sources.list.d` instructions are shipped.
 - [ ] Unsigned Windows and macOS status is repeated in release notes unless
   Authenticode signing, Apple Developer ID signing, and notarization are live.
-- [ ] SBOM/provenance posture is explicit: generated artifacts are published
-  and verified, or maintainers record that the channel uses checksum-only
-  verification for this release.
+- [ ] SBOM/provenance posture is explicit: the release publishes
+  `llmff-<version>-release-trust.json`, and maintainers either publish
+  generated SBOM/provenance artifacts or record that the channel uses
+  checksum-only verification for this release.
 - [ ] Manifest schema, plugin protocol, CLI flags, and trace/event field changes
   are additive or have a documented deprecation path.
 - [ ] Deprecated surfaces include replacement guidance, warning behavior when

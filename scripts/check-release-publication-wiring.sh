@@ -22,6 +22,8 @@ require_text "$workflow" '--repo "$RELEASE_REPOSITORY"'
 require_text "$workflow" 'rm -rf release-assets/arch'
 require_text "$workflow" 'find release-assets -maxdepth 1 -type f'
 require_text "$workflow" 'release assets already uploaded for %s'
+require_text "$workflow" 'scripts/generate-release-trust-manifest.sh'
+require_text "$workflow" 'llmff-${version}-release-trust.json'
 require_text "$workflow" 'publish-release:'
 require_text "$workflow" 'needs: archive'
 require_text "$workflow" 'actions/download-artifact@v4'
@@ -34,6 +36,7 @@ require_text "scripts/check-release-assets.sh" 'gh release view "$tag"'
 require_text "scripts/check-release-assets.sh" 'gh release download "$tag"'
 require_text "scripts/check-release-assets.sh" 'scripts/smoke-archive.sh'
 require_text "scripts/check-release-assets.sh" 'llmff-${version}-arch.SRCINFO'
+require_text "scripts/check-release-assets.sh" 'llmff-${version}-release-trust.json'
 require_text "$readiness" "creates the GitHub Release when"
 require_text "$readiness" "the tag does not already have one"
 require_text "$readiness" "scripts/check-release-assets.sh v0.1.3"

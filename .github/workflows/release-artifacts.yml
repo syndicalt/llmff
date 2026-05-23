@@ -214,6 +214,11 @@ jobs:
           rm -rf release-assets/arch
           test -f release-assets/PKGBUILD
           test -f "release-assets/llmff-${version}-arch.SRCINFO"
+          scripts/generate-release-trust-manifest.sh \
+            --assets-dir release-assets \
+            --version "$version" \
+            --out "release-assets/llmff-${version}-release-trust.json"
+          test -f "release-assets/llmff-${version}-release-trust.json"
 
       - name: Validate release repository
         shell: bash
