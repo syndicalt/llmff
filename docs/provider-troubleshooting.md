@@ -41,6 +41,10 @@ Provider example environment variables:
 | `LLMFF_MOCK_GOOD_RESPONSE` | Mock fallbacks | Deterministic model response for `.mock.yaml` examples. |
 | `LLMFF_MOCK_BAD_RESPONSE` | JSON repair mocks | Deterministic invalid draft for repair workflows. |
 
+Live provider certification is covered by
+[`docs/provider-smoke-readiness.md`](provider-smoke-readiness.md). Those smokes
+remain opt-in and are not run from pull requests or pushes.
+
 ## base URL normalization
 
 OpenAI-compatible base URLs are normalized to include `/v1`.

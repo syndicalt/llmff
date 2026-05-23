@@ -184,6 +184,37 @@ fn provider_live_smoke_scripts_are_explicitly_opt_in() {
 }
 
 #[test]
+fn provider_live_smoke_readiness_is_checked() {
+    let root = workspace_root();
+    let guide = root.join("docs/provider-smoke-readiness.md");
+    assert!(guide.exists(), "missing provider smoke readiness guide");
+
+    let source = std::fs::read_to_string(&guide).expect("guide should be readable");
+    for required in [
+        "LLMFF_LIVE_PROVIDER_SMOKE=1",
+        "OPENAI_API_KEY",
+        "OPENAI_BASE_URL",
+        "OLLAMA_BASE_URL",
+        "ubuntu-latest",
+        "workflow_dispatch",
+        "not run on pull_request or push",
+        "certification is a support commitment",
+    ] {
+        assert!(
+            source.contains(required),
+            "provider smoke readiness guide should cover {required}"
+        );
+    }
+
+    Command::new(root.join("scripts/check-provider-smoke-readiness.sh"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "provider smoke readiness validation succeeded",
+        ));
+}
+
+#[test]
 fn provider_docs_examples_and_ci_cover_common_gateways() {
     let root = workspace_root();
     let provider_dir = root.join("docs/providers");

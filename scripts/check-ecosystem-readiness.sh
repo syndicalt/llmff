@@ -30,12 +30,14 @@ require_file "scripts/check-plugin-fixtures.sh"
 require_file "scripts/check-package-manager-metadata.sh"
 require_file "scripts/check-release-publication-wiring.sh"
 require_file "scripts/check-release-assets.sh"
+require_file "scripts/check-provider-smoke-readiness.sh"
 require_file ".github/workflows/live-provider-smoke.yml"
 require_file "docs/schemas/pipeline-manifest-v1.schema.json"
 require_file "docs/schemas/inspect-report-v1.schema.json"
 require_file "docs/events.md"
 require_file "docs/plugins/registry.v1.json"
 require_file "docs/provider-troubleshooting.md"
+require_file "docs/provider-smoke-readiness.md"
 require_file "docs/agent-workflows.md"
 require_file "docs/package-manager-roadmap.md"
 require_file "docs/distribution-trust.md"
@@ -58,7 +60,7 @@ for gate in \
   "cargo test -p llmff --test cli_run observability_export_scripts_summarize_trace_fixture" \
   "cargo test -p llmff --test cli_run inspect_json_reports_reproducible_execution_contract" \
   "scripts/check-plugin-fixtures.sh" \
-  ".github/workflows/live-provider-smoke.yml" \
+  "scripts/check-provider-smoke-readiness.sh" \
   "cargo test -p llmff --test example_catalog agent_workflow_docs_link_to_a_runnable_supervisor_example" \
   "scripts/check-package-manager-metadata.sh" \
   "scripts/check-release-publication-wiring.sh" \
@@ -69,6 +71,7 @@ done
 
 require_text "$guide" "support commitments"
 require_text "$guide" "explicitly opt-in"
+require_text "docs/provider-smoke-readiness.md" "certification is a support commitment"
 require_text "docs/roadmap.md" "Keep every public integration path covered by a local validation gate or a"
 
 printf 'ecosystem readiness validation succeeded\n'

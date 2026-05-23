@@ -311,7 +311,9 @@ Goal: make every run inspectable after the fact and monitorable while running.
 Goal: make external integrations boring.
 
 - Run live provider smoke jobs only once maintainers have decided which secrets
-  and runner expectations are supportable.
+  and runner expectations are supportable. Provider smoke readiness is now
+  documented in `docs/provider-smoke-readiness.md` and checked locally before
+  certification is treated as supportable.
 - Keep provider capability reports focused on what manifests and supervisors
   need to know: JSON mode, streaming, seed, stop sequences, usage metadata,
   authentication, and known diagnostics.
