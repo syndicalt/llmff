@@ -243,7 +243,9 @@ Goal: make `llmff run` fully dependable as a subprocess primitive.
   Checkpoint manifest mismatches now report the checkpoint path, saved hash,
   current manifest hash, and inspect hint.
 - Expand failure classification only through additive `failure_kind` values
-  with schema fixtures and compatibility notes.
+  with schema fixtures and compatibility notes. Current failure kinds are
+  captured in `docs/schemas/failure-kinds-v1.json` and checked against trace
+  and event schemas.
 - Add focused contract tests for process behavior that external supervisors are
   expected to rely on.
 

@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "failure_kinds": [
+    "manifest_parse",
+    "io",
+    "json",
+    "graph_validation",
+    "unknown_stage",
+    "timeout",
+    "http",
+    "stage_execution",
+    "backend",
+    "config",
+    "not_implemented"
+  ]
+}

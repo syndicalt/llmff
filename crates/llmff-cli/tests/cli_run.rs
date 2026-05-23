@@ -2877,8 +2877,8 @@ outputs:
     );
 
     let pid = child.id() as libc::pid_t;
-    let signal_result = unsafe { libc::kill(-pid, libc::SIGINT) };
-    assert_eq!(signal_result, 0, "SIGINT should reach the process group");
+    let signal_result = unsafe { libc::kill(pid, libc::SIGINT) };
+    assert_eq!(signal_result, 0, "SIGINT should reach llmff");
 
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(130));

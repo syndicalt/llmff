@@ -36,7 +36,21 @@
     "total_tokens": { "type": "integer", "minimum": 0 },
     "cache_hit": { "type": "boolean" },
     "cache_path": { "type": "string", "minLength": 1 },
-    "failure_kind": { "type": "string", "minLength": 1 },
+    "failure_kind": {
+      "enum": [
+        "manifest_parse",
+        "io",
+        "json",
+        "graph_validation",
+        "unknown_stage",
+        "timeout",
+        "http",
+        "stage_execution",
+        "backend",
+        "config",
+        "not_implemented"
+      ]
+    },
     "failure_message": { "type": "string", "minLength": 1 }
   }
 }

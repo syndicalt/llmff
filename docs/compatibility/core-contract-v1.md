@@ -27,7 +27,7 @@ Events and traces are newline-delimited JSON. Consumers should correlate records
 Trace `stage_finished` records may include `attempts` when a retryable stage
 needed more than one attempt. Missing `attempts` means one attempt.
 
-Failure records use `event: "run_failed"` with `failure_kind` and `failure_message` when a writer is available.
+Failure records use `event: "run_failed"` with `failure_kind` and `failure_message` when a writer is available. Current `failure_kind` values are `manifest_parse`, `io`, `json`, `graph_validation`, `unknown_stage`, `timeout`, `http`, `stage_execution`, `backend`, `config`, and `not_implemented`. New `failure_kind` values are additive compatibility changes and must be added to `docs/schemas/failure-kinds-v1.json`, trace/event schemas, fixtures, and docs together.
 
 Process exit-code meanings are part of the CLI compatibility surface. New
 non-zero codes may be added only when they describe a new broad failure class;
