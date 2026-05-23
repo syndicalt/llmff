@@ -197,9 +197,9 @@ Observability and supervision:
 
 - Event schema fixtures, supervisor/dashboard examples, and trace-to-summary
   plus trace-to-metrics exporters are published.
-- Exporters summarize stage timing, token usage, cache hit rate, and backend
-  error rate. The metrics exporter is the local hook for future OpenTelemetry
-  bridges.
+- Exporters summarize run wall-clock duration, stage timing, token usage, cache
+  hit rate, backend error rate, timeout rate, and failure counts. The metrics
+  exporter is the local hook for future OpenTelemetry bridges.
 
 Distribution and trust:
 
