@@ -2478,6 +2478,68 @@ fn inspect_example_manifest_succeeds() {
 }
 
 #[test]
+fn inspect_json_reports_reproducible_execution_contract() {
+    let root = workspace_root();
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "inspect",
+            "examples/json-repair.yaml",
+            "--format",
+            "json",
+            "--plugin-dir",
+            "examples/plugins",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&output).expect("inspect report should be valid JSON");
+
+    assert_eq!(report["format_version"], 1);
+    assert_eq!(report["manifest"]["version"], 1);
+    assert_eq!(report["manifest"]["source"]["kind"], "file");
+    assert_eq!(
+        report["manifest"]["source"]["path"],
+        "examples/json-repair.yaml"
+    );
+    assert!(report["manifest"]["hash"]
+        .as_str()
+        .expect("manifest hash should be a string")
+        .starts_with("sha256:"));
+
+    assert_eq!(report["inputs"]["prompt"]["path"], "./question.txt");
+    assert_eq!(report["outputs"]["final"]["from"], "choose_final");
+    assert_eq!(report["outputs"]["final"]["path"], "./answer.json");
+    assert_eq!(
+        report["stage_order"],
+        serde_json::json!([
+            "load_prompt",
+            "render_prompt",
+            "apply_policy",
+            "draft",
+            "validate",
+            "repair",
+            "choose_final"
+        ])
+    );
+    assert_eq!(report["stages"][3]["id"], "draft");
+    assert_eq!(report["stages"][3]["model"]["alias"], "mock");
+    assert_eq!(report["stages"][3]["model"]["provider_model"], "bad");
+    assert_eq!(report["execution"]["scheduler"], "sequential");
+    assert_eq!(report["execution"]["stdout"]["events"], false);
+    assert_eq!(report["execution"]["stdout"]["stream_stage"], false);
+    assert_eq!(
+        report["plugins"]["directories"],
+        serde_json::json!(["examples/plugins"])
+    );
+}
+
+#[test]
 fn inspect_accepts_plugin_stage_with_plugin_dir() {
     let dir = tempfile::tempdir().unwrap();
     let plugin_dir = dir.path().join("plugins");

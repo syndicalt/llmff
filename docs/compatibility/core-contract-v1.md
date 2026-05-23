@@ -1,6 +1,6 @@
 # Core Contract Compatibility v1
 
-llmff core contract v1 covers pipeline manifests, inline graph syntax metadata, lifecycle events, traces, plugin manifests, plugin process protocol, and plugin validation reports.
+llmff core contract v1 covers pipeline manifests, inline graph syntax metadata, lifecycle events, traces, inspect reports, plugin manifests, plugin process protocol, and plugin validation reports.
 
 ## Pipeline Manifests
 
@@ -25,6 +25,14 @@ Future breaking syntax changes require a new inline graph syntax version.
 Events and traces are newline-delimited JSON. Consumers should correlate records by `run_id` and `stage_id`, and should treat unknown future fields as additive.
 
 Failure records use `event: "run_failed"` with `failure_kind` and `failure_message` when a writer is available.
+
+## Inspect Reports
+
+`llmff inspect --format json` emits an inspect report with
+`format_version: 1`. Existing fields keep their meaning within this contract.
+Consumers should ignore unknown future fields and use the manifest hash,
+resolved inputs, resolved outputs, stage order, plugin directories, and stdout
+ownership fields as preflight metadata rather than payload logs.
 
 ## Plugin Protocol
 

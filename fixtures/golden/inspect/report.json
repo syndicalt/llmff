@@ -1,0 +1,88 @@
+{
+  "format_version": 1,
+  "manifest": {
+    "version": 1,
+    "source": {
+      "kind": "file",
+      "path": "examples/json-repair.yaml",
+      "cwd": "examples"
+    },
+    "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "inputs": {
+    "prompt": {
+      "path": "./question.txt",
+      "format": null
+    }
+  },
+  "outputs": {
+    "final": {
+      "from": "choose_final",
+      "path": "./answer.json"
+    }
+  },
+  "stage_order": [
+    "load_prompt",
+    "render_prompt",
+    "apply_policy",
+    "draft",
+    "validate",
+    "repair",
+    "choose_final"
+  ],
+  "stages": [
+    {
+      "id": "load_prompt",
+      "op": "load",
+      "input": "prompt",
+      "from": null,
+      "model": null,
+      "sampler": null,
+      "plugin": null,
+      "cache_policy": null,
+      "timeout_ms": null,
+      "retry": null,
+      "writes_stdout": false
+    },
+    {
+      "id": "draft",
+      "op": "infer",
+      "input": null,
+      "from": "apply_policy",
+      "model": {
+        "id": "mock:bad",
+        "alias": "mock",
+        "provider_model": "bad"
+      },
+      "sampler": null,
+      "plugin": null,
+      "cache_policy": null,
+      "timeout_ms": null,
+      "retry": null,
+      "writes_stdout": false
+    }
+  ],
+  "execution": {
+    "scheduler": "sequential",
+    "max_concurrency": null,
+    "default_timeout_ms": null,
+    "default_retry": {
+      "attempts": 1,
+      "backoff_ms": 0
+    },
+    "checkpoint": {
+      "enabled": false,
+      "resume": false
+    },
+    "stdout": {
+      "events": false,
+      "stream_stage": false,
+      "manifest_outputs": false
+    }
+  },
+  "plugins": {
+    "directories": [
+      "examples/plugins"
+    ]
+  }
+}

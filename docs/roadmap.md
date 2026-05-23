@@ -8,7 +8,9 @@ This roadmap tracks major product capabilities that move `llmff` toward an FFmpe
 - YAML manifests and compact inline graphs.
 - Deterministic stages for loading, templating, system prompts, local lexical and embedding-style retrieval, local reranking, caching, routing, validation, repair, tools, and writes.
 - Mock, OpenAI-compatible, and Ollama backend adapters with portable sampling, seed, JSON response-format, and stop-sequence controls. OpenAI-compatible backends also expose the first token-streaming contract.
-- Dry-run inspection, JSONL traces, streamed lifecycle events, trace summaries, plugin manifest discovery, and a GitHub install smoke gate.
+- Dry-run inspection with text and JSON reproducibility reports, JSONL traces,
+  streamed lifecycle events, trace summaries, plugin manifest discovery, and a
+  GitHub install smoke gate.
 
 ## Completed Release Tracks
 
@@ -217,11 +219,124 @@ Governance:
 
 ## Next Product Roadmap
 
-- Run live provider smoke jobs once maintainers have decided which secrets and
-  runner expectations are supportable.
-- Use the new plugin fixtures with third-party plugin authors and promote real
+The next roadmap tracks move `llmff` toward a dependable FFmpeg-style runner
+for LLM inference pipelines: boring process semantics, explicit inputs,
+reproducible manifests, inspectable execution, and stable machine-readable
+outputs. For agent systems, `llmff` should be a bounded execution tool: the
+agent decides what needs to happen, and `llmff` performs the pipeline work in a
+way that is observable, restartable, and easy to supervise.
+
+### Execution Contract Hardening
+
+Goal: make `llmff run` fully dependable as a subprocess primitive.
+
+- Keep exit codes stable and documented across successful runs, stage failures,
+  graph/configuration failures, batch failures, and interrupted runs.
+- Keep stdout, stderr, `--events`, `--trace`, `--stream-stage`, and manifest
+  outputs unambiguous so supervisors can safely compose `llmff` in shells,
+  daemons, and agent runtimes.
+- Strengthen checkpoint/resume semantics for interrupted and long-running jobs,
+  including clearer operator diagnostics when a checkpoint cannot be reused.
+- Expand failure classification only through additive `failure_kind` values
+  with schema fixtures and compatibility notes.
+- Add focused contract tests for process behavior that external supervisors are
+  expected to rely on.
+
+### Agent Embedding Surface
+
+Goal: make it trivial for agents to call `llmff` safely.
+
+- Promote `docs/agent-workflows.md` into a complete embedding guide with
+  canonical subprocess patterns for short jobs, long jobs, batch jobs, and
+  streaming jobs.
+- Add reference integrations for common agent host languages, starting with the
+  existing Python supervisor and expanding only where the integration contract
+  is genuinely different.
+- Document retry, timeout, checkpoint, trace, event, and artifact ownership
+  patterns for agent supervisors.
+- Provide copyable examples that show how an agent should interpret
+  `run_failed.failure_kind`, preserve the exit code, and avoid reading prompt
+  payloads from metadata streams.
+- Keep examples offline-runnable by default, with live-provider variants gated
+  behind explicit secrets and opt-in flags.
+
+### Manifest Reproducibility
+
+Goal: make manifests portable, auditable, and predictable before execution.
+
+- Improve `llmff inspect` output so operators can see resolved inputs, outputs,
+  stage order, backend aliases, model ids, plugin dependencies, cache policy,
+  checkpoint policy, and known capability constraints before a run.
+- Add reproducibility reports that summarize the manifest hash, schema version,
+  inline graph syntax version, backend registrations, plugin protocol versions,
+  and execution controls.
+- Keep all inputs and outputs explicit: file inputs, stdin, batch input,
+  generated artifacts, and stdout-producing stages should be visible in
+  inspection output.
+- Explore lockfile or manifest-lock support only if it materially improves
+  portability across machines and provider configurations.
+- Maintain schema compatibility fixtures for every additive manifest contract
+  change.
+
+### Observability And Supervision
+
+Goal: make every run inspectable after the fact and monitorable while running.
+
+- Extend trace summaries with the fields supervisors need most: run duration,
+  per-stage timing, retry counts, timeout status, cache behavior, token usage,
+  backend diagnostics, and output artifact locations.
+- Keep event and trace schemas stable, additive, and backed by fixtures that
+  downstream dashboards can use as compatibility tests.
+- Improve local exporters while keeping telemetry local-first and opt-in:
+  no collectors, network calls, or external services by default.
+- Define a clear bridge point for future OpenTelemetry integration without
+  changing the current file-based supervision contract.
+- Add examples that demonstrate live event consumption, post-run summaries, and
+  metrics export from the same run.
+
+### Provider And Plugin Confidence
+
+Goal: make external integrations boring.
+
+- Run live provider smoke jobs only once maintainers have decided which secrets
+  and runner expectations are supportable.
+- Keep provider capability reports focused on what manifests and supervisors
+  need to know: JSON mode, streaming, seed, stop sequences, usage metadata,
+  authentication, and known diagnostics.
+- Use plugin protocol fixtures with third-party plugin authors and promote real
   extensions into the static registry only after review.
+- Add plugin conformance checks that validate command protocol behavior, schema
+  output, error handling, and trust metadata without requiring a full pipeline
+  run.
+- Preserve process isolation and explicit trust boundaries for plugin execution;
+  do not imply sandboxing unless it exists.
+
+### Distribution And Trust
+
+Goal: make installation, verification, and upgrades predictable.
+
+- Keep GitHub Release assets, checksums, and local release verification as the
+  default supported distribution lane.
 - Generate SBOM/provenance artifacts in CI if release adoption justifies the
   additional support commitment.
+- Keep Homebrew, Scoop, winget, and AUR metadata support-ready but unpublished
+  until maintainers explicitly decide each channel is supportable.
 - Design signed apt repository metadata before documenting apt repository
   installation.
+- Keep Authenticode signing, Apple Developer ID signing, and notarization
+  parked until paid credentials and recovery procedures are available.
+
+### Ecosystem Readiness
+
+Goal: let other tools build on `llmff` without relying on internal knowledge.
+
+- Maintain stable schemas, fixtures, and compatibility policy for manifests,
+  traces, events, plugin manifests, validation reports, and CLI JSON output.
+- Keep roadmap, release notes, provider docs, plugin docs, and agent workflow
+  examples aligned with the supported contract.
+- Add adoption-oriented guides only when they demonstrate real integration
+  patterns instead of duplicating CLI reference material.
+- Treat registry promotion, package-manager publication, and live-provider
+  certification as support commitments, not just generated metadata.
+- Keep every public integration path covered by a local validation gate or a
+  documented opt-in live smoke gate.

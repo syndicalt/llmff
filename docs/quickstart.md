@@ -81,6 +81,17 @@ Expected output:
 ok
 ```
 
+For agents, dashboards, and CI jobs that need a machine-readable preflight,
+use the JSON inspect report:
+
+```bash
+llmff inspect examples/json-repair.yaml --format json
+```
+
+The report includes the manifest hash, resolved inputs and outputs, execution
+stage order, model/backend aliases, plugin directories, stdout ownership, and
+default execution controls.
+
 ## 4. Run A One-Line Pipeline
 
 Inline graphs are useful for shell workflows and quick experiments:

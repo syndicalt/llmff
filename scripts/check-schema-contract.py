@@ -15,6 +15,7 @@ SCHEMAS = {
     "plugin": ROOT / "docs/schemas/plugin-manifest-v1.schema.json",
     "plugin_validation_report": ROOT
     / "docs/schemas/plugin-validation-report-v1.schema.json",
+    "inspect_report": ROOT / "docs/schemas/inspect-report-v1.schema.json",
 }
 
 SCHEMA_IDS = {
@@ -23,6 +24,7 @@ SCHEMA_IDS = {
     "trace": "trace-v1.schema.json",
     "plugin": "plugin-manifest-v1.schema.json",
     "plugin_validation_report": "plugin-validation-report-v1.schema.json",
+    "inspect_report": "inspect-report-v1.schema.json",
 }
 
 FIXTURES = {
@@ -40,6 +42,7 @@ FIXTURES = {
         ROOT / "fixtures/golden/plugin-validation/valid-report.json",
         ROOT / "fixtures/golden/plugin-validation/missing-entrypoint-report.json",
     ],
+    "inspect_report": [ROOT / "fixtures/golden/inspect/report.json"],
 }
 
 DOCS = [
@@ -102,6 +105,11 @@ def main():
 
     for path in FIXTURES["plugin_validation_report"]:
         validate_instance(schemas["plugin_validation_report"], load_json(path))
+
+    for path in FIXTURES["inspect_report"]:
+        report = load_json(path)
+        validate_instance(schemas["inspect_report"], report)
+        assert report["format_version"] == 1
 
     for path in FIXTURES["event"]:
         validate_jsonl(schemas["event"], path)
