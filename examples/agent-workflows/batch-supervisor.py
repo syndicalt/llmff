@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
-"""Run llmff as a supervised subprocess for agent workflows."""
+"""Run an offline llmff batch job as a supervised agent subprocess."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
-
-def repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
 
 
 def resolve_command(command: str) -> str:
@@ -23,33 +18,50 @@ def resolve_command(command: str) -> str:
     return str(Path(command).resolve())
 
 
-def copy_fixture(work_dir: Path) -> Path:
-    source_dir = repo_root() / "examples"
-    for name in [
-        "json-repair.yaml",
-        "question.txt",
-        "prompt.tmpl",
-        "policy.md",
-        "answer.schema.json",
-    ]:
-        shutil.copy2(source_dir / name, work_dir / name)
-    return work_dir / "json-repair.yaml"
+def write_fixture(work_dir: Path) -> tuple[Path, Path, Path]:
+    manifest = work_dir / "batch-pipeline.yaml"
+    placeholder = work_dir / "placeholder.txt"
+    batch_input = work_dir / "items.txt"
+    batch_output = work_dir / "batch-output"
+
+    placeholder.write_text("inspect placeholder\n", encoding="utf-8")
+    batch_input.write_text("first item\nsecond item\n", encoding="utf-8")
+    manifest.write_text(
+        """version: 1
+inputs:
+  prompt:
+    path: placeholder.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: answer.txt
+""",
+        encoding="utf-8",
+    )
+    return manifest, batch_input, batch_output
+
+
+def read_report(report_path: Path) -> list[dict[str, object]]:
+    rows = []
+    if not report_path.exists():
+        return rows
+    for line in report_path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            rows.append(json.loads(line))
+    return rows
 
 
 def run_pipeline(work_dir: Path) -> int:
-    manifest = copy_fixture(work_dir)
-    trace = work_dir / "trace.jsonl"
-    checkpoint = work_dir / "checkpoint.json"
+    manifest, batch_input, batch_output = write_fixture(work_dir)
     llmff = resolve_command(os.environ.get("LLMFF_BIN", "llmff"))
-
-    env = os.environ.copy()
-    env.setdefault("LLMFF_MOCK_BAD_RESPONSE", '{"wrong":true}')
-    env.setdefault("LLMFF_MOCK_GOOD_RESPONSE", '{"answer":"ok"}')
 
     inspect = subprocess.run(
         [llmff, "inspect", str(manifest), "--format", "json"],
         cwd=work_dir,
-        env=env,
         text=True,
         capture_output=True,
         check=False,
@@ -72,46 +84,33 @@ def run_pipeline(work_dir: Path) -> int:
             llmff,
             "run",
             str(manifest),
-            "--events",
-            "-",
-            "--trace",
-            str(trace),
-            "--checkpoint",
-            str(checkpoint),
+            "--batch-input",
+            str(batch_input),
+            "--batch-output-dir",
+            str(batch_output),
             "--timeout-ms",
             "30000",
         ],
         cwd=work_dir,
-        env=env,
         text=True,
         capture_output=True,
         check=False,
     )
 
-    events = [
-        json.loads(line)
-        for line in completed.stdout.splitlines()
-        if line.strip().startswith("{")
-    ]
-    failures = [event for event in events if event.get("event") == "run_failed"]
+    report_path = batch_output / "batch-report.jsonl"
+    rows = read_report(report_path)
+    failed_count = sum(1 for row in rows if row.get("status") != "succeeded")
     status = "ok" if completed.returncode == 0 else "failed"
 
     print(f"run_status={status}")
-    print(f"event_count={len(events)}")
-    print(f"trace={trace}")
-    print(f"checkpoint={checkpoint}")
-    output = work_dir / "answer.json"
-    print(f"output={output}")
-    print(f"output_exists={str(output.exists()).lower()}")
-
-    if failures:
-        failure = failures[-1]
-        print(
-            "failure_kind="
-            f"{failure.get('failure_kind', 'unknown')} "
-            f"failure_message={failure.get('failure_message', '')}",
-            file=sys.stderr,
-        )
+    print(f"batch_report={report_path}")
+    print(f"item_count={len(rows)}")
+    print(f"failed_count={failed_count}")
+    for index in range(len(rows)):
+        item_id = f"{index:06}"
+        output = batch_output / "items" / item_id / "answer.txt"
+        print(f"item_{item_id}_output={output}")
+        print(f"item_{item_id}_output_exists={str(output.exists()).lower()}")
 
     if completed.stderr:
         print(completed.stderr, file=sys.stderr, end="")
@@ -124,7 +123,7 @@ def main() -> int:
     parser.add_argument(
         "--work-dir",
         type=Path,
-        help="Directory for copied fixtures, trace, checkpoint, and output.",
+        help="Directory for generated manifest, batch inputs, and outputs.",
     )
     args = parser.parse_args()
 
@@ -132,7 +131,7 @@ def main() -> int:
         args.work_dir.mkdir(parents=True, exist_ok=True)
         return run_pipeline(args.work_dir)
 
-    with tempfile.TemporaryDirectory(prefix="llmff-agent-") as temp:
+    with tempfile.TemporaryDirectory(prefix="llmff-agent-batch-") as temp:
         return run_pipeline(Path(temp))
 
 

@@ -291,10 +291,15 @@ fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
     let root = workspace_root();
     let docs = root.join("docs/agent-workflows.md");
     let example = root.join("examples/agent-workflows/supervisor.py");
+    let batch_example = root.join("examples/agent-workflows/batch-supervisor.py");
     let node_example = root.join("examples/agent-workflows/node-supervisor.mjs");
 
     assert!(docs.exists(), "missing agent workflow docs");
     assert!(example.exists(), "missing agent supervisor example");
+    assert!(
+        batch_example.exists(),
+        "missing batch agent supervisor example"
+    );
     assert!(
         node_example.exists(),
         "missing Node agent supervisor example"
@@ -328,8 +333,10 @@ fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
 
     assert!(readme.contains("docs/agent-workflows.md"));
     assert!(examples_readme.contains("examples/agent-workflows/supervisor.py"));
+    assert!(examples_readme.contains("examples/agent-workflows/batch-supervisor.py"));
     assert!(examples_readme.contains("examples/agent-workflows/node-supervisor.mjs"));
     assert!(observability.contains("docs/agent-workflows.md"));
+    assert!(docs_source.contains("python3 examples/agent-workflows/batch-supervisor.py"));
     assert!(docs_source.contains("node examples/agent-workflows/node-supervisor.mjs"));
 
     let temp = tempfile::tempdir().expect("tempdir should be available");
@@ -347,6 +354,25 @@ fn agent_workflow_docs_link_to_a_runnable_supervisor_example() {
         .stdout(predicates::str::contains("stdout_manifest_outputs=false"))
         .stdout(predicates::str::contains("run_status=ok"))
         .stdout(predicates::str::contains("output_exists=true"));
+
+    let batch_temp = tempfile::tempdir().expect("tempdir should be available");
+    Command::new("python3")
+        .arg(batch_example)
+        .arg("--work-dir")
+        .arg(batch_temp.path())
+        .current_dir(&root)
+        .env("LLMFF_BIN", "target/debug/llmff")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("inspect_format_version=1"))
+        .stdout(predicates::str::contains("manifest_hash=sha256:"))
+        .stdout(predicates::str::contains("stdout_manifest_outputs=false"))
+        .stdout(predicates::str::contains("run_status=ok"))
+        .stdout(predicates::str::contains("batch_report="))
+        .stdout(predicates::str::contains("item_count=2"))
+        .stdout(predicates::str::contains("failed_count=0"))
+        .stdout(predicates::str::contains("item_000000_output_exists=true"))
+        .stdout(predicates::str::contains("item_000001_output_exists=true"));
 
     let node_temp = tempfile::tempdir().expect("tempdir should be available");
     Command::new("node")

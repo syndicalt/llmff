@@ -105,6 +105,14 @@ llmff run pipeline.yaml \
   --trace .llmff/runs/job-42/trace.jsonl
 ```
 
+The runnable batch supervisor example performs an inspect preflight, writes a
+line-based batch input, runs batch mode, summarizes the batch report, and
+preserves the `llmff` process exit code:
+
+```bash
+python3 examples/agent-workflows/batch-supervisor.py
+```
+
 ### Streaming Jobs
 
 For live supervision, stream events only when manifest outputs write to files:

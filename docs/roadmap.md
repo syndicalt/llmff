@@ -259,6 +259,9 @@ Goal: make it trivial for agents to call `llmff` safely.
 - The Python supervisor reference now performs inspect JSON preflight, runs the
   deterministic offline pipeline, captures events, writes trace/checkpoint
   artifacts, and preserves the `llmff` process exit code.
+- The batch supervisor reference now performs inspect JSON preflight, writes
+  explicit batch inputs, summarizes the batch report, checks item artifact
+  existence, and preserves the `llmff` process exit code.
 - Add more reference integrations for common agent host languages only where
   the integration contract is genuinely different from the Python subprocess
   pattern.
