@@ -197,7 +197,9 @@ a separate output stream.
 For agent supervisors, see
 [`../docs/agent-workflows.md`](../docs/agent-workflows.md) and the runnable
 [`examples/agent-workflows/supervisor.py`](agent-workflows/supervisor.py)
-subprocess example.
+subprocess example. JavaScript and TypeScript agent hosts can use the
+streaming subprocess pattern in
+[`examples/agent-workflows/node-supervisor.mjs`](agent-workflows/node-supervisor.mjs).
 
 ## Retrieval Fixtures
 
