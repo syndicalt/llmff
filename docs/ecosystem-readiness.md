@@ -12,7 +12,7 @@ smoke gate that protects it.
 | Trace and event streams | `docs/events.md` and `examples/supervision/fixtures/` | `cargo test -p llmff --test cli_run observability_export_scripts_summarize_trace_fixture` | local |
 | CLI JSON output | `docs/schemas/inspect-report-v1.schema.json` and CLI integration tests | `cargo test -p llmff --test cli_run inspect_json_reports_reproducible_execution_contract` | local |
 | Plugin protocol | `docs/plugins/fixtures/protocol-v1/` and `docs/plugins/registry.v1.json` | `scripts/check-plugin-fixtures.sh` | local |
-| Provider onboarding | `docs/provider-troubleshooting.md`, `docs/providers/`, and `examples/providers/` | `.github/workflows/live-provider-smoke.yml` | opt-in live smoke |
+| Provider onboarding | `docs/provider-troubleshooting.md`, `docs/provider-smoke-readiness.md`, `docs/providers/`, and `examples/providers/` | `scripts/check-provider-smoke-readiness.sh` and `.github/workflows/live-provider-smoke.yml` | local plus opt-in live smoke |
 | Agent subprocess embedding | `docs/agent-workflows.md` and `examples/agent-workflows/` | `cargo test -p llmff --test example_catalog agent_workflow_docs_link_to_a_runnable_supervisor_example` | local |
 | Package-manager metadata | `packaging/` and `docs/package-manager-roadmap.md` | `scripts/check-package-manager-metadata.sh` | local |
 | Release assets | `.github/workflows/release-artifacts.yml` and `docs/distribution-trust.md` | `scripts/check-release-publication-wiring.sh` and `scripts/check-release-assets.sh <tag>` | local plus post-release |
