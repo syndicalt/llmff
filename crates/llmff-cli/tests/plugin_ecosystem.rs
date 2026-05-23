@@ -52,3 +52,34 @@ fn plugin_ecosystem_assets_are_ci_checkable() {
         );
     }
 }
+
+#[test]
+fn ecosystem_integration_paths_are_readiness_gated() {
+    let root = workspace_root();
+    let guide = root.join("docs/ecosystem-readiness.md");
+    assert!(guide.exists(), "missing ecosystem readiness guide");
+
+    let source = std::fs::read_to_string(&guide).expect("guide should be readable");
+    for integration in [
+        "Manifest contracts",
+        "Trace and event streams",
+        "CLI JSON output",
+        "Plugin protocol",
+        "Provider onboarding",
+        "Agent subprocess embedding",
+        "Package-manager metadata",
+        "Release assets",
+    ] {
+        assert!(
+            source.contains(integration),
+            "ecosystem readiness guide should cover {integration}"
+        );
+    }
+
+    Command::new(root.join("scripts/check-ecosystem-readiness.sh"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "ecosystem readiness validation succeeded",
+        ));
+}
