@@ -94,7 +94,7 @@ llmff inspect "$example"
 run_dir="$tmp/run"
 mkdir -p "$run_dir"
 if [ "$mode" = "--path" ]; then
-  cp "$(dirname "$example")"/* "$run_dir/"
+  find "$(dirname "$example")" -maxdepth 1 -type f -exec cp {} "$run_dir/" \;
   mv "$run_dir/json-repair.yaml" "$run_dir/pipeline.yaml"
 else
   cp "$example" "$run_dir/pipeline.yaml"

@@ -32,11 +32,11 @@ scripts/release-preflight.sh v0.1.1
 scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.1.1
 ```
 
-The next package-publication release should be cut as `v0.1.2` after this
+The next package-publication release should be cut as `v0.1.3` after this
 check passes locally:
 
 ```bash
-scripts/release-preflight.sh v0.1.2
+scripts/release-preflight.sh v0.1.3
 ```
 
 For release tags after this packaging slice, CI creates the GitHub Release when
@@ -45,7 +45,7 @@ Ubuntu/Debian packages, Arch packaging metadata, Windows MSI packages, and
 macOS `.pkg` packages to the matching GitHub Release assets. Manual dispatch
 keeps those outputs as Actions artifacts only.
 
-Unsigned Windows and macOS artifacts are acceptable for v0.1.2. Windows release
+Unsigned Windows and macOS artifacts are acceptable for v0.1.3. Windows release
 tags publish an unsigned `.zip` and unsigned MSI. macOS release tags publish
 unsigned `.pkg` installers. Trusted Authenticode signing, Apple Developer ID
 signing, and notarization remain deferred paid distribution tracks.
@@ -53,14 +53,14 @@ signing, and notarization remain deferred paid distribution tracks.
 Current packaged artifact targets and installer assumptions are documented in
 [`docs/platform-support.md`](platform-support.md).
 
-After release CI completes for `v0.1.2`, verify the published GitHub Release
+After release CI completes for `v0.1.3`, verify the published GitHub Release
 contains the expected archive, checksum, Debian, Arch metadata, MSI, and macOS
 package assets. Release publication is handled by a dependent publish job after
 the full artifact matrix succeeds, so partial native-installer releases are not
 published:
 
 ```bash
-scripts/check-release-assets.sh v0.1.2
+scripts/check-release-assets.sh v0.1.3
 ```
 
 ## Ecosystem Compatibility Checklist

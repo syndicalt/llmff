@@ -9,7 +9,7 @@ then shows the smallest real-backend configuration.
 Install the latest tagged release with Cargo:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v0.1.2 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v0.1.3 llmff
 ```
 
 If you downloaded a release archive instead, unpack it and put the `llmff`
@@ -27,7 +27,7 @@ llmff stages list
 Expected version:
 
 ```text
-llmff 0.1.2
+llmff 0.1.3
 ```
 
 ## 2. Run The Offline Example
@@ -152,7 +152,7 @@ does not include full prompts, tool bodies, headers, cached values, or secrets.
   before the first colon.
 - `missing API key environment variable`: export the secret and pass
   `--api-key-env alias=ENV_NAME`.
-- Windows and macOS release installers are unsigned in `v0.1.2`; expect normal
+- Windows and macOS release installers are unsigned in `v0.1.3`; expect normal
   OS trust prompts until paid signing and notarization are added.
 
 ## Next Steps
