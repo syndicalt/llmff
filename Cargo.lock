@@ -1012,6 +1012,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "libc",
  "llmff-core",
  "predicates",
  "serde_json",

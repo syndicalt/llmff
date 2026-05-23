@@ -5,9 +5,46 @@ mod commands;
 
 #[tokio::main]
 async fn main() {
-    if let Err(error) = commands::run(commands::Cli::parse()).await {
-        eprintln!("Error: {error:#}");
-        std::process::exit(exit_code(&error));
+    let cli = commands::Cli::parse();
+    let code = tokio::select! {
+        result = commands::run(cli) => match result {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("Error: {error:#}");
+                exit_code(&error)
+            }
+        },
+        signal = interrupt_signal() => {
+            if let Err(error) = signal {
+                eprintln!("Error: failed to listen for interrupt signal: {error}");
+                1
+            } else {
+                eprintln!("Error: interrupted");
+                130
+            }
+        }
+    };
+    if code != 0 {
+        std::process::exit(code);
+    }
+}
+
+async fn interrupt_signal() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let mut interrupt = signal(SignalKind::interrupt())?;
+        let mut terminate = signal(SignalKind::terminate())?;
+        tokio::select! {
+            _ = interrupt.recv() => Ok(()),
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await
     }
 }
 

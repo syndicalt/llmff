@@ -234,7 +234,7 @@ Goal: make `llmff run` fully dependable as a subprocess primitive.
   graph/configuration failures, batch failures, and interrupted runs. Initial
   stable process codes are implemented for success, CLI usage failures,
   validation failures, stage failures, provider/runtime failures, local data
-  failures, and intentionally unsupported behavior.
+  failures, intentionally unsupported behavior, and interrupted runs.
 - Keep stdout, stderr, `--events`, `--trace`, `--stream-stage`, and manifest
   outputs unambiguous so supervisors can safely compose `llmff` in shells,
   daemons, and agent runtimes.

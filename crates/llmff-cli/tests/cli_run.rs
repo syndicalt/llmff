@@ -1,6 +1,12 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::path::PathBuf;
+#[cfg(unix)]
+use std::process::Command as StdCommand;
+#[cfg(unix)]
+use std::thread;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -2793,6 +2799,95 @@ fn process_exit_codes_are_stable_for_supervisors() {
         .assert()
         .code(21)
         .stderr(predicate::str::contains("backend"));
+}
+
+#[cfg(unix)]
+#[test]
+fn interrupted_run_exits_with_stable_supervisor_code() {
+    use std::os::unix::process::CommandExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let events = dir.path().join("events.jsonl");
+    let output_path = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&prompt, "do not leak this interrupted prompt").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: slow_tool
+    op: tool
+    from: load_prompt
+    command: ["sh", "-c", "sleep 30"]
+outputs:
+  final:
+    from: slow_tool
+    path: {}
+"#,
+            prompt.display(),
+            output_path.display()
+        ),
+    )
+    .unwrap();
+
+    let child = unsafe {
+        let mut command = StdCommand::new(assert_cmd::cargo::cargo_bin("llmff"));
+        command
+            .args([
+                "run",
+                "--events",
+                events.to_str().unwrap(),
+                manifest.to_str().unwrap(),
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .pre_exec(|| {
+                if libc::setpgid(0, 0) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        command.spawn().unwrap()
+    };
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if std::fs::read_to_string(&events)
+            .map(|text| text.contains(r#""event":"stage_started""#))
+            .unwrap_or(false)
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let event_text = std::fs::read_to_string(&events).unwrap_or_default();
+    assert!(
+        event_text.contains(r#""event":"stage_started""#),
+        "run should start before interrupt, events were: {event_text}"
+    );
+
+    let pid = child.id() as libc::pid_t;
+    let signal_result = unsafe { libc::kill(-pid, libc::SIGINT) };
+    assert_eq!(signal_result, 0, "SIGINT should reach the process group");
+
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(130));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("interrupted"));
+
+    let event_text = std::fs::read_to_string(events).unwrap();
+    assert!(!event_text.contains("do not leak this interrupted prompt"));
 }
 
 #[test]
