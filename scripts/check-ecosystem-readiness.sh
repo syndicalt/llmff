@@ -42,6 +42,7 @@ require_file "docs/plugins/registry.v1.json"
 require_file "docs/provider-troubleshooting.md"
 require_file "docs/provider-smoke-readiness.md"
 require_file "docs/agent-workflows.md"
+require_file "docs/adoption/agent-runner.md"
 require_file "docs/package-manager-roadmap.md"
 require_file "docs/distribution-trust.md"
 
@@ -53,6 +54,7 @@ for integration in \
   "Plugin protocol" \
   "Provider onboarding" \
   "Agent subprocess embedding" \
+  "Agent runner adoption" \
   "Package-manager metadata" \
   "Release assets"
 do
@@ -68,6 +70,7 @@ for gate in \
   "scripts/check-plugin-fixtures.sh" \
   "scripts/check-provider-smoke-readiness.sh" \
   "cargo test -p llmff --test example_catalog agent_workflow_docs_link_to_a_runnable_supervisor_example" \
+  "scripts/check-agent-adoption-guide.sh" \
   "scripts/check-package-manager-metadata.sh" \
   "scripts/check-release-publication-wiring.sh" \
   "scripts/check-release-assets.sh <tag>"
@@ -80,6 +83,7 @@ require_text "$guide" "explicitly opt-in"
 require_text "docs/manifest-reproducibility.md" "manifest lockfile remains parked"
 require_text "docs/provider-smoke-readiness.md" "certification is a support commitment"
 require_text "docs/opentelemetry-bridge.md" "no network telemetry by default"
+require_text "docs/adoption/agent-runner.md" "bounded execution tool"
 require_text "docs/roadmap.md" "Keep every public integration path covered by a local validation gate or a"
 
 printf 'ecosystem readiness validation succeeded\n'
