@@ -83,3 +83,34 @@ fn ecosystem_integration_paths_are_readiness_gated() {
             "ecosystem readiness validation succeeded",
         ));
 }
+
+#[test]
+fn apt_repository_publication_requires_signed_metadata_design() {
+    let root = workspace_root();
+    let design = root.join("docs/apt-repository-design.md");
+    assert!(design.exists(), "missing apt repository design");
+
+    let source = std::fs::read_to_string(&design).expect("design should be readable");
+    for required in [
+        "signed repository metadata",
+        "InRelease",
+        "Release.gpg",
+        "key rotation",
+        "historical retention",
+        "hosting",
+        "recovery",
+        "no apt repository installation instructions",
+    ] {
+        assert!(
+            source.contains(required),
+            "apt repository design should cover {required}"
+        );
+    }
+
+    Command::new(root.join("scripts/check-apt-repository-design.sh"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "apt repository design validation succeeded",
+        ));
+}

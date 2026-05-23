@@ -145,6 +145,8 @@ Prototype status:
 - No apt repository metadata is shipped under `packaging/apt`.
 - Local validation fails if unsigned apt repository metadata such as `Release`,
   `InRelease`, `Packages`, `Sources`, or `Release.gpg` is added.
+- Signed repository metadata requirements are tracked in
+  [`docs/apt-repository-design.md`](apt-repository-design.md).
 
 Target source:
 
@@ -155,6 +157,9 @@ Readiness work:
 
 - Decide whether the project will host repository metadata, signing keys, and
   retention for historical package versions.
+- Implement the signed metadata design in
+  [`docs/apt-repository-design.md`](apt-repository-design.md), including
+  `InRelease`, `Release.gpg`, key rotation, hosting, retention, and recovery.
 - Require signed repository metadata before documenting `apt add` or
   `sources.list.d` installation.
 - Keep direct `.deb` installation as the supported Debian and Ubuntu path until
