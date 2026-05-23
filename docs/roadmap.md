@@ -113,27 +113,57 @@ Distribution:
 - Homebrew formula, winget, Scoop, official AUR submission, and apt repository
   feasibility tracks are documented for post-release package-manager work.
 
+## Completed Next Roadmap Sprint
+
+Provider onboarding:
+
+- Opt-in live smoke scripts cover OpenAI-compatible and Ollama provider paths
+  without requiring credentials or local services in default tests.
+- Reusable templates now cover multi-step extraction and batch processing.
+
+Streaming and supervision:
+
+- `run_failed` lifecycle events provide a sanitized failure contract with stable
+  `failure_kind` and `failure_message` fields.
+- Supervisor examples cover long-running process handling and parallel
+  execution event consumption.
+
+Plugin ecosystem:
+
+- `llmff plugins validate --format json` emits structured validation reports
+  for machine consumers.
+- Plugin protocol v1 and validation report v1 compatibility expectations are
+  documented.
+
+Distribution:
+
+- Homebrew, winget, Scoop, and AUR package-manager metadata prototypes are
+  produced and locally validated without publishing.
+- Apt repository metadata remains parked until signing, key management,
+  hosting, rotation, and recovery are designed.
+
 ## Next Product Roadmap
 
 Provider onboarding:
 
-- Add provider-specific smoke tests against opt-in live OpenAI-compatible and
-  Ollama endpoints.
-- Add more reusable templates for multi-step extraction and batch processing.
+- Add provider-specific live smoke jobs in CI once secret policy and runner
+  expectations are settled.
+- Add provider examples for additional OpenAI-compatible gateways.
 
 Streaming and supervision:
 
-- Add a dedicated failure event once the error contract is designed.
-- Add supervisor examples for long-running processes and parallel execution.
+- Add machine-readable event schema fixtures for downstream supervisor tests.
+- Add richer failure classification only when a concrete consumer needs it.
 
 Plugin ecosystem:
 
-- Add structured machine-readable plugin validation output.
-- Add versioned plugin protocol compatibility docs.
+- Add plugin protocol fixtures that third-party plugin authors can run in their
+  own CI.
+- Add more example plugins once real extension use cases emerge.
 
 Distribution:
 
-- Produce and validate package-manager metadata for Homebrew, winget, Scoop, and
-  AUR without publishing it.
 - Design signed apt repository metadata before documenting apt repository
   installation.
+- Publish package-manager metadata only after maintainers decide each channel is
+  ready for support.

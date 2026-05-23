@@ -9,7 +9,8 @@ use llmff_core::backend::{
 use llmff_core::engine::{Engine, RunOptions, SchedulerMode};
 use llmff_core::manifest::Manifest;
 use llmff_core::plugin::{
-    discover_plugin_backends, discover_plugin_manifests, validate_plugin_manifests,
+    discover_plugin_backends, discover_plugin_manifests, validate_plugin_directory,
+    validate_plugin_manifests,
 };
 use llmff_core::stage::builtin_stage_metadata;
 
@@ -138,6 +139,8 @@ enum PluginsCommand {
     Validate {
         #[arg(long = "plugin-dir")]
         plugin_dir: PathBuf,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
 }
 
@@ -219,8 +222,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             command: PluginsCommand::List { plugin_dir, format },
         } => print_plugin_manifests(&plugin_dir, format)?,
         Command::Plugins {
-            command: PluginsCommand::Validate { plugin_dir },
-        } => validate_plugins(&plugin_dir)?,
+            command: PluginsCommand::Validate { plugin_dir, format },
+        } => validate_plugins(&plugin_dir, format)?,
         Command::Trace { path } => summarize_trace(&path)?,
     }
 
@@ -487,9 +490,21 @@ fn print_plugin_manifests(plugin_dir: &Path, format: OutputFormat) -> Result<()>
     Ok(())
 }
 
-fn validate_plugins(plugin_dir: &Path) -> Result<()> {
-    validate_plugin_manifests(plugin_dir)?;
-    println!("ok");
+fn validate_plugins(plugin_dir: &Path, format: OutputFormat) -> Result<()> {
+    match format {
+        OutputFormat::Text => {
+            validate_plugin_manifests(plugin_dir)?;
+            println!("ok");
+        }
+        OutputFormat::Json => {
+            let report = validate_plugin_directory(plugin_dir)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            if !report.valid {
+                anyhow::bail!("plugin validation failed");
+            }
+        }
+    }
+
     Ok(())
 }
 

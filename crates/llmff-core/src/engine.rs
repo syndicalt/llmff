@@ -174,6 +174,27 @@ impl Engine {
         cwd: &Path,
         options: RunOptions,
     ) -> Result<RunReport, LlmffError> {
+        let run_id = options.run_id.clone();
+        let mut trace = create_trace_writers(&options)?;
+        match self
+            .run_manifest_inner(manifest, cwd, options, &mut trace)
+            .await
+        {
+            Ok(report) => Ok(report),
+            Err(error) => {
+                write_run_failed(&mut trace, &run_id, &error)?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn run_manifest_inner(
+        &self,
+        manifest: Manifest,
+        cwd: &Path,
+        options: RunOptions,
+        trace: &mut Vec<TraceWriter>,
+    ) -> Result<RunReport, LlmffError> {
         let plugin_tool_transports = load_plugin_tool_transports(&options.plugin_dirs)?;
         let plugin_stages = load_plugin_stages(&options.plugin_dirs)?;
         let plugin_samplers = load_plugin_samplers(&options.plugin_dirs)?;
@@ -189,10 +210,9 @@ impl Engine {
         }
         let mut stream_writer = create_stage_stream_writer(&options, &graph, cwd)?;
         let mut statuses = BTreeMap::new();
-        let mut trace = create_trace_writers(&options)?;
 
         write_trace(
-            &mut trace,
+            trace,
             TraceEvent {
                 run_id: options.run_id.clone(),
                 event: "run_started".to_string(),
@@ -213,6 +233,8 @@ impl Engine {
                 total_tokens: None,
                 cache_hit: None,
                 cache_path: None,
+                failure_kind: None,
+                failure_message: None,
             },
         )?;
 
@@ -223,7 +245,7 @@ impl Engine {
                     &graph,
                     cwd,
                     &mut statuses,
-                    &mut trace,
+                    trace,
                     &options.run_id,
                     &plugin_tool_transports,
                     &plugin_stages,
@@ -238,7 +260,7 @@ impl Engine {
                     &graph,
                     cwd,
                     &mut statuses,
-                    &mut trace,
+                    trace,
                     &options.run_id,
                     &plugin_tool_transports,
                     &plugin_stages,
@@ -277,7 +299,7 @@ impl Engine {
             final_status: RunStatus::Succeeded,
         };
         write_trace(
-            &mut trace,
+            trace,
             TraceEvent {
                 run_id: options.run_id,
                 event: "run_finished".to_string(),
@@ -298,6 +320,8 @@ impl Engine {
                 total_tokens: None,
                 cache_hit: None,
                 cache_path: None,
+                failure_kind: None,
+                failure_message: None,
             },
         )?;
 
@@ -431,6 +455,8 @@ impl Engine {
                 total_tokens: None,
                 cache_hit: None,
                 cache_path: None,
+                failure_kind: None,
+                failure_message: None,
             },
         )?;
         Ok(started)
@@ -473,6 +499,8 @@ impl Engine {
                 total_tokens: metadata.total_tokens,
                 cache_hit,
                 cache_path,
+                failure_kind: None,
+                failure_message: None,
             },
         )
     }
@@ -2207,6 +2235,74 @@ fn write_trace(trace: &mut Vec<TraceWriter>, event: TraceEvent) -> Result<(), Ll
     Ok(())
 }
 
+fn write_run_failed(
+    trace: &mut Vec<TraceWriter>,
+    run_id: &str,
+    error: &LlmffError,
+) -> Result<(), LlmffError> {
+    write_trace(
+        trace,
+        TraceEvent {
+            run_id: run_id.to_string(),
+            event: "run_failed".to_string(),
+            stage_id: failure_stage_id(error),
+            op: None,
+            status: Some("failed".to_string()),
+            timestamp_ms: timestamp_ms(),
+            duration_ms: None,
+            model: None,
+            backend: None,
+            provider_model: None,
+            validation_errors: None,
+            tool_kind: None,
+            tool_target: None,
+            output_path: None,
+            prompt_tokens: None,
+            completion_tokens: None,
+            total_tokens: None,
+            cache_hit: None,
+            cache_path: None,
+            failure_kind: Some(failure_kind(error).to_string()),
+            failure_message: Some(failure_message(error).to_string()),
+        },
+    )
+}
+
+fn failure_stage_id(error: &LlmffError) -> Option<String> {
+    match error {
+        LlmffError::StageExecution { stage_id, .. } => Some(stage_id.clone()),
+        _ => None,
+    }
+}
+
+fn failure_kind(error: &LlmffError) -> &'static str {
+    match error {
+        LlmffError::ManifestParse(_) => "manifest_parse",
+        LlmffError::Io(_) => "io",
+        LlmffError::Json(_) => "json",
+        LlmffError::GraphValidation(_) => "graph_validation",
+        LlmffError::UnknownStage(_) => "unknown_stage",
+        LlmffError::StageExecution { .. } => "stage_execution",
+        LlmffError::Backend(_) => "backend",
+        LlmffError::Config(_) => "config",
+        LlmffError::NotImplemented(_) => "not_implemented",
+    }
+}
+
+fn failure_message(error: &LlmffError) -> &'static str {
+    match error {
+        LlmffError::ManifestParse(_) => "manifest parse failed",
+        LlmffError::Io(_) => "I/O operation failed",
+        LlmffError::Json(_) => "JSON operation failed",
+        LlmffError::GraphValidation(_) => "graph validation failed",
+        LlmffError::UnknownStage(_) => "unknown stage operation",
+        LlmffError::StageExecution { .. } => "stage execution failed",
+        LlmffError::Backend(_) => "backend request failed",
+        LlmffError::Config(_) => "configuration failed",
+        LlmffError::NotImplemented(_) => "feature is not implemented",
+    }
+}
+
 fn timestamp_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -3167,6 +3263,68 @@ outputs:
             .find(|event| event["event"] == "stage_finished")
             .expect("stage_finished event should exist");
         assert!(stage_finished["duration_ms"].is_u64());
+    }
+
+    #[tokio::test]
+    async fn trace_events_include_run_failed_without_sensitive_payloads() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("secret-question.txt");
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(&prompt_path, "super secret prompt body").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: missing:model
+outputs:
+  final:
+    from: draft
+    path: answer.txt
+"#,
+            prompt_path.display()
+        ))
+        .unwrap();
+        let options = RunOptions {
+            run_id: "failed-run".to_string(),
+            trace_path: Some(trace_path.clone()),
+            event_path: None,
+            scheduler: SchedulerMode::Sequential,
+            plugin_dirs: Vec::new(),
+            stream_stage: None,
+            stream_path: None,
+        };
+
+        let error = Engine::new()
+            .run_manifest_with_options(manifest, dir.path(), options)
+            .await
+            .expect_err("run should fail when model backend is missing");
+        assert!(matches!(error, LlmffError::Backend(_)));
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let failed = events
+            .iter()
+            .find(|event| event["event"] == "run_failed")
+            .expect("run_failed event should exist");
+
+        assert_eq!(failed["run_id"], "failed-run");
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["failure_kind"], "backend");
+        assert_eq!(failed["failure_message"], "backend request failed");
+        assert!(failed["stage_id"].is_null());
+        assert!(failed["timestamp_ms"].is_u64());
+        assert!(!trace.contains("super secret prompt body"));
+        assert!(!trace.contains("missing:model"));
     }
 
     #[tokio::test]

@@ -32,6 +32,8 @@ fn provider_onboarding_examples_and_templates_are_inspectable() {
     for manifest in [
         "examples/templates/summarization.yaml",
         "examples/templates/structured-extraction.yaml",
+        "examples/templates/multi-step-extraction.yaml",
+        "examples/templates/batch-processing.yaml",
         "examples/templates/json-repair.yaml",
         "examples/templates/retrieve-rerank-answer.yaml",
         "examples/templates/tool-call.yaml",
@@ -72,4 +74,39 @@ fn provider_onboarding_examples_and_templates_are_inspectable() {
         ])
         .assert()
         .success();
+}
+
+#[test]
+fn provider_live_smoke_scripts_are_explicitly_opt_in() {
+    let root = workspace_root();
+
+    for script in [
+        "scripts/smoke-openai-compatible-provider.sh",
+        "scripts/smoke-ollama-provider.sh",
+    ] {
+        let path = root.join(script);
+        assert!(path.exists(), "missing {script}");
+
+        let source = std::fs::read_to_string(&path).expect("script should be readable");
+        assert!(
+            source.contains("LLMFF_LIVE_PROVIDER_SMOKE=1"),
+            "{script} should require LLMFF_LIVE_PROVIDER_SMOKE=1"
+        );
+        assert!(
+            source.contains("exit 0"),
+            "{script} should skip cleanly without opt-in"
+        );
+    }
+
+    let openai = Command::new(root.join("scripts/smoke-openai-compatible-provider.sh"))
+        .assert()
+        .success();
+    openai.stdout(predicates::str::contains(
+        "skipping OpenAI-compatible provider smoke",
+    ));
+
+    let ollama = Command::new(root.join("scripts/smoke-ollama-provider.sh"))
+        .assert()
+        .success();
+    ollama.stdout(predicates::str::contains("skipping Ollama provider smoke"));
 }

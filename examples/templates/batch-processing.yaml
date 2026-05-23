@@ -1,0 +1,36 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_batch_request
+    op: load
+    input: prompt
+  - id: retrieve_context
+    op: retrieve
+    from: load_batch_request
+    documents:
+      - ../retrieval/python.txt
+      - ../retrieval/rust.txt
+    strategy: lexical
+    top_k: 2
+  - id: rank_context
+    op: rerank
+    from: retrieve_context
+    strategy: lexical
+    top_k: 2
+  - id: process_batch
+    op: infer
+    from: rank_context
+    model: mock:good
+    temperature: 0.1
+    max_tokens: 768
+    response_format: json
+  - id: validate_batch
+    op: validate_json
+    from: process_batch
+    schema_path: ../answer.schema.json
+outputs:
+  final:
+    from: validate_batch
+    path: ./batch-processing.answer.json

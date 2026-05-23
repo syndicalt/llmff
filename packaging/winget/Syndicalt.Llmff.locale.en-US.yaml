@@ -1,0 +1,10 @@
+# Prototype only. Do not submit until maintainers intentionally publish.
+PackageIdentifier: Syndicalt.Llmff
+PackageVersion: 0.1.2
+PackageLocale: en-US
+Publisher: Syndicalt
+PackageName: llmff
+License: MIT
+ShortDescription: FFmpeg-shaped command-line runner for LLM inference pipelines
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

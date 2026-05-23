@@ -40,6 +40,10 @@ pub struct TraceEvent {
     pub cache_hit: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_message: Option<String>,
 }
 
 pub struct TraceWriter {

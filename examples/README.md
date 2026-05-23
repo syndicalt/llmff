@@ -119,12 +119,41 @@ llmff run examples/providers/ollama.mock.yaml
 Provider setup and failure handling are documented in
 [`docs/provider-troubleshooting.md`](../docs/provider-troubleshooting.md).
 
+Optional live smoke scripts are available for provider onboarding. They skip by
+default and only call real endpoints when explicitly enabled:
+
+```bash
+scripts/smoke-openai-compatible-provider.sh
+scripts/smoke-ollama-provider.sh
+```
+
+Run the OpenAI-compatible smoke against a live endpoint:
+
+```bash
+export LLMFF_LIVE_PROVIDER_SMOKE=1
+export OPENAI_API_KEY='...'
+export OPENAI_BASE_URL='https://api.openai.com/v1'
+
+scripts/smoke-openai-compatible-provider.sh
+```
+
+Run the Ollama smoke against a local service:
+
+```bash
+export LLMFF_LIVE_PROVIDER_SMOKE=1
+export OLLAMA_BASE_URL='http://localhost:11434'
+
+scripts/smoke-ollama-provider.sh
+```
+
 ## Manifest Templates
 
 Reusable workflow templates live in `examples/templates/`:
 
 - `summarization.yaml`
 - `structured-extraction.yaml`
+- `multi-step-extraction.yaml`
+- `batch-processing.yaml`
 - `json-repair.yaml`
 - `retrieve-rerank-answer.yaml`
 - `tool-call.yaml`

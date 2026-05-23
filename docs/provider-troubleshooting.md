@@ -37,6 +37,7 @@ Provider example environment variables:
 | `OPENAI_API_KEY` | OpenAI-compatible | Secret read by `--api-key-env openai=OPENAI_API_KEY`. |
 | `OPENAI_BASE_URL` | OpenAI-compatible | Optional shell variable for the value passed to `--backend openai=...`. |
 | `OLLAMA_BASE_URL` | Ollama | Optional shell variable for the value passed to `--ollama ollama=...`. |
+| `LLMFF_LIVE_PROVIDER_SMOKE` | Live provider smokes | Must be `1` before smoke scripts call real endpoints. |
 | `LLMFF_MOCK_GOOD_RESPONSE` | Mock fallbacks | Deterministic model response for `.mock.yaml` examples. |
 | `LLMFF_MOCK_BAD_RESPONSE` | JSON repair mocks | Deterministic invalid draft for repair workflows. |
 
@@ -128,3 +129,37 @@ llmff run examples/providers/openai-compatible.mock.yaml
 LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
 llmff run examples/providers/ollama.mock.yaml
 ```
+
+## Optional live smoke scripts
+
+Provider smoke scripts are intentionally opt-in. Running them without the opt-in
+environment exits successfully after printing a skip message:
+
+```bash
+scripts/smoke-openai-compatible-provider.sh
+scripts/smoke-ollama-provider.sh
+```
+
+To test an OpenAI-compatible endpoint, set an API key and opt in:
+
+```bash
+export LLMFF_LIVE_PROVIDER_SMOKE=1
+export OPENAI_API_KEY='...'
+export OPENAI_BASE_URL='https://api.openai.com/v1'
+
+scripts/smoke-openai-compatible-provider.sh
+```
+
+`OPENAI_BASE_URL` may point at another OpenAI-compatible gateway. If the key is
+stored under a different variable name, set `OPENAI_API_KEY_ENV` to that name.
+
+To test Ollama, start the local service, select its base URL, and opt in:
+
+```bash
+export LLMFF_LIVE_PROVIDER_SMOKE=1
+export OLLAMA_BASE_URL='http://localhost:11434'
+
+scripts/smoke-ollama-provider.sh
+```
+
+The scripts remove their generated example output files before exiting.
