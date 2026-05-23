@@ -46,6 +46,13 @@ checkpoint. Checkpoints are bound to a hash of the current manifest so stale
 checkpoints cannot be silently reused with a changed graph. Checkpoints store
 stage values, so treat them as job artifacts.
 
+If a checkpoint cannot be reused because its manifest hash differs from the
+current manifest, `llmff` exits with code `10` and reports the checkpoint path,
+the checkpoint's saved manifest hash, the current manifest hash, and an
+`inspect --format json` hint. Supervisors should treat this as a static
+preflight failure: do not retry the same checkpoint against the changed
+manifest.
+
 ## Batch Input Mode
 
 `--batch-input path --batch-output-dir dir` runs the same manifest once for each

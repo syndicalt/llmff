@@ -167,7 +167,9 @@ llmff run pipeline.yaml \
 
 Checkpoints include stage values, so store them with the same care as other job
 artifacts. A checkpoint is bound to the manifest hash and cannot be silently
-reused after the graph changes.
+reused after the graph changes. A manifest mismatch exits with code `10` and
+reports the checkpoint path plus both manifest hashes, so an agent can stop
+retrying and create a fresh checkpoint for the changed manifest.
 
 ## Runnable Supervisor Example
 

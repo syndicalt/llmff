@@ -1650,9 +1650,12 @@ fn read_checkpoint(
         )));
     }
     if record.manifest_hash != expected_manifest_hash {
-        return Err(LlmffError::Config(
-            "checkpoint manifest hash does not match current manifest".to_string(),
-        ));
+        return Err(LlmffError::Config(format!(
+            "checkpoint manifest hash does not match current manifest: checkpoint={} checkpoint_hash={} current_manifest_hash={}; run inspect --format json on the manifest used for this run and resume only from a checkpoint produced by the same manifest",
+            path.display(),
+            record.manifest_hash,
+            expected_manifest_hash
+        )));
     }
 
     Ok(record.statuses)
@@ -3392,7 +3395,7 @@ outputs:
                 manifest,
                 dir.path(),
                 RunOptions {
-                    resume_path: Some(checkpoint_path),
+                    resume_path: Some(checkpoint_path.clone()),
                     ..RunOptions::default()
                 },
             )
@@ -3446,7 +3449,7 @@ outputs:
                 changed,
                 dir.path(),
                 RunOptions {
-                    resume_path: Some(checkpoint_path),
+                    resume_path: Some(checkpoint_path.clone()),
                     ..RunOptions::default()
                 },
             )
@@ -3456,6 +3459,12 @@ outputs:
         assert!(error
             .to_string()
             .contains("checkpoint manifest hash does not match"));
+        assert!(error
+            .to_string()
+            .contains(checkpoint_path.to_str().unwrap()));
+        assert!(error.to_string().contains("checkpoint_hash="));
+        assert!(error.to_string().contains("current_manifest_hash="));
+        assert!(error.to_string().contains("run inspect --format json"));
     }
 
     #[tokio::test]
