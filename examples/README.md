@@ -197,7 +197,9 @@ a separate output stream.
 For agent supervisors, see
 [`../docs/agent-workflows.md`](../docs/agent-workflows.md) and the runnable
 [`examples/agent-workflows/supervisor.py`](agent-workflows/supervisor.py)
-subprocess example. JavaScript and TypeScript agent hosts can use the
+subprocess example. Batch supervisors can use the offline
+[`examples/agent-workflows/batch-supervisor.py`](agent-workflows/batch-supervisor.py)
+example. JavaScript and TypeScript agent hosts can use the
 streaming subprocess pattern in
 [`examples/agent-workflows/node-supervisor.mjs`](agent-workflows/node-supervisor.mjs).
 
