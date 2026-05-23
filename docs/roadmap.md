@@ -285,7 +285,10 @@ Goal: make manifests portable, auditable, and predictable before execution.
   generated artifacts, and stdout-producing stages should be visible in
   inspection output.
 - Explore lockfile or manifest-lock support only if it materially improves
-  portability across machines and provider configurations.
+  portability across machines and provider configurations. The current
+  manifest lockfile decision is documented in
+  `docs/manifest-reproducibility.md` and kept parked until it improves on
+  `inspect --format json`.
 - Maintain schema compatibility fixtures for every additive manifest contract
   change.
 

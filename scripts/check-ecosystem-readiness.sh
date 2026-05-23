@@ -26,6 +26,7 @@ guide="docs/ecosystem-readiness.md"
 
 require_file "$guide"
 require_file "scripts/check-schema-contract.py"
+require_file "scripts/check-manifest-reproducibility.sh"
 require_file "scripts/check-plugin-fixtures.sh"
 require_file "scripts/check-package-manager-metadata.sh"
 require_file "scripts/check-release-publication-wiring.sh"
@@ -33,6 +34,7 @@ require_file "scripts/check-release-assets.sh"
 require_file "scripts/check-provider-smoke-readiness.sh"
 require_file ".github/workflows/live-provider-smoke.yml"
 require_file "docs/schemas/pipeline-manifest-v1.schema.json"
+require_file "docs/manifest-reproducibility.md"
 require_file "docs/schemas/inspect-report-v1.schema.json"
 require_file "docs/events.md"
 require_file "docs/plugins/registry.v1.json"
@@ -57,6 +59,7 @@ done
 
 for gate in \
   "python3 scripts/check-schema-contract.py" \
+  "scripts/check-manifest-reproducibility.sh" \
   "cargo test -p llmff --test cli_run observability_export_scripts_summarize_trace_fixture" \
   "cargo test -p llmff --test cli_run inspect_json_reports_reproducible_execution_contract" \
   "scripts/check-plugin-fixtures.sh" \
@@ -71,6 +74,7 @@ done
 
 require_text "$guide" "support commitments"
 require_text "$guide" "explicitly opt-in"
+require_text "docs/manifest-reproducibility.md" "manifest lockfile remains parked"
 require_text "docs/provider-smoke-readiness.md" "certification is a support commitment"
 require_text "docs/roadmap.md" "Keep every public integration path covered by a local validation gate or a"
 
