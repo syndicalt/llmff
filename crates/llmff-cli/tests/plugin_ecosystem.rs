@@ -247,10 +247,13 @@ fn release_preflight_runs_ecosystem_readiness_gate() {
 #[test]
 fn release_notes_cover_current_ecosystem_contract() {
     let root = workspace_root();
-    let notes_path = root.join("docs/release-notes/v0.1.3.md");
-    assert!(notes_path.exists(), "missing v0.1.3 release notes");
+    let version = env!("CARGO_PKG_VERSION");
+    let tag = format!("v{version}");
+    let notes_path = root.join(format!("docs/release-notes/{tag}.md"));
+    assert!(notes_path.exists(), "missing current release notes");
 
     let source = std::fs::read_to_string(&notes_path).expect("release notes should be readable");
+    assert!(source.contains(&format!("# llmff {tag}")));
     for required in [
         "Python subprocess supervisor",
         "batch supervisor",
@@ -262,7 +265,7 @@ fn release_notes_cover_current_ecosystem_contract() {
     ] {
         assert!(
             source.contains(required),
-            "v0.1.3 release notes should cover {required}"
+            "{tag} release notes should cover {required}"
         );
     }
 
@@ -275,12 +278,22 @@ fn release_notes_cover_current_ecosystem_contract() {
 #[test]
 fn package_manager_metadata_tracks_current_release_version() {
     let root = workspace_root();
-    let version = env!("CARGO_PKG_VERSION");
-    let tag = format!("v{version}");
+    let workspace_version = env!("CARGO_PKG_VERSION");
 
     let checker = std::fs::read_to_string(root.join("scripts/check-package-manager-metadata.sh"))
         .expect("checker should be readable");
-    assert!(checker.contains(&format!("version=\"{version}\"")));
+    let metadata_version = checker
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("version=\"")
+                .and_then(|rest| rest.strip_suffix('"'))
+        })
+        .expect("checker should define package-manager metadata version");
+    let tag = format!("v{metadata_version}");
+    assert!(
+        parse_version_triplet(metadata_version) <= parse_version_triplet(workspace_version),
+        "package metadata should not point past the workspace version"
+    );
     assert!(checker.contains("tag=\"v${version}\""));
 
     for path in [
@@ -292,12 +305,12 @@ fn package_manager_metadata_tracks_current_release_version() {
     ] {
         let source = std::fs::read_to_string(root.join(path)).expect("file should be readable");
         assert!(
-            source.contains(version),
-            "{path} should reference current version {version}"
+            source.contains(metadata_version),
+            "{path} should reference metadata version {metadata_version}"
         );
         assert!(
             source.contains(&tag),
-            "{path} should reference current tag {tag}"
+            "{path} should reference metadata tag {tag}"
         );
     }
 
@@ -307,8 +320,8 @@ fn package_manager_metadata_tracks_current_release_version() {
     ] {
         let source = std::fs::read_to_string(root.join(path)).expect("file should be readable");
         assert!(
-            source.contains(version),
-            "{path} should reference current version {version}"
+            source.contains(metadata_version),
+            "{path} should reference metadata version {metadata_version}"
         );
     }
 
@@ -322,4 +335,25 @@ fn package_manager_metadata_tracks_current_release_version() {
         .stdout(predicates::str::contains(format!(
             "package-manager metadata validation succeeded for {tag}"
         )));
+}
+
+fn parse_version_triplet(version: &str) -> [u64; 3] {
+    let mut parts = version.split('.');
+    let major = parts
+        .next()
+        .and_then(|part| part.parse::<u64>().ok())
+        .expect("major version should be numeric");
+    let minor = parts
+        .next()
+        .and_then(|part| part.parse::<u64>().ok())
+        .expect("minor version should be numeric");
+    let patch = parts
+        .next()
+        .and_then(|part| part.parse::<u64>().ok())
+        .expect("patch version should be numeric");
+    assert!(
+        parts.next().is_none(),
+        "version should have exactly three components"
+    );
+    [major, minor, patch]
 }
