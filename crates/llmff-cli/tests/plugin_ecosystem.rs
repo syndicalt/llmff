@@ -181,3 +181,40 @@ fn opentelemetry_bridge_is_defined_without_default_network_telemetry() {
             "OpenTelemetry bridge validation succeeded",
         ));
 }
+
+#[test]
+fn adoption_guide_demonstrates_real_agent_integration_patterns() {
+    let root = workspace_root();
+    let guide = root.join("docs/adoption/agent-runner.md");
+    assert!(guide.exists(), "missing agent runner adoption guide");
+
+    let source = std::fs::read_to_string(&guide).expect("guide should be readable");
+    for required in [
+        "bounded execution tool",
+        "preflight",
+        "dispatch",
+        "supervision",
+        "artifact collection",
+        "retry decision",
+        "failure_kind",
+        "exit code",
+        "checkpoint",
+        "trace",
+        "events",
+        "batch-supervisor.py",
+        "node-supervisor.mjs",
+        "do not read prompt payloads from metadata",
+    ] {
+        assert!(
+            source.contains(required),
+            "agent runner adoption guide should cover {required}"
+        );
+    }
+
+    Command::new(root.join("scripts/check-agent-adoption-guide.sh"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "agent adoption guide validation succeeded",
+        ));
+}
