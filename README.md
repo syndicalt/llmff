@@ -212,6 +212,10 @@ Emit a machine-readable reproducibility report for agents and CI:
 llmff inspect examples/json-repair.yaml --format json
 ```
 
+The JSON report includes schema compatibility versions, the manifest hash,
+resolved inputs and outputs, stage order, backend registrations, plugin
+protocol metadata, plugin manifests, execution controls, and stdout ownership.
+
 Inspect an inline graph without running model calls:
 
 ```bash

@@ -34,8 +34,9 @@ machine-readable contract for the pipeline:
 llmff inspect pipeline.yaml --format json
 ```
 
-The report includes the manifest hash, source kind, resolved inputs and
-outputs, execution stage order, model aliases, plugin directories, stdout
+The report includes schema compatibility versions, the manifest hash, source
+kind, resolved inputs and outputs, execution stage order, model aliases,
+backend registrations, plugin protocol metadata, plugin manifests, stdout
 ownership, and default execution controls. Agents can store this report next to
 the trace and checkpoint to explain what was expected to run.
 

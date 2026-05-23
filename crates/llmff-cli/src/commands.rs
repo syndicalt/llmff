@@ -12,7 +12,7 @@ use llmff_core::graph::Graph;
 use llmff_core::manifest::Manifest;
 use llmff_core::plugin::{
     discover_plugin_backends, discover_plugin_manifests, validate_plugin_directory,
-    validate_plugin_manifests,
+    validate_plugin_manifests, PLUGIN_PROTOCOL_VERSION,
 };
 use llmff_core::stage::builtin_stage_metadata;
 use sha2::{Digest, Sha256};
@@ -249,10 +249,16 @@ pub async fn run(cli: Cli) -> Result<()> {
             api_key,
         } => {
             let loaded = load_pipeline_manifest(manifest, input, graph)?;
-            let engine = build_engine(backend, ollama, api_key_env, api_key, &plugin_dir)?;
+            let engine = build_engine(
+                backend.clone(),
+                ollama.clone(),
+                api_key_env,
+                api_key,
+                &plugin_dir,
+            )?;
             let graph =
                 engine.validate_manifest_with_plugin_dirs(loaded.manifest.clone(), &plugin_dir)?;
-            print_inspect_report(format, loaded, graph, &plugin_dir)?;
+            print_inspect_report(format, loaded, graph, &plugin_dir, &backend, &ollama)?;
         }
         Command::Backends {
             command:
@@ -317,13 +323,15 @@ fn print_inspect_report(
     loaded: LoadedManifest,
     graph: Graph,
     plugin_dirs: &[PathBuf],
+    backend: &[String],
+    ollama: &[String],
 ) -> Result<()> {
     match format {
         OutputFormat::Text => {
             println!("ok");
         }
         OutputFormat::Json => {
-            let report = inspect_report(loaded, graph, plugin_dirs);
+            let report = inspect_report(loaded, graph, plugin_dirs, backend, ollama)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
     }
@@ -335,7 +343,9 @@ fn inspect_report(
     loaded: LoadedManifest,
     graph: Graph,
     plugin_dirs: &[PathBuf],
-) -> serde_json::Value {
+    backend: &[String],
+    ollama: &[String],
+) -> Result<serde_json::Value> {
     let stage_order = graph
         .stages()
         .iter()
@@ -355,9 +365,18 @@ fn inspect_report(
         .iter()
         .map(|path| path.to_string_lossy().to_string())
         .collect::<Vec<_>>();
+    let backend_registrations =
+        inspect_backend_registrations(backend, ollama, plugin_dirs.iter().map(PathBuf::from))?;
+    let plugin_manifests = inspect_plugin_manifests(plugin_dirs.iter().map(PathBuf::from))?;
 
-    serde_json::json!({
+    Ok(serde_json::json!({
         "format_version": 1,
+        "compatibility": {
+            "pipeline_manifest_schema": 1,
+            "inspect_report_schema": 1,
+            "inline_graph_syntax": 1,
+            "plugin_protocol": PLUGIN_PROTOCOL_VERSION,
+        },
         "manifest": {
             "version": loaded.manifest.version,
             "source": {
@@ -389,10 +408,115 @@ fn inspect_report(
                 "manifest_outputs": loaded.manifest.outputs.values().any(|output| output.path == "-"),
             },
         },
+        "backends": {
+            "registrations": backend_registrations,
+        },
         "plugins": {
             "directories": plugin_dirs,
+            "protocol_version": PLUGIN_PROTOCOL_VERSION,
+            "manifests": plugin_manifests,
         },
-    })
+    }))
+}
+
+fn inspect_backend_registrations(
+    backend: &[String],
+    ollama: &[String],
+    plugin_dirs: impl IntoIterator<Item = PathBuf>,
+) -> Result<Vec<serde_json::Value>> {
+    let mut registrations = builtin_backend_families()
+        .iter()
+        .map(|backend| {
+            serde_json::json!({
+                "name": backend.name,
+                "kind": backend.kind,
+                "source": "built-in",
+                "registration_flag": backend.registration_flag,
+                "base_url": null,
+                "requires_api_key": backend.requires_api_key,
+                "model_aliases": backend.model_aliases,
+                "capabilities": backend.capabilities,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for backend in parse_alias_value_list(backend.to_vec())? {
+        registrations.push(serde_json::json!({
+            "name": backend.alias,
+            "kind": "openai-compatible",
+            "source": "cli",
+            "registration_flag": format!("--backend {}=<base-url>", backend.alias),
+            "base_url": backend.value,
+            "requires_api_key": true,
+            "model_aliases": [format!("{}:<model>", backend.alias)],
+            "capabilities": [
+                "chat-messages",
+                "response-format-json",
+                "sampling",
+                "seed-control",
+                "stop-sequences",
+                "streaming-inference",
+                "usage-metadata",
+            ],
+        }));
+    }
+
+    for backend in parse_alias_value_list(ollama.to_vec())? {
+        registrations.push(serde_json::json!({
+            "name": backend.alias,
+            "kind": "ollama",
+            "source": "cli",
+            "registration_flag": format!("--ollama {}=<base-url>", backend.alias),
+            "base_url": backend.value,
+            "requires_api_key": false,
+            "model_aliases": [format!("{}:<model>", backend.alias)],
+            "capabilities": [
+                "chat-messages",
+                "response-format-json",
+                "sampling",
+                "seed-control",
+                "stop-sequences",
+                "usage-metadata",
+            ],
+        }));
+    }
+
+    for plugin_dir in plugin_dirs {
+        for backend in discover_plugin_backends(&plugin_dir)? {
+            registrations.push(serde_json::json!({
+                "name": backend.name,
+                "kind": "plugin-command",
+                "source": "plugin",
+                "registration_flag": "--plugin-dir",
+                "base_url": null,
+                "requires_api_key": false,
+                "model_aliases": [format!("{}:<model>", backend.name)],
+                "capabilities": [
+                    "chat-messages",
+                    "command-backend",
+                    "usage-metadata",
+                ],
+            }));
+        }
+    }
+
+    Ok(registrations)
+}
+
+fn inspect_plugin_manifests(
+    plugin_dirs: impl IntoIterator<Item = PathBuf>,
+) -> Result<Vec<serde_json::Value>> {
+    let mut manifests = Vec::new();
+    for plugin_dir in plugin_dirs {
+        for manifest in discover_plugin_manifests(&plugin_dir)? {
+            manifests.push(serde_json::json!({
+                "name": manifest.name,
+                "version": manifest.version,
+                "capabilities": manifest.capabilities,
+            }));
+        }
+    }
+    Ok(manifests)
 }
 
 fn inspect_stage_view(stage: &llmff_core::manifest::StageSpec) -> serde_json::Value {

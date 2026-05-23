@@ -35,7 +35,8 @@ existing code meanings should not change within core contract v1.
 `llmff inspect --format json` emits an inspect report with
 `format_version: 1`. Existing fields keep their meaning within this contract.
 Consumers should ignore unknown future fields and use the manifest hash,
-resolved inputs, resolved outputs, stage order, plugin directories, and stdout
+schema compatibility versions, resolved inputs, resolved outputs, stage order,
+backend registrations, plugin protocol metadata, plugin manifests, and stdout
 ownership fields as preflight metadata rather than payload logs.
 
 ## Plugin Protocol

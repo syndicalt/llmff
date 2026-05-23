@@ -270,9 +270,9 @@ Goal: make manifests portable, auditable, and predictable before execution.
 - Improve `llmff inspect` output so operators can see resolved inputs, outputs,
   stage order, backend aliases, model ids, plugin dependencies, cache policy,
   checkpoint policy, and known capability constraints before a run.
-- Add reproducibility reports that summarize the manifest hash, schema version,
-  inline graph syntax version, backend registrations, plugin protocol versions,
-  and execution controls.
+- Reproducibility reports now summarize the manifest hash, schema version,
+  inline graph syntax version, backend registrations, plugin protocol version,
+  plugin manifests, and execution controls.
 - Keep all inputs and outputs explicit: file inputs, stdin, batch input,
   generated artifacts, and stdout-producing stages should be visible in
   inspection output.

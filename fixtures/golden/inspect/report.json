@@ -1,5 +1,11 @@
 {
   "format_version": 1,
+  "compatibility": {
+    "pipeline_manifest_schema": 1,
+    "inspect_report_schema": 1,
+    "inline_graph_syntax": 1,
+    "plugin_protocol": 1
+  },
   "manifest": {
     "version": 1,
     "source": {
@@ -80,9 +86,70 @@
       "manifest_outputs": false
     }
   },
+  "backends": {
+    "registrations": [
+      {
+        "name": "mock",
+        "kind": "deterministic",
+        "source": "built-in",
+        "registration_flag": "built-in",
+        "base_url": null,
+        "requires_api_key": false,
+        "model_aliases": ["mock:bad", "mock:good", "mock:json"],
+        "capabilities": ["deterministic", "chat-messages"]
+      },
+      {
+        "name": "ollama",
+        "kind": "local-chat",
+        "source": "built-in",
+        "registration_flag": "--ollama <alias>=<base-url>",
+        "base_url": null,
+        "requires_api_key": false,
+        "model_aliases": [],
+        "capabilities": [
+          "chat-messages",
+          "response-format-json",
+          "sampling",
+          "seed-control",
+          "stop-sequences",
+          "usage-metadata"
+        ]
+      },
+      {
+        "name": "openai-compatible",
+        "kind": "remote-chat",
+        "source": "built-in",
+        "registration_flag": "--backend <alias>=<base-url>",
+        "base_url": null,
+        "requires_api_key": true,
+        "model_aliases": [],
+        "capabilities": [
+          "chat-messages",
+          "response-format-json",
+          "sampling",
+          "seed-control",
+          "streaming-inference",
+          "stop-sequences",
+          "usage-metadata"
+        ]
+      }
+    ]
+  },
   "plugins": {
-    "directories": [
-      "examples/plugins"
+    "directories": ["examples/plugins"],
+    "protocol_version": 1,
+    "manifests": [
+      {
+        "name": "backend-echo",
+        "version": "0.1.0",
+        "capabilities": [
+          {
+            "kind": "backend",
+            "name": "echo-backend",
+            "entrypoint": "./bin/backend"
+          }
+        ]
+      }
     ]
   }
 }
