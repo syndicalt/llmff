@@ -18,6 +18,8 @@ SCHEMAS = {
     "inspect_report": ROOT / "docs/schemas/inspect-report-v1.schema.json",
 }
 
+FAILURE_KINDS = ROOT / "docs/schemas/failure-kinds-v1.json"
+
 SCHEMA_IDS = {
     "manifest": "pipeline-manifest-v1.schema.json",
     "event": "event-v1.schema.json",
@@ -85,11 +87,27 @@ def validate_instance(schema, instance):
 
 
 def main():
-    require_paths([*SCHEMAS.values(), *DOCS])
+    require_paths([*SCHEMAS.values(), FAILURE_KINDS, *DOCS])
     for paths in FIXTURES.values():
         require_paths(paths)
 
     schemas = {name: load_json(path) for name, path in SCHEMAS.items()}
+    failure_kind_registry = load_json(FAILURE_KINDS)
+    failure_kinds = failure_kind_registry["failure_kinds"]
+    expected_failure_kinds = [
+        "manifest_parse",
+        "io",
+        "json",
+        "graph_validation",
+        "unknown_stage",
+        "timeout",
+        "http",
+        "stage_execution",
+        "backend",
+        "config",
+        "not_implemented",
+    ]
+    assert failure_kinds == expected_failure_kinds
     for name, schema in schemas.items():
         jsonschema.Draft202012Validator.check_schema(schema)
         assert schema["$id"].endswith(SCHEMA_IDS[name])
@@ -116,6 +134,17 @@ def main():
 
     for path in FIXTURES["trace"]:
         validate_jsonl(schemas["trace"], path)
+
+    for schema_name in ["event", "trace"]:
+        assert schemas[schema_name]["properties"]["failure_kind"]["enum"] == failure_kinds
+
+    event_schema_text = (ROOT / "examples/supervision/fixtures/event.schema.json").read_text(
+        encoding="utf-8"
+    )
+    assert '"enum"' in event_schema_text
+    for failure_kind in failure_kinds:
+        for path in [ROOT / "docs/events.md", ROOT / "docs/compatibility/core-contract-v1.md"]:
+            assert failure_kind in path.read_text(encoding="utf-8")
 
 
 if __name__ == "__main__":

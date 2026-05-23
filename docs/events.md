@@ -81,7 +81,7 @@ code `130` for that case.
 | `output_path` | string | write stages | Destination path for a write stage. |
 | `cache_hit` | boolean | cache stages | Whether the cache stage reused an existing value. |
 | `cache_path` | string | cache stages | Cache file path used by the stage. |
-| `failure_kind` | string | `run_failed` | Stable failure class such as `manifest_parse`, `io`, `json`, `graph_validation`, `unknown_stage`, `stage_execution`, `backend`, `config`, or `not_implemented`. |
+| `failure_kind` | string | `run_failed` | Stable failure class. Current values are `manifest_parse`, `io`, `json`, `graph_validation`, `unknown_stage`, `timeout`, `http`, `stage_execution`, `backend`, `config`, and `not_implemented`. New values are additive compatibility changes. |
 | `failure_message` | string | `run_failed` | Stable safe summary for the failure class. It does not include raw prompts, secrets, tool bodies, backend payloads, or provider response bodies. |
 
 ## Example Event

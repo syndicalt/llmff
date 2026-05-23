@@ -35,7 +35,21 @@
     "output_path": { "type": "string" },
     "cache_hit": { "type": "boolean" },
     "cache_path": { "type": "string" },
-    "failure_kind": { "type": "string" },
+    "failure_kind": {
+      "enum": [
+        "manifest_parse",
+        "io",
+        "json",
+        "graph_validation",
+        "unknown_stage",
+        "timeout",
+        "http",
+        "stage_execution",
+        "backend",
+        "config",
+        "not_implemented"
+      ]
+    },
     "failure_message": { "type": "string" }
   },
   "additionalProperties": true
