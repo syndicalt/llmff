@@ -98,6 +98,7 @@ scripts/trace-to-summary.sh "$trace"
 scripts/trace-to-metrics.sh "$trace" > /tmp/llmff-metrics.prom
 ```
 
-The summary includes stage timing, token usage, cache hit rate, and backend
-error rate. See `examples/supervision/dashboard.md` and
+The summary includes stage timing, output artifact locations, cache artifact
+locations, token usage, cache hit rate, and failure breakdowns. See
+`examples/supervision/dashboard.md` and
 `examples/supervision/supervisor.md` for complete local patterns.
