@@ -10,13 +10,17 @@ The supported baseline is:
 
 - versioned GitHub Release assets;
 - adjacent SHA-256 checksum files;
+- a machine-readable `llmff-<version>-release-trust.json` manifest generated
+  from the staged release assets;
 - local package smoke tests before release publication;
 - package-manager metadata that pins immutable release URLs and expected
   SHA-256 digests;
 - release docs that accurately describe unsigned installers.
 
-This baseline is enough for early package-manager metadata readiness. It is not
-the same as signed supply-chain provenance or OS-trusted installer identity.
+This baseline is enough for early package-manager metadata readiness. The trust
+manifest records asset names, sizes, SHA-256 digests, checksum sidecar
+relationships, and the current checksum-only posture. It is not a complete
+SBOM, signed supply-chain provenance, or OS-trusted installer identity.
 
 ## Parked Signing Tracks
 
@@ -42,7 +46,8 @@ postures and document it in the release checklist:
 - Generate SBOM and provenance artifacts in CI, publish them next to release
   assets, and verify their presence after publication.
 - Keep SBOM and provenance parked, explicitly state that the package-manager
-  channel relies on release checksums only, and record the follow-up work before
+  channel relies on release checksums plus
+  `llmff-<version>-release-trust.json`, and record the follow-up work before
   broad announcement.
 
 A generated SBOM/provenance lane must specify:
@@ -54,7 +59,10 @@ A generated SBOM/provenance lane must specify:
 - recovery steps when an artifact is missing or stale.
 
 Until that lane exists, package-manager publication can proceed only when the
-maintainers accept the checksum-only posture for that specific channel.
+maintainers accept the checksum-only posture for that specific channel. The
+release workflow generates `llmff-<version>-release-trust.json` before upload,
+and `scripts/check-release-assets.sh <tag>` verifies that published release
+assets include it.
 
 ## Channel Trust Requirements
 

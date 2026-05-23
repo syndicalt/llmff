@@ -330,8 +330,10 @@ Goal: make installation, verification, and upgrades predictable.
 
 - Keep GitHub Release assets, checksums, and local release verification as the
   default supported distribution lane.
-- Generate SBOM/provenance artifacts in CI if release adoption justifies the
-  additional support commitment.
+- Release publication now generates `llmff-<version>-release-trust.json` from
+  staged assets so checksum-only trust posture is machine-readable. Full
+  SBOM/provenance artifacts remain a future support commitment if release
+  adoption justifies them.
 - Keep Homebrew, Scoop, winget, and AUR metadata support-ready but unpublished
   until maintainers explicitly decide each channel is supportable.
 - Design signed apt repository metadata before documenting apt repository
