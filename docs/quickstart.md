@@ -90,7 +90,8 @@ llmff inspect examples/json-repair.yaml --format json
 
 The report includes the manifest hash, resolved inputs and outputs, execution
 stage order, model/backend aliases, per-stage capability constraints, plugin
-directories, stdout ownership, and default execution controls.
+directories, stdout ownership, artifact paths, checkpoint/resume intent, and
+the requested default execution controls.
 
 ## 4. Run A One-Line Pipeline
 

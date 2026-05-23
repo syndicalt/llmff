@@ -186,7 +186,15 @@
     },
     "execution": {
       "type": "object",
-      "required": ["scheduler", "stdout"],
+      "required": [
+        "scheduler",
+        "max_concurrency",
+        "default_timeout_ms",
+        "default_retry",
+        "checkpoint",
+        "stdout",
+        "artifacts"
+      ],
       "properties": {
         "scheduler": {
           "enum": ["sequential", "parallel"]
@@ -198,13 +206,70 @@
           "type": ["integer", "null"]
         },
         "default_retry": {
-          "type": "object"
+          "type": "object",
+          "required": ["attempts", "backoff_ms"],
+          "properties": {
+            "attempts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "backoff_ms": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
         },
         "checkpoint": {
-          "type": "object"
+          "type": "object",
+          "required": ["enabled", "resume", "path", "resume_path"],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "resume": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": ["string", "null"]
+            },
+            "resume_path": {
+              "type": ["string", "null"]
+            }
+          },
+          "additionalProperties": true
         },
         "stdout": {
-          "type": "object"
+          "type": "object",
+          "required": ["events", "stream_stage", "manifest_outputs"],
+          "properties": {
+            "events": {
+              "type": "boolean"
+            },
+            "stream_stage": {
+              "type": "boolean"
+            },
+            "manifest_outputs": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": true
+        },
+        "artifacts": {
+          "type": "object",
+          "required": ["trace", "events", "stream_stage"],
+          "properties": {
+            "trace": {
+              "type": ["string", "null"]
+            },
+            "events": {
+              "type": ["string", "null"]
+            },
+            "stream_stage": {
+              "type": ["string", "null"]
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": true

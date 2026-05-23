@@ -2944,6 +2944,111 @@ fn inspect_json_reports_reproducible_execution_contract() {
 }
 
 #[test]
+fn inspect_json_reports_requested_execution_options() {
+    let root = workspace_root();
+    let checkpoint = root.join("target/inspect-checkpoint.json");
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "inspect",
+            "examples/json-repair.yaml",
+            "--format",
+            "json",
+            "--parallel",
+            "--max-concurrency",
+            "4",
+            "--timeout-ms",
+            "30000",
+            "--retry-attempts",
+            "3",
+            "--retry-backoff-ms",
+            "250",
+            "--checkpoint",
+            checkpoint.to_str().unwrap(),
+            "--resume",
+            checkpoint.to_str().unwrap(),
+            "--events",
+            "-",
+            "--trace",
+            "target/inspect-trace.jsonl",
+        ])
+        .current_dir(&root)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let report: serde_json::Value =
+        serde_json::from_slice(&output).expect("inspect report should be valid JSON");
+
+    assert_eq!(report["execution"]["scheduler"], "parallel");
+    assert_eq!(report["execution"]["max_concurrency"], 4);
+    assert_eq!(report["execution"]["default_timeout_ms"], 30000);
+    assert_eq!(report["execution"]["default_retry"]["attempts"], 3);
+    assert_eq!(report["execution"]["default_retry"]["backoff_ms"], 250);
+    assert_eq!(report["execution"]["checkpoint"]["enabled"], true);
+    assert_eq!(report["execution"]["checkpoint"]["resume"], true);
+    assert_eq!(
+        report["execution"]["checkpoint"]["path"],
+        checkpoint.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        report["execution"]["checkpoint"]["resume_path"],
+        checkpoint.to_string_lossy().as_ref()
+    );
+    assert_eq!(report["execution"]["stdout"]["events"], true);
+    assert_eq!(report["execution"]["stdout"]["stream_stage"], false);
+    assert_eq!(
+        report["execution"]["artifacts"]["trace"],
+        "target/inspect-trace.jsonl"
+    );
+}
+
+#[test]
+fn inspect_rejects_requested_stdout_conflicts() {
+    let manifest = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        manifest.path(),
+        r#"
+version: 1
+inputs:
+  prompt:
+    path: "-"
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: write_answer
+    op: write
+    from: load_prompt
+    path: "-"
+outputs:
+  final:
+    from: write_answer
+    path: "-"
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "inspect",
+            manifest.path().to_str().unwrap(),
+            "--format",
+            "json",
+            "--events",
+            "-",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "events cannot stream to stdout while manifest outputs write to stdout",
+        ));
+}
+
+#[test]
 fn inspect_accepts_plugin_stage_with_plugin_dir() {
     let dir = tempfile::tempdir().unwrap();
     let plugin_dir = dir.path().join("plugins");
