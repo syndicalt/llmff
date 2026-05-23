@@ -1,5 +1,7 @@
 # llmff
 
+![llmff: FFmpeg-shaped pipelines for LLM workflows](docs/assets/llmff-hero.png)
+
 `llmff` is an FFmpeg-shaped command-line and library tool for LLM inference pipelines. The MVP focuses on a typed pipeline graph, reproducible YAML manifests, backend adapters, local retrieval, JSON validation and repair, and JSONL traces.
 
 ## Start Here
