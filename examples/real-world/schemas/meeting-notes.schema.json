@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "required": ["summary", "decisions", "actions"],
+  "properties": {
+    "summary": { "type": "string" },
+    "decisions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["owner", "task"],
+        "properties": {
+          "owner": { "type": "string" },
+          "task": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

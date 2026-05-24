@@ -1,0 +1,23 @@
+version: 1
+inputs:
+  issue:
+    path: inputs/support-issue.txt
+graph:
+  - id: load_issue
+    op: load
+    input: issue
+  - id: triage
+    op: infer
+    from: load_issue
+    model: mock:good
+    temperature: 0.0
+    max_tokens: 256
+    response_format: json
+  - id: validate_triage
+    op: validate_json
+    from: triage
+    schema_path: schemas/issue-triage.schema.json
+outputs:
+  final:
+    from: validate_triage
+    path: outputs/issue-triage.json

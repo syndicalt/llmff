@@ -1,0 +1,24 @@
+version: 1
+inputs:
+  item:
+    path: inputs/batch-items.jsonl
+graph:
+  - id: load_item
+    op: load
+    input: item
+    input_format: json
+  - id: classify
+    op: infer
+    from: load_item
+    model: mock:good
+    temperature: 0.0
+    max_tokens: 256
+    response_format: json
+  - id: validate_classification
+    op: validate_json
+    from: classify
+    schema_path: schemas/classification.schema.json
+outputs:
+  final:
+    from: validate_classification
+    path: outputs/batch-classification.json

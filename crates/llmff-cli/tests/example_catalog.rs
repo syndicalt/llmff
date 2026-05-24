@@ -26,12 +26,45 @@ const PIPELINE_TEMPLATES: &[(&str, &str)] = &[
     ),
 ];
 
+const REAL_WORLD_EXAMPLES: &[(&str, &str)] = &[
+    ("Issue Triage", "examples/real-world/issue-triage.yaml"),
+    ("Meeting Notes", "examples/real-world/meeting-notes.yaml"),
+    ("Local RAG Answer", "examples/real-world/rag-answer.yaml"),
+    (
+        "Batch Classification",
+        "examples/real-world/batch-classification.yaml",
+    ),
+];
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|path| path.parent())
         .expect("CLI crate should live under crates/llmff-cli")
         .to_path_buf()
+}
+
+#[test]
+fn product_spec_defines_scope_goal_and_open_items() {
+    let root = workspace_root();
+    let spec = root.join("SPEC.md");
+    assert!(spec.exists(), "missing root SPEC.md");
+
+    let source = std::fs::read_to_string(&spec).expect("SPEC.md should be readable");
+    for required in [
+        "# llmff Specification",
+        "Current Implementation",
+        "Product Goal",
+        "Boundary With Agent Orchestration",
+        "Production-Readiness Status",
+        "Open Functionality Items",
+        "Distribution And Trust Items",
+        "Real-World Example Roadmap",
+        "not a full agent framework",
+        "bounded execution tool",
+    ] {
+        assert!(source.contains(required), "SPEC.md should cover {required}");
+    }
 }
 
 #[test]
@@ -85,6 +118,130 @@ fn pipeline_library_catalog_is_documented_and_inspectable_offline() {
             library_source.contains(required_note),
             "pipeline docs should explain: {required_note}"
         );
+    }
+}
+
+#[test]
+fn real_world_examples_are_documented_and_inspectable_offline() {
+    let root = workspace_root();
+    let examples_docs = root.join("examples/README.md");
+    let examples_source =
+        std::fs::read_to_string(&examples_docs).expect("README should be readable");
+
+    for (name, manifest) in REAL_WORLD_EXAMPLES {
+        assert!(
+            root.join(manifest).exists(),
+            "missing real-world example {manifest}"
+        );
+        assert!(
+            examples_source.contains(&format!("### {name}")),
+            "examples README should document {name}"
+        );
+        assert!(
+            examples_source.contains(&format!("llmff inspect {manifest}")),
+            "examples README should include inspect command for {manifest}"
+        );
+        assert!(
+            examples_source.contains(&format!("llmff run {manifest}")),
+            "examples README should include run command for {manifest}"
+        );
+
+        Command::cargo_bin("llmff")
+            .unwrap()
+            .args(["inspect", root.join(manifest).to_str().unwrap()])
+            .assert()
+            .success();
+    }
+}
+
+#[test]
+fn real_world_examples_run_with_mock_backends() {
+    let root = workspace_root();
+    let output_dir = root.join("examples/real-world/outputs");
+
+    let issue_output = output_dir.join("issue-triage.json");
+    let meeting_output = output_dir.join("meeting-notes.json");
+    let rag_output = output_dir.join("rag-answer.txt");
+    for output in [&issue_output, &meeting_output, &rag_output] {
+        let _ = std::fs::remove_file(output);
+    }
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .env(
+            "LLMFF_MOCK_GOOD_RESPONSE",
+            r#"{"category":"operations","priority":"high","summary":"Nightly invoice export times out before finance close.","recommended_action":"Escalate to the job owner and provide a same-day workaround."}"#,
+        )
+        .args([
+            "run",
+            root.join("examples/real-world/issue-triage.yaml")
+                .to_str()
+                .unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(issue_output.exists(), "issue triage should write output");
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .env(
+            "LLMFF_MOCK_GOOD_RESPONSE",
+            r#"{"summary":"The team kept llmff focused on bounded execution.","decisions":["llmff remains an execution substrate."],"actions":[{"owner":"Dana","task":"Draft production examples."}]}"#,
+        )
+        .args([
+            "run",
+            root.join("examples/real-world/meeting-notes.yaml")
+                .to_str()
+                .unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(meeting_output.exists(), "meeting notes should write output");
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .env(
+            "LLMFF_MOCK_GOOD_RESPONSE",
+            "Use llmff as a bounded subprocess with explicit artifacts.",
+        )
+        .args([
+            "run",
+            root.join("examples/real-world/rag-answer.yaml")
+                .to_str()
+                .unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(rag_output.exists(), "RAG answer should write output");
+
+    let batch_output = tempfile::tempdir().unwrap();
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .env(
+            "LLMFF_MOCK_GOOD_RESPONSE",
+            r#"{"label":"support","confidence":0.91,"rationale":"The item asks for operational guidance."}"#,
+        )
+        .args([
+            "run",
+            "--batch-input",
+            root.join("examples/real-world/inputs/batch-items.jsonl")
+                .to_str()
+                .unwrap(),
+            "--batch-output-dir",
+            batch_output.path().to_str().unwrap(),
+            root.join("examples/real-world/batch-classification.yaml")
+                .to_str()
+                .unwrap(),
+        ])
+        .assert()
+        .success();
+    assert!(
+        batch_output.path().join("batch-report.jsonl").exists(),
+        "batch classification should write a batch report"
+    );
+
+    for output in [issue_output, meeting_output, rag_output] {
+        let _ = std::fs::remove_file(output);
     }
 }
 

@@ -1,0 +1,23 @@
+version: 1
+inputs:
+  notes:
+    path: inputs/meeting-notes.txt
+graph:
+  - id: load_notes
+    op: load
+    input: notes
+  - id: extract_decisions
+    op: infer
+    from: load_notes
+    model: mock:good
+    temperature: 0.0
+    max_tokens: 512
+    response_format: json
+  - id: validate_notes
+    op: validate_json
+    from: extract_decisions
+    schema_path: schemas/meeting-notes.schema.json
+outputs:
+  final:
+    from: validate_notes
+    path: outputs/meeting-notes.json

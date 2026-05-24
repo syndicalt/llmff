@@ -1,0 +1,6 @@
+May 24 planning notes:
+
+The team agreed to keep llmff focused on bounded pipeline execution and leave
+agent planning to orchestration hosts. Dana will draft production examples.
+Ravi will review provider smoke expectations. The package-manager channels
+remain parked until maintainers decide they are support-ready.
