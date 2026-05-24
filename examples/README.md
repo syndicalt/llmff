@@ -174,74 +174,145 @@ the pipeline library doc explains exactly what they do.
 
 ## Real-World Workflows
 
-Production-shaped examples live in `examples/real-world/`. They use deterministic
-mock backends by default, so they are safe for local testing, CI checks, and
-agent-supervisor smoke runs without provider credentials.
+Production-shaped examples live in `examples/real-world/`. They are offline mock
+examples by default: each manifest uses deterministic `mock:*` model aliases, so
+the commands are safe for local testing, CI checks, and agent-supervisor smoke
+runs without provider credentials.
+
+To adapt any workflow to a real provider, keep the same pipeline shape and change
+the manifest model alias plus runtime backend registration. For example, replace
+`model: mock:good` with a registered provider alias, then run with flags such as
+`--backend openai=https://api.openai.com/v1 --api-key-env openai=OPENAI_API_KEY`
+or `--ollama ollama=http://localhost:11434`.
+
+For a production-shaped subprocess wrapper, run
+[`examples/real-world/supervisor.py`](real-world/supervisor.py). It inspects the
+issue-triage manifest, writes trace and event artifacts, preserves the `llmff`
+exit code, and verifies the declared output artifact.
 
 ### Issue Triage
 
-Classify a support issue into a structured triage record:
+Use `examples/real-world/issue-triage.yaml` when you want to turn an inbound
+support issue into a structured category, priority, summary, and next action.
+
+Inspect:
 
 ```bash
 llmff inspect examples/real-world/issue-triage.yaml
+```
+
+Run:
+
+```bash
 LLMFF_MOCK_GOOD_RESPONSE='{"category":"operations","priority":"high","summary":"Nightly invoice export times out before finance close.","recommended_action":"Escalate to the job owner, collect trace artifacts, and provide a same-day workaround."}' \
 llmff run examples/real-world/issue-triage.yaml
 ```
 
-Output:
+Expected output artifact:
 
 ```text
 examples/real-world/outputs/issue-triage.json
 ```
 
+Cleanup:
+
+```bash
+rm -f examples/real-world/outputs/issue-triage.json
+```
+
 ### Meeting Notes
 
-Summarize notes, extract decisions, and produce action items:
+Use `examples/real-world/meeting-notes.yaml` when you want meeting notes
+summarized into a short recap, decisions, and owner-assigned action items.
+
+Inspect:
 
 ```bash
 llmff inspect examples/real-world/meeting-notes.yaml
+```
+
+Run:
+
+```bash
 LLMFF_MOCK_GOOD_RESPONSE='{"summary":"The team kept llmff focused on bounded execution and deferred package-manager publication.","decisions":["llmff remains an execution substrate, not an agent framework."],"actions":[{"owner":"Dana","task":"Draft production examples."},{"owner":"Ravi","task":"Review provider smoke expectations."}]}' \
 llmff run examples/real-world/meeting-notes.yaml
 ```
 
-Output:
+Expected output artifact:
 
 ```text
 examples/real-world/outputs/meeting-notes.json
 ```
 
+Cleanup:
+
+```bash
+rm -f examples/real-world/outputs/meeting-notes.json
+```
+
 ### Local RAG Answer
 
-Answer a question from local documents with retrieval and reranking:
+Use `examples/real-world/rag-answer.yaml` when you want to answer a question
+from checked-in local documents using retrieval, reranking, and a final answer
+step.
+
+Inspect:
 
 ```bash
 llmff inspect examples/real-world/rag-answer.yaml
+```
+
+Run:
+
+```bash
 LLMFF_MOCK_GOOD_RESPONSE='Use llmff as a bounded subprocess: inspect first, run with explicit artifacts, keep events and traces as metadata, and let the supervisor own retry policy.' \
 llmff run examples/real-world/rag-answer.yaml
 ```
 
-Output:
+Expected output artifact:
 
 ```text
 examples/real-world/outputs/rag-answer.txt
 ```
 
+Cleanup:
+
+```bash
+rm -f examples/real-world/outputs/rag-answer.txt
+```
+
 ### Batch Classification
 
-Classify line-delimited work items with isolated item outputs:
+Use `examples/real-world/batch-classification.yaml` when you want to classify
+line-delimited work items and write isolated per-item batch results.
+
+Inspect:
 
 ```bash
 llmff inspect examples/real-world/batch-classification.yaml
+```
+
+Run:
+
+```bash
 LLMFF_MOCK_GOOD_RESPONSE='{"label":"support","confidence":0.91,"rationale":"The item asks for operational guidance."}' \
 llmff run examples/real-world/batch-classification.yaml \
   --batch-input examples/real-world/inputs/batch-items.jsonl \
-  --batch-output-dir examples/real-world/outputs/batch-items
+  --batch-output-dir "$PWD/examples/real-world/outputs/batch-items"
 ```
 
-Output:
+Expected output artifact:
 
 ```text
 examples/real-world/outputs/batch-items/batch-report.jsonl
+```
+
+Cleanup:
+
+```bash
+rm -rf examples/real-world/outputs/batch-items/items \
+  examples/real-world/outputs/batch-items/inputs \
+  examples/real-world/outputs/batch-items/batch-report.jsonl
 ```
 
 ## Inline Smoke Examples
