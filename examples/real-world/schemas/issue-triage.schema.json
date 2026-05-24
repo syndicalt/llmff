@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "required": ["category", "priority", "summary", "recommended_action"],
+  "properties": {
+    "category": { "type": "string" },
+    "priority": { "type": "string" },
+    "summary": { "type": "string" },
+    "recommended_action": { "type": "string" }
+  },
+  "additionalProperties": false
+}

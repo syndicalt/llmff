@@ -172,6 +172,78 @@ Copy-this-and-run-it commands for every template are documented in
 cost/latency examples are simulations built from currently available stages;
 the pipeline library doc explains exactly what they do.
 
+## Real-World Workflows
+
+Production-shaped examples live in `examples/real-world/`. They use deterministic
+mock backends by default, so they are safe for local testing, CI checks, and
+agent-supervisor smoke runs without provider credentials.
+
+### Issue Triage
+
+Classify a support issue into a structured triage record:
+
+```bash
+llmff inspect examples/real-world/issue-triage.yaml
+LLMFF_MOCK_GOOD_RESPONSE='{"category":"operations","priority":"high","summary":"Nightly invoice export times out before finance close.","recommended_action":"Escalate to the job owner, collect trace artifacts, and provide a same-day workaround."}' \
+llmff run examples/real-world/issue-triage.yaml
+```
+
+Output:
+
+```text
+examples/real-world/outputs/issue-triage.json
+```
+
+### Meeting Notes
+
+Summarize notes, extract decisions, and produce action items:
+
+```bash
+llmff inspect examples/real-world/meeting-notes.yaml
+LLMFF_MOCK_GOOD_RESPONSE='{"summary":"The team kept llmff focused on bounded execution and deferred package-manager publication.","decisions":["llmff remains an execution substrate, not an agent framework."],"actions":[{"owner":"Dana","task":"Draft production examples."},{"owner":"Ravi","task":"Review provider smoke expectations."}]}' \
+llmff run examples/real-world/meeting-notes.yaml
+```
+
+Output:
+
+```text
+examples/real-world/outputs/meeting-notes.json
+```
+
+### Local RAG Answer
+
+Answer a question from local documents with retrieval and reranking:
+
+```bash
+llmff inspect examples/real-world/rag-answer.yaml
+LLMFF_MOCK_GOOD_RESPONSE='Use llmff as a bounded subprocess: inspect first, run with explicit artifacts, keep events and traces as metadata, and let the supervisor own retry policy.' \
+llmff run examples/real-world/rag-answer.yaml
+```
+
+Output:
+
+```text
+examples/real-world/outputs/rag-answer.txt
+```
+
+### Batch Classification
+
+Classify line-delimited work items with isolated item outputs:
+
+```bash
+llmff inspect examples/real-world/batch-classification.yaml
+LLMFF_MOCK_GOOD_RESPONSE='{"label":"support","confidence":0.91,"rationale":"The item asks for operational guidance."}' \
+llmff run examples/real-world/batch-classification.yaml \
+  --batch-input examples/real-world/inputs/batch-items.jsonl \
+  --batch-output-dir examples/real-world/outputs/batch-items
+```
+
+Output:
+
+```text
+examples/real-world/outputs/batch-items/batch-report.jsonl
+```
+
 ## Inline Smoke Examples
 
 Run a one-line mock pipeline:

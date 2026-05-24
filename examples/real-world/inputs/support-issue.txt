@@ -1,0 +1,4 @@
+Customer reports that the nightly invoice export failed after timing out.
+The issue affects the finance team before Monday close. They retried once and
+the job failed again after five minutes. No data loss is reported, but the
+customer needs a workaround today.

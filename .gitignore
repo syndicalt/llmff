@@ -4,3 +4,6 @@ dist/
 .codex/
 .env.local
 .eventloom/
+CODEX.md
+EXAMPLES.md
+SKILL.md

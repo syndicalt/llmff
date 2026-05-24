@@ -1,0 +1,31 @@
+version: 1
+inputs:
+  question:
+    path: inputs/rag-question.txt
+graph:
+  - id: load_question
+    op: load
+    input: question
+  - id: retrieve_context
+    op: retrieve
+    from: load_question
+    documents:
+      - docs/agent-supervision.md
+      - docs/release-trust.md
+    strategy: lexical
+    top_k: 2
+  - id: rerank_context
+    op: rerank
+    from: retrieve_context
+    strategy: embedding
+    top_k: 1
+  - id: answer
+    op: infer
+    from: rerank_context
+    model: mock:good
+    temperature: 0.1
+    max_tokens: 384
+outputs:
+  final:
+    from: answer
+    path: outputs/rag-answer.txt
