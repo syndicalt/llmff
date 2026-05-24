@@ -16,6 +16,7 @@ SCHEMAS = {
     "plugin_validation_report": ROOT
     / "docs/schemas/plugin-validation-report-v1.schema.json",
     "inspect_report": ROOT / "docs/schemas/inspect-report-v1.schema.json",
+    "run_result": ROOT / "docs/schemas/run-result-v1.schema.json",
 }
 
 FAILURE_KINDS = ROOT / "docs/schemas/failure-kinds-v1.json"
@@ -27,6 +28,7 @@ SCHEMA_IDS = {
     "plugin": "plugin-manifest-v1.schema.json",
     "plugin_validation_report": "plugin-validation-report-v1.schema.json",
     "inspect_report": "inspect-report-v1.schema.json",
+    "run_result": "run-result-v1.schema.json",
 }
 
 FIXTURES = {
@@ -128,6 +130,49 @@ def main():
         report = load_json(path)
         validate_instance(schemas["inspect_report"], report)
         assert report["format_version"] == 1
+
+    validate_instance(
+        schemas["run_result"],
+        {
+            "schema_version": 1,
+            "status": "succeeded",
+            "exit_code": 0,
+            "manifest": {
+                "hash": "sha256:"
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "artifacts": {
+                "inspect": "inspect.json",
+                "trace": "trace.jsonl",
+                "events": "events.jsonl",
+                "checkpoint": "checkpoint.json",
+            },
+            "failure": None,
+        },
+    )
+    validate_instance(
+        schemas["run_result"],
+        {
+            "schema_version": 1,
+            "status": "failed",
+            "exit_code": 20,
+            "manifest": {
+                "hash": "sha256:"
+                "1111111111111111111111111111111111111111111111111111111111111111"
+            },
+            "artifacts": {
+                "inspect": "inspect.json",
+                "trace": "trace.jsonl",
+                "events": "events.jsonl",
+                "checkpoint": "checkpoint.json",
+            },
+            "failure": {
+                "kind": "stage_execution",
+                "message": "tool command exited with status 7",
+                "retry_recommendation": "check_stage_or_input",
+            },
+        },
+    )
 
     for path in FIXTURES["event"]:
         validate_jsonl(schemas["event"], path)

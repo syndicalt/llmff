@@ -1,3 +1,4 @@
+use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use llmff_core::backend::{
     builtin_backend_families, CommandBackend, MockBackend, OllamaBackend, OpenAiCompatibleBackend,
 };
 use llmff_core::engine::{Engine, RetryPolicy, RunOptions, SchedulerMode};
+use llmff_core::error::LlmffError;
 use llmff_core::graph::Graph;
 use llmff_core::manifest::Manifest;
 use llmff_core::plugin::{
@@ -42,6 +44,8 @@ enum Command {
         trace: Option<PathBuf>,
         #[arg(long = "events")]
         events: Option<PathBuf>,
+        #[arg(long = "run-dir")]
+        run_dir: Option<PathBuf>,
         #[arg(long)]
         parallel: bool,
         #[arg(long = "max-concurrency")]
@@ -215,6 +219,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             graph,
             trace,
             events,
+            run_dir,
             parallel,
             max_concurrency,
             timeout_ms,
@@ -238,6 +243,7 @@ pub async fn run(cli: Cli) -> Result<()> {
                 graph,
                 trace,
                 events,
+                run_dir,
                 parallel,
                 max_concurrency,
                 timeout_ms,
@@ -355,14 +361,14 @@ pub async fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct LoadedManifest {
     manifest: Manifest,
     cwd: PathBuf,
     source: ManifestSource,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ManifestSource {
     kind: &'static str,
     path: Option<PathBuf>,
@@ -1306,6 +1312,7 @@ async fn run_pipeline(
     inline_graph: Option<String>,
     trace: Option<PathBuf>,
     events: Option<PathBuf>,
+    run_dir: Option<PathBuf>,
     parallel: bool,
     max_concurrency: Option<usize>,
     timeout_ms: Option<u64>,
@@ -1323,10 +1330,59 @@ async fn run_pipeline(
     api_key_env: Vec<String>,
     api_key: Vec<String>,
 ) -> Result<()> {
-    let loaded = load_pipeline_manifest(manifest_path, input_path, inline_graph)?;
-    let manifest = loaded.manifest;
-    let cwd = loaded.cwd;
-    let engine = build_engine(backend, ollama, api_key_env, api_key, &plugin_dir)?;
+    if run_dir.is_some() && (trace.is_some() || events.is_some() || checkpoint.is_some()) {
+        anyhow::bail!(
+            "--run-dir owns trace, events, and checkpoint paths; do not combine it with --trace, --events, or --checkpoint"
+        );
+    }
+    if run_dir.is_some() && (batch_input.is_some() || batch_output_dir.is_some()) {
+        anyhow::bail!("--run-dir cannot be used with batch mode yet");
+    }
+    if max_concurrency == Some(0) {
+        anyhow::bail!("max-concurrency must be greater than 0");
+    }
+    if timeout_ms == Some(0) {
+        anyhow::bail!("timeout-ms must be greater than 0");
+    }
+    if retry_attempts == Some(0) {
+        anyhow::bail!("retry-attempts must be greater than 0");
+    }
+
+    let run_dir_artifacts = run_dir
+        .as_ref()
+        .map(|path| RunDirArtifacts::new(path))
+        .transpose()?;
+    let failure_manifest_bytes =
+        manifest_bytes_for_failure(manifest_path.as_ref(), inline_graph.as_ref());
+    let loaded = match load_pipeline_manifest(manifest_path, input_path, inline_graph) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            if let Some(artifacts) = run_dir_artifacts.as_ref() {
+                let summary =
+                    run_result_summary_for_error(&failure_manifest_bytes, artifacts, &error);
+                write_json_file(&artifacts.result_path, &summary)?;
+            }
+            return Err(error);
+        }
+    };
+    let manifest = loaded.manifest.clone();
+    let cwd = loaded.cwd.clone();
+    let backend_args = backend.clone();
+    let ollama_args = ollama.clone();
+    let engine = match build_engine(backend, ollama, api_key_env, api_key, &plugin_dir) {
+        Ok(engine) => engine,
+        Err(error) => {
+            if let Some(artifacts) = run_dir_artifacts.as_ref() {
+                let summary = run_result_summary_for_error(
+                    loaded.source.content.as_bytes(),
+                    artifacts,
+                    &error,
+                );
+                write_json_file(&artifacts.result_path, &summary)?;
+            }
+            return Err(error);
+        }
+    };
     if batch_input.is_some() || batch_output_dir.is_some() {
         return run_batch_pipeline(
             manifest,
@@ -1360,16 +1416,66 @@ async fn run_pipeline(
             .values()
             .any(|output| output.path.as_str() == "-")
     {
-        anyhow::bail!("stream-stage cannot write to stdout while manifest outputs write to stdout");
+        let error = anyhow::anyhow!(
+            "stream-stage cannot write to stdout while manifest outputs write to stdout"
+        );
+        if let Some(artifacts) = run_dir_artifacts.as_ref() {
+            let summary =
+                run_result_summary_for_error(loaded.source.content.as_bytes(), artifacts, &error);
+            write_json_file(&artifacts.result_path, &summary)?;
+        }
+        return Err(error);
     }
-    if max_concurrency == Some(0) {
-        anyhow::bail!("max-concurrency must be greater than 0");
-    }
-    if timeout_ms == Some(0) {
-        anyhow::bail!("timeout-ms must be greater than 0");
-    }
-    if retry_attempts == Some(0) {
-        anyhow::bail!("retry-attempts must be greater than 0");
+    let trace = trace.or_else(|| {
+        run_dir_artifacts
+            .as_ref()
+            .map(|artifacts| artifacts.trace_path.clone())
+    });
+    let events = events.or_else(|| {
+        run_dir_artifacts
+            .as_ref()
+            .map(|artifacts| artifacts.events_path.clone())
+    });
+    let checkpoint = checkpoint.or_else(|| {
+        run_dir_artifacts
+            .as_ref()
+            .map(|artifacts| artifacts.checkpoint_path.clone())
+    });
+    if let Some(artifacts) = run_dir_artifacts.as_ref() {
+        let graph = match engine.validate_manifest_with_plugin_dirs(manifest.clone(), &plugin_dir) {
+            Ok(graph) => graph,
+            Err(error) => {
+                let summary = run_result_summary_for_llmff_error(
+                    loaded.source.content.as_bytes(),
+                    artifacts,
+                    Some(&error),
+                );
+                write_json_file(&artifacts.result_path, &summary)?;
+                return Err(error.into());
+            }
+        };
+        let inspect_options = InspectExecutionOptions::new(
+            trace.clone(),
+            events.clone(),
+            parallel,
+            max_concurrency,
+            timeout_ms,
+            retry_attempts,
+            retry_backoff_ms,
+            checkpoint.clone(),
+            resume.clone(),
+            stream_stage.clone(),
+        )?;
+        inspect_options.validate_stdout_ownership(&manifest)?;
+        let inspect = inspect_report(
+            loaded.clone(),
+            graph,
+            &plugin_dir,
+            &backend_args,
+            &ollama_args,
+            &inspect_options,
+        )?;
+        write_json_file(&artifacts.inspect_path, &inspect)?;
     }
 
     let stream_path = stream_stage.as_ref().map(|_| PathBuf::from("-"));
@@ -1400,10 +1506,203 @@ async fn run_pipeline(
         ..RunOptions::default()
     };
 
-    engine
+    let result = engine
         .run_manifest_with_options(manifest, &cwd, options)
-        .await?;
+        .await;
 
+    if let Some(artifacts) = run_dir_artifacts.as_ref() {
+        let summary = match &result {
+            Ok(_) => run_result_summary_for_llmff_error(
+                loaded.source.content.as_bytes(),
+                artifacts,
+                None,
+            ),
+            Err(error) => run_result_summary_for_llmff_error(
+                loaded.source.content.as_bytes(),
+                artifacts,
+                Some(error),
+            ),
+        };
+        write_json_file(&artifacts.result_path, &summary)?;
+    }
+
+    result?;
+
+    Ok(())
+}
+
+#[derive(Debug)]
+struct RunDirArtifacts {
+    inspect_path: PathBuf,
+    trace_path: PathBuf,
+    events_path: PathBuf,
+    checkpoint_path: PathBuf,
+    result_path: PathBuf,
+}
+
+impl RunDirArtifacts {
+    fn new(run_dir: &Path) -> Result<Self> {
+        fs::create_dir_all(run_dir)?;
+        Ok(Self {
+            inspect_path: run_dir.join("inspect.json"),
+            trace_path: run_dir.join("trace.jsonl"),
+            events_path: run_dir.join("events.jsonl"),
+            checkpoint_path: run_dir.join("checkpoint.json"),
+            result_path: run_dir.join("result.json"),
+        })
+    }
+}
+
+fn run_result_summary_for_llmff_error(
+    manifest_bytes: &[u8],
+    artifacts: &RunDirArtifacts,
+    error: Option<&LlmffError>,
+) -> serde_json::Value {
+    let failure = error.map(|error| {
+        serde_json::json!({
+            "kind": failure_kind(error),
+            "message": error.to_string(),
+            "retry_recommendation": retry_recommendation(error),
+        })
+    });
+    serde_json::json!({
+        "schema_version": 1,
+        "status": if error.is_some() { "failed" } else { "succeeded" },
+        "exit_code": error.map(llmff_exit_code).unwrap_or(0),
+        "manifest": {
+            "hash": format!("sha256:{}", sha256_hex(manifest_bytes)),
+        },
+        "artifacts": {
+            "inspect": relative_artifact_name(&artifacts.inspect_path),
+            "trace": relative_artifact_name(&artifacts.trace_path),
+            "events": relative_artifact_name(&artifacts.events_path),
+            "checkpoint": relative_artifact_name(&artifacts.checkpoint_path),
+        },
+        "failure": failure,
+    })
+}
+
+fn run_result_summary_for_error(
+    manifest_bytes: &[u8],
+    artifacts: &RunDirArtifacts,
+    error: &anyhow::Error,
+) -> serde_json::Value {
+    for cause in error.chain() {
+        if let Some(error) = cause.downcast_ref::<LlmffError>() {
+            return run_result_summary_for_llmff_error(manifest_bytes, artifacts, Some(error));
+        }
+    }
+
+    serde_json::json!({
+        "schema_version": 1,
+        "status": "failed",
+        "exit_code": pre_run_exit_code(error),
+        "manifest": {
+            "hash": format!("sha256:{}", sha256_hex(manifest_bytes)),
+        },
+        "artifacts": {
+            "inspect": relative_artifact_name(&artifacts.inspect_path),
+            "trace": relative_artifact_name(&artifacts.trace_path),
+            "events": relative_artifact_name(&artifacts.events_path),
+            "checkpoint": relative_artifact_name(&artifacts.checkpoint_path),
+        },
+        "failure": {
+            "kind": "config",
+            "message": error.to_string(),
+            "retry_recommendation": "do_not_retry_without_changes",
+        },
+    })
+}
+
+fn pre_run_exit_code(error: &anyhow::Error) -> i32 {
+    let message = error.to_string();
+    if [
+        "provide either manifest or --graph",
+        "stream-stage cannot write to stdout",
+        "events cannot stream to stdout",
+        "max-concurrency must be greater than 0",
+        "timeout-ms must be greater than 0",
+        "retry-attempts must be greater than 0",
+        "batch mode requires",
+        "batch mode output paths cannot contain parent directory components",
+        "expected alias=value",
+        "expected non-empty alias",
+        "expected non-empty value",
+        "--run-dir owns trace, events, and checkpoint paths",
+        "--run-dir cannot be used with batch mode yet",
+    ]
+    .iter()
+    .any(|prefix| message.starts_with(prefix))
+    {
+        2
+    } else {
+        1
+    }
+}
+
+fn manifest_bytes_for_failure(
+    manifest_path: Option<&PathBuf>,
+    inline_graph: Option<&String>,
+) -> Vec<u8> {
+    if let Some(graph) = inline_graph {
+        return graph.as_bytes().to_vec();
+    }
+    manifest_path
+        .and_then(|path| fs::read(path).ok())
+        .unwrap_or_default()
+}
+
+fn relative_artifact_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
+fn failure_kind(error: &LlmffError) -> &'static str {
+    match error {
+        LlmffError::ManifestParse(_) => "manifest_parse",
+        LlmffError::GraphValidation(_) => "graph_validation",
+        LlmffError::UnknownStage(_) => "unknown_stage",
+        LlmffError::Config(_) => "config",
+        LlmffError::StageExecution { message, .. } if message == "stage timed out" => "timeout",
+        LlmffError::StageExecution { message, .. } if message.starts_with("http tool ") => "http",
+        LlmffError::StageExecution { .. } => "stage_execution",
+        LlmffError::Backend(_) => "backend",
+        LlmffError::Io(_) => "io",
+        LlmffError::Json(_) => "json",
+        LlmffError::NotImplemented(_) => "not_implemented",
+    }
+}
+
+fn retry_recommendation(error: &LlmffError) -> &'static str {
+    match error {
+        LlmffError::Backend(_) => "retry_with_backoff",
+        LlmffError::StageExecution { .. } => "check_stage_or_input",
+        LlmffError::Io(_) => "check_filesystem",
+        _ => "do_not_retry_without_changes",
+    }
+}
+
+fn llmff_exit_code(error: &LlmffError) -> i32 {
+    match error {
+        LlmffError::ManifestParse(_)
+        | LlmffError::GraphValidation(_)
+        | LlmffError::UnknownStage(_)
+        | LlmffError::Config(_) => 10,
+        LlmffError::StageExecution { message, .. }
+            if message == "stage timed out" || message.starts_with("http tool ") =>
+        {
+            21
+        }
+        LlmffError::StageExecution { .. } => 20,
+        LlmffError::Backend(_) => 21,
+        LlmffError::Io(_) | LlmffError::Json(_) => 22,
+        LlmffError::NotImplemented(_) => 30,
+    }
+}
+
+fn write_json_file(path: &Path, value: &serde_json::Value) -> Result<()> {
+    fs::write(path, format!("{}\n", serde_json::to_string_pretty(value)?))?;
     Ok(())
 }
 

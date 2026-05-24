@@ -850,6 +850,397 @@ outputs:
 }
 
 #[test]
+fn run_dir_writes_supervisor_artifacts_and_result_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: mock:good
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .env("LLMFF_MOCK_GOOD_RESPONSE", r#"{"answer":"ok"}"#)
+        .assert()
+        .success();
+
+    assert!(run_dir.join("inspect.json").exists());
+    assert!(run_dir.join("trace.jsonl").exists());
+    assert!(run_dir.join("events.jsonl").exists());
+    assert!(run_dir.join("checkpoint.json").exists());
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("run result should be valid JSON");
+
+    assert_eq!(result["schema_version"], 1);
+    assert_eq!(result["status"], "succeeded");
+    assert_eq!(result["exit_code"], 0);
+    assert!(result["manifest"]["hash"]
+        .as_str()
+        .expect("manifest hash should be a string")
+        .starts_with("sha256:"));
+    assert_eq!(result["artifacts"]["inspect"], "inspect.json");
+    assert_eq!(result["artifacts"]["trace"], "trace.jsonl");
+    assert_eq!(result["artifacts"]["events"], "events.jsonl");
+    assert_eq!(result["artifacts"]["checkpoint"], "checkpoint.json");
+    assert_eq!(result["failure"], serde_json::Value::Null);
+}
+
+#[test]
+fn run_dir_writes_failed_result_summary_for_supervisors() {
+    let dir = tempfile::tempdir().unwrap();
+    let tool = dir.path().join("fail-tool");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(
+        &tool,
+        r#"#!/bin/sh
+cat >/dev/null
+printf 'tool failed\n' >&2
+exit 7
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&tool).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+    }
+    std::fs::set_permissions(&tool, permissions).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: "-"
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: call_tool
+    op: tool
+    from: load_prompt
+    command: [{}]
+outputs:
+  final:
+    from: call_tool
+    path: "-"
+"#,
+            tool.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .write_stdin("payload")
+        .assert()
+        .code(20)
+        .stderr(predicate::str::contains("tool command exited with status"));
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("failed run result should be valid JSON");
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["exit_code"], 20);
+    assert_eq!(result["failure"]["kind"], "stage_execution");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "check_stage_or_input"
+    );
+    assert!(result["failure"]["message"]
+        .as_str()
+        .expect("failure message should be present")
+        .contains("tool command exited with status"));
+}
+
+#[test]
+fn run_dir_writes_result_summary_for_validation_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: missing_op
+    from: load_prompt
+outputs:
+  final:
+    from: draft
+    path: answer.json
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(10)
+        .stderr(predicate::str::contains("unknown stage operation"));
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("failed run result should be valid JSON");
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["exit_code"], 10);
+    assert_eq!(result["failure"]["kind"], "unknown_stage");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "do_not_retry_without_changes"
+    );
+}
+
+#[test]
+fn run_dir_rejects_explicit_metadata_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    let trace = dir.path().join("trace.jsonl");
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+graph:
+  - id: load_prompt
+    op: load
+outputs:
+  final:
+    from: load_prompt
+    path: "-"
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--trace",
+            trace.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "--run-dir owns trace, events, and checkpoint paths",
+        ));
+
+    assert!(!run_dir.exists());
+}
+
+#[test]
+fn run_dir_writes_result_summary_for_manifest_parse_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&manifest, "version: [not valid").unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(10)
+        .stderr(predicate::str::contains("failed to parse manifest"));
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("parse failure result should be valid JSON");
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["exit_code"], 10);
+    assert_eq!(result["failure"]["kind"], "manifest_parse");
+    assert!(result["manifest"]["hash"]
+        .as_str()
+        .expect("manifest hash should be present")
+        .starts_with("sha256:"));
+}
+
+#[test]
+fn run_dir_result_exit_code_matches_missing_manifest_exit() {
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = dir.path().join("missing.yaml");
+    let run_dir = dir.path().join("run");
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("No such file or directory"));
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("missing manifest result should be valid JSON");
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["exit_code"], 1);
+    assert_eq!(result["failure"]["kind"], "config");
+}
+
+#[test]
+fn run_dir_usage_errors_do_not_create_partial_artifact_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+graph:
+  - id: load_prompt
+    op: load
+outputs:
+  final:
+    from: load_prompt
+    path: "-"
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--timeout-ms",
+            "0",
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "timeout-ms must be greater than 0",
+        ));
+
+    assert!(!run_dir.exists());
+}
+
+#[test]
+fn run_dir_writes_result_summary_for_stdout_ownership_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: "-"
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--stream-stage",
+            "load_prompt",
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "stream-stage cannot write to stdout while manifest outputs write to stdout",
+        ));
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("stdout conflict result should be valid JSON");
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["exit_code"], 2);
+    assert_eq!(result["failure"]["kind"], "config");
+}
+
+#[test]
 fn run_accepts_parallel_scheduler_flag() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");
