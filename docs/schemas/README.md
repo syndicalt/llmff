@@ -8,6 +8,7 @@ These JSON Schemas freeze the llmff core contract at version 1:
 - `plugin-manifest-v1.schema.json`: `llmff-plugin.yaml` plugin manifests.
 - `plugin-validation-report-v1.schema.json`: JSON output from `llmff plugins validate --format json`.
 - `inspect-report-v1.schema.json`: JSON output from `llmff inspect --format json`.
+- `run-result-v1.schema.json`: `result.json` written by `llmff run --run-dir`.
 - `failure-kinds-v1.json`: stable `run_failed.failure_kind` values shared by
   lifecycle events, traces, and compatibility documentation.
 

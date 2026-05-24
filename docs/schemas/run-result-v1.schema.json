@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llmff.dev/schemas/run-result-v1.schema.json",
+  "title": "llmff run result v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "status",
+    "exit_code",
+    "manifest",
+    "artifacts",
+    "failure"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "status": {
+      "enum": [
+        "succeeded",
+        "failed"
+      ]
+    },
+    "exit_code": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "manifest": {
+      "type": "object",
+      "required": [
+        "hash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "required": [
+        "inspect",
+        "trace",
+        "events",
+        "checkpoint"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "inspect": {
+          "const": "inspect.json"
+        },
+        "trace": {
+          "const": "trace.jsonl"
+        },
+        "events": {
+          "const": "events.jsonl"
+        },
+        "checkpoint": {
+          "const": "checkpoint.json"
+        }
+      }
+    },
+    "failure": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "message",
+            "retry_recommendation"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "manifest_parse",
+                "io",
+                "json",
+                "graph_validation",
+                "unknown_stage",
+                "timeout",
+                "http",
+                "stage_execution",
+                "backend",
+                "config",
+                "not_implemented"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
+            "retry_recommendation": {
+              "enum": [
+                "retry_with_backoff",
+                "check_stage_or_input",
+                "check_filesystem",
+                "do_not_retry_without_changes"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

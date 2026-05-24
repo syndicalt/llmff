@@ -19,3 +19,13 @@ fn schema_contract_checker_passes() {
         .assert()
         .success();
 }
+
+#[test]
+fn agent_harness_conformance_checker_passes() {
+    let root = workspace_root();
+
+    Command::new(root.join("scripts/check-agent-harness-conformance.sh"))
+        .current_dir(root)
+        .assert()
+        .success();
+}
