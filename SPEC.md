@@ -1,13 +1,16 @@
 # llmff Specification
 
-This file summarizes the current implementation, product goal, boundaries, and
-open work for `llmff`.
+This is the canonical product boundary and roadmap document for `llmff`.
+
+`llmff` is a bounded FFmpeg-style execution runner for LLM inference
+pipelines. It executes declared manifests and graphs; it does not plan work,
+own memory, coordinate agents, or act as an agent framework.
 
 ## Current Implementation
 
-`llmff` is a command-line and library runner for typed LLM inference pipelines.
-It executes YAML manifests and compact inline graphs with explicit inputs,
-ordered stages, backend adapters, local retrieval and reranking, JSON
+`llmff` is currently a command-line and library runner for typed LLM inference
+pipelines. It executes YAML manifests and compact inline graphs with explicit
+inputs, ordered stages, backend adapters, local retrieval and reranking, JSON
 validation, JSON repair, tool calls, caching, batch mode, checkpoint/resume,
 JSONL traces, lifecycle events, and machine-readable inspection reports.
 
@@ -25,93 +28,95 @@ The current release line provides:
 
 ## Product Goal
 
-The goal is to make `llmff` a dependable FFmpeg-style runner for LLM inference
-pipelines: boring process semantics, explicit inputs, reproducible manifests,
-inspectable execution, local-first observability, restartable jobs, and stable
+The goal is to make `llmff` a dependable execution substrate for LLM inference
+pipelines: explicit inputs, reproducible manifests, boring process semantics,
+inspectable execution, restartable jobs, local-first observability, and stable
 machine-readable outputs.
 
-For agent systems, `llmff` should be a bounded execution tool. An agent or
-supervisor decides what work should happen, selects or writes the manifest,
-passes explicit inputs, runs `llmff`, and uses exit codes, failure kinds,
-events, traces, checkpoints, and declared artifacts to decide the next action.
+For shells, CI jobs, daemons, and agent runtimes, `llmff` should behave like a
+supervisable subprocess. A caller chooses or writes the manifest, passes
+explicit inputs, runs `llmff`, and makes follow-up decisions from exit codes,
+failure kinds, events, traces, checkpoints, and declared artifacts.
+In agent systems, that makes `llmff` a bounded execution tool rather than the
+agent host.
 
-## Boundary With Agent Orchestration
+## Supported Execution Contract
 
-`llmff` owns pipeline execution. It should answer: given this manifest or graph
-and these inputs, what ran, what artifacts were produced, and what happened?
-
-Agent orchestration systems own planning and context. OpenClaw, Hermes, or
-similar hosts should own task decomposition, memory, tool selection policy,
-multi-agent coordination, human approval, long-running control loops, global
-configuration, and retry policy at the task level.
-
-`llmff` is not a full agent framework. It should not own autonomous planning,
-workspace indexing, persistent world models, global memory, or orchestration
-loops. It should remain a clear execution substrate that those systems can
-call, observe, and supervise.
-
-## Supported Execution Model
-
-The supported production shape is:
+The supported production contract is:
 
 1. Inspect the manifest or inline graph before execution.
 2. Run the pipeline with explicit inputs and file-backed artifacts.
 3. Keep payload streams separate from metadata streams.
-4. Treat the process exit code as the final authority.
-5. Use `run_failed.failure_kind` and trace records for retry or escalation
+4. Treat the process exit code as the final authority for run success.
+5. Use additive failure kinds and trace records for retry or escalation
    decisions.
 6. Store trace, event, checkpoint, inspect, and output artifacts next to the
    supervising job record.
 
-This keeps `llmff` useful from shells, CI jobs, daemons, and agent runtimes
-without turning it into the scheduler or agent host.
+The contract is intentionally process-oriented. `llmff` owns what ran, what
+failed, what artifacts were produced, and what machine-readable evidence was
+emitted. The caller owns why the job exists and what should happen next.
 
-## Production-Readiness Status
+## Production-Readiness Criteria
 
-`llmff` is ready for early production-style internal workflows where callers
-can supervise a subprocess, pin manifests in source control, store artifacts,
-and tolerate a young provider/plugin ecosystem.
+`llmff` is production-ready for a workflow when all of the following are true:
 
-It is not yet as mature as FFmpeg. FFmpeg has decades of format coverage,
-platform hardening, packaging availability, and ecosystem expectations.
-`llmff` is still proving its contracts across real workflows, provider drift,
-plugin adoption, and release-to-release compatibility.
+- the manifest or graph is pinned, inspected, and reviewed with the calling
+  system;
+- inputs, outputs, checkpoints, traces, events, and inspect reports are stored
+  under caller-owned artifact retention;
+- the caller supervises the process, handles non-zero exit codes, and maps
+  failure kinds to retry, escalation, or terminal failure;
+- backend credentials and provider-specific limits are managed outside
+  `llmff`;
+- compatibility-sensitive consumers depend only on documented CLI, schema,
+  event, trace, artifact, and exit-code contracts;
+- live provider behavior is covered by the caller's smoke tests where provider
+  drift would affect production outcomes.
 
-The right production posture today is to use `llmff` for bounded jobs with
-clear artifact ownership, local validation, and explicit supervision.
+Today, the expected use is bounded production-style internal workflows where a
+caller can supervise subprocess execution, pin manifests in source control,
+store artifacts, and tolerate a young provider and plugin ecosystem.
 
-## Open Functionality Items
+## Explicitly Not Ready
 
-- Add more real-world examples that exercise current functionality without live
-  credentials by default.
-- Harden provider behavior through opt-in live smoke history, documented
-  provider quirks, and support tiers.
-- Improve production workflow examples for CI jobs, queue workers, scheduled
-  jobs, long-running supervisors, and failure triage.
-- Revisit manifest lockfile support only if it materially improves portability
-  beyond `inspect --format json`.
-- Grow plugin ecosystem confidence through reviewed external plugins and
-  registry promotion policy.
-- Expand local observability toward an optional OpenTelemetry bridge while
-  preserving the file-based supervision contract.
-- Prove schema, event, trace, and CLI compatibility over multiple releases.
+`llmff` is not yet as mature as FFmpeg. It has not proven decades of format
+coverage, platform hardening, distribution availability, ecosystem norms, or
+release-to-release compatibility at that scale.
 
-## Distribution And Trust Items
+The following areas are not ready to treat as fully settled production
+infrastructure:
 
-- Keep GitHub Release assets and checksums as the default supported
-  distribution lane.
-- Keep Homebrew, Scoop, winget, and AUR metadata unpublished until maintainers
-  decide each channel is support-ready.
-- Keep apt repository publication parked until signed metadata, hosting, key
-  rotation, retention, and recovery are designed.
-- Keep Windows Authenticode signing, Apple Developer ID signing, and
-  notarization parked until paid credentials and recovery procedures exist.
-- Add SBOM/provenance artifacts only when release adoption justifies the
-  additional support commitment.
+- broad provider support tiers and documented provider quirk handling;
+- long-lived compatibility proof across many releases;
+- mature external plugin review, registry promotion, and adoption practices;
+- first-class examples for every deployment shape;
+- optional OpenTelemetry integration;
+- package-manager distribution beyond GitHub Release assets;
+- signed installer, notarization, SBOM, and provenance workflows.
 
-## Real-World Example Roadmap
+## Functionality Roadmap
 
-Examples should demonstrate useful workflows with the current implementation.
+Roadmap work should strengthen the execution-runner contract before expanding
+surface area:
+
+- add more real-world examples that exercise current functionality without live
+  credentials by default;
+- harden provider behavior through opt-in live smoke history, documented
+  provider quirks, and support tiers;
+- improve production workflow examples for CI jobs, queue workers, scheduled
+  jobs, long-running supervisors, and failure triage;
+- revisit manifest lockfile support only if it materially improves portability
+  beyond `inspect --format json`;
+- grow plugin ecosystem confidence through reviewed external plugins and
+  registry promotion policy;
+- expand local observability toward an optional OpenTelemetry bridge while
+  preserving the file-based supervision contract;
+- prove schema, event, trace, and CLI compatibility over multiple releases.
+
+## Example Roadmap
+
+Examples must demonstrate useful workflows with the current implementation.
 They must be offline-runnable by default, inspectable, documented, and tied to
 validation gates.
 
@@ -125,3 +130,29 @@ The first catalog should cover:
 Future examples should be added only when they show a distinct integration
 pattern or operational behavior, not when they duplicate CLI reference
 material.
+
+## Distribution And Trust Roadmap
+
+- Keep GitHub Release assets and checksums as the default supported
+  distribution lane.
+- Keep Homebrew, Scoop, winget, and AUR metadata unpublished until maintainers
+  decide each channel is support-ready.
+- Keep apt repository publication parked until signed metadata, hosting, key
+  rotation, retention, and recovery are designed.
+- Keep Windows Authenticode signing, Apple Developer ID signing, and
+  notarization parked until paid credentials and recovery procedures exist.
+- Add SBOM/provenance artifacts only when release adoption justifies the
+  additional support commitment.
+
+## Outside llmff
+
+OpenClaw, Hermes, or another host owns orchestration concerns around `llmff`.
+Those systems should own task decomposition, planning, memory, tool selection
+policy, multi-agent coordination, human approval, long-running control loops,
+global configuration, workspace indexing, provider account policy, and
+task-level retry strategy.
+
+`llmff` must not grow autonomous planning, persistent world models, global
+memory, multi-agent loops, task schedulers, or host-level configuration
+systems. It should remain the execution runner those systems can call, observe,
+and supervise.

@@ -55,12 +55,14 @@ fn product_spec_defines_scope_goal_and_open_items() {
         "# llmff Specification",
         "Current Implementation",
         "Product Goal",
-        "Boundary With Agent Orchestration",
-        "Production-Readiness Status",
-        "Open Functionality Items",
-        "Distribution And Trust Items",
-        "Real-World Example Roadmap",
-        "not a full agent framework",
+        "Supported Execution Contract",
+        "Production-Readiness Criteria",
+        "Explicitly Not Ready",
+        "Functionality Roadmap",
+        "Example Roadmap",
+        "Distribution And Trust Roadmap",
+        "Outside llmff",
+        "agent framework",
         "bounded execution tool",
     ] {
         assert!(source.contains(required), "SPEC.md should cover {required}");
@@ -214,7 +216,10 @@ fn real_world_examples_run_with_mock_backends() {
         .success();
     assert!(rag_output.exists(), "RAG answer should write output");
 
-    let batch_output = tempfile::tempdir().unwrap();
+    let batch_output = root.join("examples/real-world/outputs/batch-items");
+    let _ = std::fs::remove_dir_all(batch_output.join("items"));
+    let _ = std::fs::remove_dir_all(batch_output.join("inputs"));
+    let _ = std::fs::remove_file(batch_output.join("batch-report.jsonl"));
     Command::cargo_bin("llmff")
         .unwrap()
         .env(
@@ -228,7 +233,7 @@ fn real_world_examples_run_with_mock_backends() {
                 .to_str()
                 .unwrap(),
             "--batch-output-dir",
-            batch_output.path().to_str().unwrap(),
+            batch_output.to_str().unwrap(),
             root.join("examples/real-world/batch-classification.yaml")
                 .to_str()
                 .unwrap(),
@@ -236,13 +241,60 @@ fn real_world_examples_run_with_mock_backends() {
         .assert()
         .success();
     assert!(
-        batch_output.path().join("batch-report.jsonl").exists(),
+        batch_output.join("batch-report.jsonl").exists(),
         "batch classification should write a batch report"
     );
 
     for output in [issue_output, meeting_output, rag_output] {
         let _ = std::fs::remove_file(output);
     }
+    let _ = std::fs::remove_dir_all(batch_output.join("items"));
+    let _ = std::fs::remove_dir_all(batch_output.join("inputs"));
+    let _ = std::fs::remove_file(batch_output.join("batch-report.jsonl"));
+}
+
+#[test]
+fn real_world_issue_triage_links_to_a_runnable_supervisor_example() {
+    let root = workspace_root();
+    let examples_readme =
+        std::fs::read_to_string(root.join("examples/README.md")).expect("examples README readable");
+    let supervisor = root.join("examples/real-world/supervisor.py");
+
+    assert!(supervisor.exists(), "missing real-world supervisor example");
+    assert!(examples_readme.contains("examples/real-world/supervisor.py"));
+
+    let temp = tempfile::tempdir().expect("tempdir should be available");
+    Command::new("python3")
+        .arg(supervisor)
+        .arg("--run-dir")
+        .arg(temp.path())
+        .current_dir(&root)
+        .env("LLMFF_BIN", assert_cmd::cargo::cargo_bin("llmff"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("inspect="))
+        .stdout(predicates::str::contains("trace="))
+        .stdout(predicates::str::contains("events="))
+        .stdout(predicates::str::contains("run_status=ok"))
+        .stdout(predicates::str::contains(
+            "output=examples/real-world/outputs/issue-triage.json",
+        ))
+        .stdout(predicates::str::contains("output_exists=true"));
+
+    assert!(
+        temp.path().join("inspect.json").exists(),
+        "supervisor should save inspect.json"
+    );
+    assert!(
+        temp.path().join("trace.jsonl").exists(),
+        "supervisor should save trace.jsonl"
+    );
+    assert!(
+        temp.path().join("events.jsonl").exists(),
+        "supervisor should save events.jsonl"
+    );
+
+    let _ = std::fs::remove_file(root.join("examples/real-world/outputs/issue-triage.json"));
 }
 
 #[test]
