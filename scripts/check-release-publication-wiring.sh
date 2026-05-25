@@ -39,4 +39,4 @@ require_text "scripts/check-release-assets.sh" 'llmff-${version}-arch.SRCINFO'
 require_text "scripts/check-release-assets.sh" 'llmff-${version}-release-trust.json'
 require_text "$readiness" "creates the GitHub Release when"
 require_text "$readiness" "the tag does not already have one"
-require_text "$readiness" "scripts/check-release-assets.sh v0.1.4"
+require_text "$readiness" "scripts/check-release-assets.sh v0.1.5"

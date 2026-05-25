@@ -7,7 +7,7 @@ Usage:
   scripts/check-macos-signing-wiring.sh
 
 Verifies that macOS signing/notarization helpers remain available, while
-v0.1.4 release artifact publication is documented as unsigned.
+v0.1.5 release artifact publication is documented as unsigned.
 USAGE
 }
 

@@ -1,20 +1,20 @@
 # GitHub Release Installation
 
 This page describes direct installation from GitHub Release assets. It is the
-current supported binary distribution lane for `llmff` v0.1.4.
+current supported binary distribution lane for `llmff` v0.1.5.
 Package-manager publication should wait until these assets have been published,
 downloaded, checksum-verified, and smoke-tested.
 
 Set the release version once:
 
 ```bash
-version=0.1.4
+version=0.1.5
 ```
 
 Download assets from the matching GitHub Release:
 
 ```text
-https://github.com/syndicalt/llmff/releases/tag/v0.1.4
+https://github.com/syndicalt/llmff/releases/tag/v0.1.5
 ```
 
 ## Checksum Verification
@@ -37,8 +37,8 @@ shasum -a 256 -c llmff-${version}-aarch64-apple-darwin.tar.gz.sha256
 On Windows PowerShell:
 
 ```powershell
-$expected = (Get-Content .\llmff-0.1.4-x86_64-pc-windows-msvc.zip.sha256).Split()[0]
-$actual = (Get-FileHash .\llmff-0.1.4-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash.ToLower()
+$expected = (Get-Content .\llmff-0.1.5-x86_64-pc-windows-msvc.zip.sha256).Split()[0]
+$actual = (Get-FileHash .\llmff-0.1.5-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash.ToLower()
 if ($actual -ne $expected) { throw "checksum mismatch" }
 ```
 
@@ -48,7 +48,7 @@ Release page and verify again.
 Maintainers can verify all published assets with:
 
 ```bash
-scripts/check-release-assets.sh v0.1.4
+scripts/check-release-assets.sh v0.1.5
 ```
 
 ## Linux x86_64 Archive
@@ -138,7 +138,7 @@ Download either the archive or the unsigned MSI:
 PowerShell archive install:
 
 ```powershell
-$version = "0.1.4"
+$version = "0.1.5"
 $zip = "llmff-$version-x86_64-pc-windows-msvc.zip"
 $expected = (Get-Content "$zip.sha256").Split()[0]
 $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
@@ -151,18 +151,18 @@ Expand-Archive $zip -DestinationPath "$env:LOCALAPPDATA\llmff" -Force
 MSI install:
 
 ```powershell
-$msi = "llmff-0.1.4-x86_64-pc-windows-msvc.msi"
+$msi = "llmff-0.1.5-x86_64-pc-windows-msvc.msi"
 $expected = (Get-Content "$msi.sha256").Split()[0]
 $actual = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower()
 if ($actual -ne $expected) { throw "checksum mismatch" }
 
-msiexec /i llmff-0.1.4-x86_64-pc-windows-msvc.msi
+msiexec /i llmff-0.1.5-x86_64-pc-windows-msvc.msi
 llmff --version
 ```
 
 ## Unsigned Installer Expectations
 
-The v0.1.4 macOS `.pkg` and Windows `.msi` installers are unsigned.
+The v0.1.5 macOS `.pkg` and Windows `.msi` installers are unsigned.
 
 - macOS: expect Gatekeeper trust prompts. Verify the `.sha256` file before
   installing. Apple Developer ID signing and notarization are planned for a
@@ -178,5 +178,5 @@ The v0.1.4 macOS `.pkg` and Windows `.msi` installers are unsigned.
 Users outside the prebuilt target set can install from source:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v0.1.4 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v0.1.5 llmff
 ```
