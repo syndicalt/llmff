@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "status": "failed",
+  "exit_code": 130,
+  "manifest": {
+    "hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "artifacts": {
+    "inspect": "inspect.json",
+    "trace": "trace.jsonl",
+    "events": "events.jsonl",
+    "checkpoint": "checkpoint.json"
+  },
+  "failure": {
+    "kind": "interrupted",
+    "message": "interrupted",
+    "retry_recommendation": "resume_with_matching_checkpoint"
+  }
+}

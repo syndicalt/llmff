@@ -1,0 +1,30 @@
+{
+  "format_version": 1,
+  "plugin": "postprocessor-strip",
+  "version": "0.1.0",
+  "category": "postprocessor",
+  "manifest": "../../examples/plugins/postprocessor-strip/llmff-plugin.yaml",
+  "promotion": {
+    "status": "promoted",
+    "support_commitment": "protocol-v1-fixture-backed",
+    "policy": "promotion-policy.md",
+    "review": "reviews/postprocessor-strip.json",
+    "reviewed_at": "2026-05-26"
+  },
+  "validation": {
+    "command": "scripts/check-plugin-fixtures.sh",
+    "manifest_checked": true,
+    "protocol_fixtures": [
+      "stage/stdin.txt",
+      "stage/stdout.txt"
+    ]
+  },
+  "trust_boundary": {
+    "sandboxed": false,
+    "filesystem_access": "stdin-stdout-only",
+    "network_access": "none",
+    "process_access": "entrypoint-shell-and-python-child",
+    "environment_access": "none-required"
+  },
+  "decision": "approved-for-registry-promotion"
+}

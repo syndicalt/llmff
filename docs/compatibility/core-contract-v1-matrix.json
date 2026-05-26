@@ -1,0 +1,186 @@
+{
+  "contract": "core-contract-v1",
+  "compatibility_policy": "additive_only",
+  "release_window": ["v0.1.3", "v0.1.4", "v0.1.5"],
+  "roadmap_items": [1, 2, 3, 4, 5, 6, 7],
+  "surfaces": ["schema", "event", "trace", "cli_json"],
+  "releases": [
+    {
+      "version": "v0.1.3",
+      "roadmap_items": [4, 5, 7],
+      "surfaces": {
+        "schema": {
+          "compatibility": "introduced",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Published core v1 schemas for manifests, events, traces, plugin manifests, plugin validation reports, and inspect reports.",
+          "evidence": [
+            "docs/release-notes/v0.1.3.md",
+            "docs/schemas/pipeline-manifest-v1.schema.json",
+            "docs/schemas/event-v1.schema.json",
+            "docs/schemas/trace-v1.schema.json",
+            "docs/schemas/plugin-manifest-v1.schema.json",
+            "docs/schemas/plugin-validation-report-v1.schema.json",
+            "docs/schemas/inspect-report-v1.schema.json",
+            "fixtures/golden/manifests/minimal-pipeline.yaml",
+            "fixtures/golden/manifests/inline-compatible-pipeline.yaml"
+          ]
+        },
+        "event": {
+          "compatibility": "introduced",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Lifecycle event JSONL contract is schema-backed and covered by success and failure golden streams.",
+          "evidence": [
+            "docs/release-notes/v0.1.3.md",
+            "docs/schemas/event-v1.schema.json",
+            "fixtures/golden/events/success.jsonl",
+            "fixtures/golden/events/failure.jsonl",
+            "docs/events.md"
+          ]
+        },
+        "trace": {
+          "compatibility": "introduced",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Trace JSONL contract is schema-backed and covered by golden stage records.",
+          "evidence": [
+            "docs/release-notes/v0.1.3.md",
+            "docs/schemas/trace-v1.schema.json",
+            "fixtures/golden/traces/success.jsonl",
+            "docs/observability.md"
+          ]
+        },
+        "cli_json": {
+          "compatibility": "introduced",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Machine-readable CLI output is represented by inspect JSON and plugin validation report schemas and fixtures.",
+          "evidence": [
+            "docs/release-notes/v0.1.3.md",
+            "docs/schemas/inspect-report-v1.schema.json",
+            "docs/schemas/plugin-validation-report-v1.schema.json",
+            "fixtures/golden/inspect/report.json",
+            "fixtures/golden/plugin-validation/valid-report.json",
+            "fixtures/golden/plugin-validation/missing-entrypoint-report.json"
+          ]
+        }
+      }
+    },
+    {
+      "version": "v0.1.4",
+      "roadmap_items": [1, 2, 3, 4, 5, 6, 7],
+      "surfaces": {
+        "schema": {
+          "compatibility": "preserved",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Roadmap-completion release preserved core schema v1 while documenting additive compatibility policy for roadmap items 1 through 7.",
+          "evidence": [
+            "docs/release-notes/v0.1.4.md",
+            "docs/compatibility/core-contract-v1.md",
+            "docs/schemas/README.md",
+            "docs/schemas/failure-kinds-v1.json"
+          ]
+        },
+        "event": {
+          "compatibility": "additive",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Execution hardening added failure classification expectations without changing existing event meanings.",
+          "evidence": [
+            "docs/release-notes/v0.1.4.md",
+            "docs/schemas/event-v1.schema.json",
+            "fixtures/golden/events/success.jsonl",
+            "fixtures/golden/events/failure.jsonl",
+            "docs/events.md"
+          ]
+        },
+        "trace": {
+          "compatibility": "additive",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Observability work preserved trace JSONL shape and keeps downstream dashboard fixtures valid.",
+          "evidence": [
+            "docs/release-notes/v0.1.4.md",
+            "docs/schemas/trace-v1.schema.json",
+            "fixtures/golden/traces/success.jsonl",
+            "docs/observability.md"
+          ]
+        },
+        "cli_json": {
+          "compatibility": "additive",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Inspect and plugin validation JSON remained the stable CLI JSON surfaces for supervisors and ecosystem tooling.",
+          "evidence": [
+            "docs/release-notes/v0.1.4.md",
+            "docs/schemas/inspect-report-v1.schema.json",
+            "docs/schemas/plugin-validation-report-v1.schema.json",
+            "fixtures/golden/inspect/report.json",
+            "fixtures/golden/plugin-validation/valid-report.json",
+            "fixtures/golden/plugin-validation/missing-entrypoint-report.json"
+          ]
+        }
+      }
+    },
+    {
+      "version": "v0.1.5",
+      "roadmap_items": [1, 2, 7],
+      "surfaces": {
+        "schema": {
+          "compatibility": "additive",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Agent harness release added run-result v1 while preserving existing core schema v1 surfaces.",
+          "evidence": [
+            "docs/release-notes/v0.1.5.md",
+            "docs/schemas/run-result-v1.schema.json",
+            "fixtures/golden/run-results/success.json",
+            "fixtures/golden/run-results/stage-failure.json",
+            "fixtures/golden/run-results/interrupted.json"
+          ]
+        },
+        "event": {
+          "compatibility": "preserved",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Run-directory artifacts preserve event JSONL as the lifecycle stream for agent supervisors.",
+          "evidence": [
+            "docs/release-notes/v0.1.5.md",
+            "docs/schemas/event-v1.schema.json",
+            "fixtures/golden/events/success.jsonl",
+            "fixtures/golden/events/failure.jsonl",
+            "docs/agent-harness-contract.md"
+          ]
+        },
+        "trace": {
+          "compatibility": "preserved",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Run-directory artifacts preserve trace JSONL as the post-run execution record.",
+          "evidence": [
+            "docs/release-notes/v0.1.5.md",
+            "docs/schemas/trace-v1.schema.json",
+            "fixtures/golden/traces/success.jsonl",
+            "docs/agent-harness-contract.md"
+          ]
+        },
+        "cli_json": {
+          "compatibility": "additive",
+          "policy": "additive_only",
+          "breaking_changes": [],
+          "notes": "Run-directory result.json joins inspect JSON and plugin validation JSON as a schema-backed CLI JSON contract.",
+          "evidence": [
+            "docs/release-notes/v0.1.5.md",
+            "docs/schemas/run-result-v1.schema.json",
+            "fixtures/golden/run-results/success.json",
+            "fixtures/golden/run-results/stage-failure.json",
+            "fixtures/golden/run-results/interrupted.json",
+            "docs/agent-harness-contract.md"
+          ]
+        }
+      }
+    }
+  ]
+}

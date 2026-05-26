@@ -1,0 +1,30 @@
+{
+  "format_version": 1,
+  "plugin": "backend-echo",
+  "version": "0.1.0",
+  "category": "model-backend",
+  "manifest": "../../examples/plugins/backend-echo/llmff-plugin.yaml",
+  "promotion": {
+    "status": "promoted",
+    "support_commitment": "protocol-v1-fixture-backed",
+    "policy": "promotion-policy.md",
+    "review": "reviews/backend-echo.json",
+    "reviewed_at": "2026-05-26"
+  },
+  "validation": {
+    "command": "scripts/check-plugin-fixtures.sh",
+    "manifest_checked": true,
+    "protocol_fixtures": [
+      "backend/infer-request.json",
+      "backend/infer-response.json"
+    ]
+  },
+  "trust_boundary": {
+    "sandboxed": false,
+    "filesystem_access": "stdin-stdout-only",
+    "network_access": "none",
+    "process_access": "entrypoint-shell",
+    "environment_access": "none-required"
+  },
+  "decision": "approved-for-registry-promotion"
+}

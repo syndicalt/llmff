@@ -2,6 +2,7 @@
   "format_version": 1,
   "plugin_protocol_version": 1,
   "generated_for": "llmff example ecosystem",
+  "promotion_policy": "promotion-policy.md",
   "plugins": [
     {
       "name": "retrieval-static",
@@ -14,7 +15,21 @@
           "name": "retrieval.static"
         }
       ],
-      "summary": "Returns deterministic JSON search results for retrieve-style pipelines."
+      "summary": "Returns deterministic JSON search results for retrieve-style pipelines.",
+      "promotion": {
+        "status": "promoted",
+        "support_commitment": "protocol-v1-fixture-backed",
+        "policy": "promotion-policy.md",
+        "review": "reviews/retrieval-static.json",
+        "reviewed_at": "2026-05-26"
+      },
+      "trust_boundary": {
+        "sandboxed": false,
+        "filesystem_access": "stdin-stdout-only",
+        "network_access": "none",
+        "process_access": "entrypoint-shell-and-python-child",
+        "environment_access": "none-required"
+      }
     },
     {
       "name": "reranker-length",
@@ -27,7 +42,21 @@
           "name": "rerank.length"
         }
       ],
-      "summary": "Orders newline-delimited candidate text by descending line length."
+      "summary": "Orders newline-delimited candidate text by descending line length.",
+      "promotion": {
+        "status": "promoted",
+        "support_commitment": "protocol-v1-fixture-backed",
+        "policy": "promotion-policy.md",
+        "review": "reviews/reranker-length.json",
+        "reviewed_at": "2026-05-26"
+      },
+      "trust_boundary": {
+        "sandboxed": false,
+        "filesystem_access": "stdin-stdout-only",
+        "network_access": "none",
+        "process_access": "entrypoint-shell-and-python-child",
+        "environment_access": "none-required"
+      }
     },
     {
       "name": "backend-echo",
@@ -40,7 +69,21 @@
           "name": "echo-backend"
         }
       ],
-      "summary": "Minimal JSON model backend."
+      "summary": "Minimal JSON model backend.",
+      "promotion": {
+        "status": "promoted",
+        "support_commitment": "protocol-v1-fixture-backed",
+        "policy": "promotion-policy.md",
+        "review": "reviews/backend-echo.json",
+        "reviewed_at": "2026-05-26"
+      },
+      "trust_boundary": {
+        "sandboxed": false,
+        "filesystem_access": "stdin-stdout-only",
+        "network_access": "none",
+        "process_access": "entrypoint-shell",
+        "environment_access": "none-required"
+      }
     },
     {
       "name": "sampler-small",
@@ -53,7 +96,21 @@
           "name": "small-deterministic"
         }
       ],
-      "summary": "Returns deterministic sampling overrides."
+      "summary": "Returns deterministic sampling overrides.",
+      "promotion": {
+        "status": "promoted",
+        "support_commitment": "protocol-v1-fixture-backed",
+        "policy": "promotion-policy.md",
+        "review": "reviews/sampler-small.json",
+        "reviewed_at": "2026-05-26"
+      },
+      "trust_boundary": {
+        "sandboxed": false,
+        "filesystem_access": "stdin-stdout-only",
+        "network_access": "none",
+        "process_access": "entrypoint-shell",
+        "environment_access": "none-required"
+      }
     },
     {
       "name": "tool-stdio-cat",
@@ -66,7 +123,21 @@
           "name": "stdio-cat"
         }
       ],
-      "summary": "Echo transport for tool-stage protocol tests."
+      "summary": "Echo transport for tool-stage protocol tests.",
+      "promotion": {
+        "status": "promoted",
+        "support_commitment": "protocol-v1-fixture-backed",
+        "policy": "promotion-policy.md",
+        "review": "reviews/tool-stdio-cat.json",
+        "reviewed_at": "2026-05-26"
+      },
+      "trust_boundary": {
+        "sandboxed": false,
+        "filesystem_access": "stdin-stdout-only",
+        "network_access": "none",
+        "process_access": "entrypoint-shell",
+        "environment_access": "none-required"
+      }
     },
     {
       "name": "postprocessor-strip",
@@ -79,7 +150,21 @@
           "name": "postprocessor.strip"
         }
       ],
-      "summary": "Implements postprocessing as a normal plugin stage."
+      "summary": "Implements postprocessing as a normal plugin stage.",
+      "promotion": {
+        "status": "promoted",
+        "support_commitment": "protocol-v1-fixture-backed",
+        "policy": "promotion-policy.md",
+        "review": "reviews/postprocessor-strip.json",
+        "reviewed_at": "2026-05-26"
+      },
+      "trust_boundary": {
+        "sandboxed": false,
+        "filesystem_access": "stdin-stdout-only",
+        "network_access": "none",
+        "process_access": "entrypoint-shell-and-python-child",
+        "environment_access": "none-required"
+      }
     }
   ]
 }

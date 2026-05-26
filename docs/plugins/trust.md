@@ -36,6 +36,16 @@ when running untrusted or semi-trusted plugins:
 - Error paths fail non-zero and include actionable stderr.
 - CI runs `llmff plugins validate` and protocol fixture checks.
 
+## Registry Promotion Review
+
+Promoted registry entries carry a stronger maintenance promise than unreviewed
+metadata. The registry must point at `docs/plugins/promotion-policy.md`, and
+each promoted entry must have a matching JSON review under `docs/plugins/reviews/`.
+
+The review records the protocol fixtures that cover the plugin category and the
+expected trust boundary. Any registry change that changes the manifest,
+capability, support commitment, or trust boundary needs a fresh review record.
+
 ## Optional Plugin Signing
 
 Plugin signing is separate from application release signing. A future signing

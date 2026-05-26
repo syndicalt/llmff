@@ -24,7 +24,11 @@ Protocol fixtures, a registry format, and trust guidance are published under
   copy into CI.
 - `docs/plugins/registry.v1.json`: static registry entries for the official
   example plugins.
-- `docs/plugins/registry.md`: registry schema notes.
+- `docs/plugins/registry.md`: registry schema and promotion fields.
+- `docs/plugins/promotion-policy.md`: policy that treats registry promotion as
+  a support commitment.
+- `docs/plugins/reviews/`: machine-readable review evidence for promoted
+  registry entries.
 - `docs/plugins/trust.md`: permissions, sandbox expectations, review checklist,
   and optional future plugin-signing guidance.
 
@@ -208,7 +212,13 @@ Compatibility policy:
 
 Plugins are local executables. llmff does not sandbox them. A plugin can read files available to the user, spawn processes, use the network, and write output wherever its OS permissions allow.
 
-Install and run plugins only from trusted sources. Prefer checked-in scripts, pinned dependencies, and reviewable source. Avoid manifests that point at mutable global commands unless that is intentional. Use `llmff plugins validate` to catch malformed manifests, missing entrypoints, non-executable entrypoints, and static conformance warnings before a run; it is not a security scanner.
+Install and run plugins only from trusted sources. Prefer checked-in scripts,
+pinned dependencies, and reviewable source. Avoid manifests that point at
+mutable global commands unless that is intentional. Use `llmff plugins validate`
+to catch malformed manifests, missing entrypoints, non-executable entrypoints,
+and static conformance warnings before a run; it is not a security scanner.
+Registry promotion adds maintainer review evidence and a protocol fixture
+support commitment, but it still does not sandbox plugin code.
 
 ## Examples
 

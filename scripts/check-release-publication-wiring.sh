@@ -3,6 +3,10 @@ set -euo pipefail
 
 workflow=".github/workflows/release-artifacts.yml"
 readiness="docs/release-readiness.md"
+workspace_version="$(
+  sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1
+)"
+release_tag="v${workspace_version}"
 
 require_text() {
   local file="$1"
@@ -39,4 +43,4 @@ require_text "scripts/check-release-assets.sh" 'llmff-${version}-arch.SRCINFO'
 require_text "scripts/check-release-assets.sh" 'llmff-${version}-release-trust.json'
 require_text "$readiness" "creates the GitHub Release when"
 require_text "$readiness" "the tag does not already have one"
-require_text "$readiness" "scripts/check-release-assets.sh v0.1.5"
+require_text "$readiness" "scripts/check-release-assets.sh ${release_tag}"

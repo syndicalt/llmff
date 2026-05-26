@@ -21,6 +21,11 @@ if [ "$#" -ne 0 ]; then
   exit 2
 fi
 
+workspace_version="$(
+  sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1
+)"
+release_tag="v${workspace_version}"
+
 require_file() {
   local path="$1"
   if [ ! -f "$path" ]; then
@@ -47,7 +52,7 @@ require_text 'scripts/check-github-release-secrets.sh' 'APPLE_APP_SPECIFIC_PASSW
 require_text 'scripts/release-preflight.sh' '--check-github-secrets'
 require_text 'docs/platform-support.md' 'unsigned `.zip` and unsigned `.msi`'
 require_text 'docs/platform-support.md' 'unsigned `.pkg`'
-require_text 'docs/release-readiness.md' 'Unsigned Windows and macOS artifacts are acceptable for v0.1.5'
+require_text 'docs/release-readiness.md' "Unsigned Windows and macOS artifacts are acceptable for ${release_tag}"
 require_text 'docs/roadmap.md' 'Trusted signing and notarization remain a future paid distribution track'
 
 for forbidden in \

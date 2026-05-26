@@ -51,14 +51,14 @@ wiring.
 Before creating or pushing a release tag, run the metadata preflight:
 
 ```bash
-scripts/release-preflight.sh v0.1.5
+scripts/release-preflight.sh v0.1.6
 ```
 
 After release CI finishes, verify the published GitHub Release assets from a
 host that can run at least one packaged artifact:
 
 ```bash
-scripts/check-release-assets.sh v0.1.5
+scripts/check-release-assets.sh v0.1.6
 ```
 
 Package-manager publication is intentionally deferred until the GitHub Release
@@ -71,7 +71,7 @@ tracks are documented in
 Users with a Rust toolchain can install from a tagged release:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v0.1.5 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v0.1.6 llmff
 ```
 
 That path remains supported even after native installers are published.

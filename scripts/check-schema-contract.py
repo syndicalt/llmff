@@ -20,6 +20,7 @@ SCHEMAS = {
 }
 
 FAILURE_KINDS = ROOT / "docs/schemas/failure-kinds-v1.json"
+COMPATIBILITY_MATRIX = ROOT / "docs/compatibility/core-contract-v1-matrix.json"
 
 SCHEMA_IDS = {
     "manifest": "pipeline-manifest-v1.schema.json",
@@ -47,12 +48,27 @@ FIXTURES = {
         ROOT / "fixtures/golden/plugin-validation/missing-entrypoint-report.json",
     ],
     "inspect_report": [ROOT / "fixtures/golden/inspect/report.json"],
+    "run_result": [
+        ROOT / "fixtures/golden/run-results/success.json",
+        ROOT / "fixtures/golden/run-results/stage-failure.json",
+        ROOT / "fixtures/golden/run-results/interrupted.json",
+    ],
 }
 
 DOCS = [
     ROOT / "docs/schemas/README.md",
     ROOT / "docs/compatibility/core-contract-v1.md",
+    COMPATIBILITY_MATRIX,
 ]
+
+REQUIRED_COMPATIBILITY_RELEASES = ["v0.1.3", "v0.1.4", "v0.1.5"]
+REQUIRED_COMPATIBILITY_SURFACES = {
+    "schema",
+    "event",
+    "trace",
+    "cli_json",
+}
+REQUIRED_ROADMAP_ITEMS = [1, 2, 3, 4, 5, 6, 7]
 
 
 def load_json(path):
@@ -88,12 +104,50 @@ def validate_instance(schema, instance):
     jsonschema.Draft202012Validator(schema).validate(instance)
 
 
+def validate_compatibility_matrix(matrix):
+    assert matrix["contract"] == "core-contract-v1"
+    assert matrix["compatibility_policy"] == "additive_only"
+    assert matrix["release_window"] == REQUIRED_COMPATIBILITY_RELEASES
+    assert matrix["roadmap_items"] == REQUIRED_ROADMAP_ITEMS
+    assert set(matrix["surfaces"]) == REQUIRED_COMPATIBILITY_SURFACES
+    assert len(matrix["releases"]) >= 3
+
+    seen_releases = [release["version"] for release in matrix["releases"]]
+    assert seen_releases == REQUIRED_COMPATIBILITY_RELEASES
+
+    release_notes_dir = ROOT / "docs/release-notes"
+    checked_roadmap_items = set()
+    for release in matrix["releases"]:
+        notes_path = release_notes_dir / f"{release['version']}.md"
+        assert notes_path.exists(), f"missing release notes for {release['version']}"
+        assert set(release["surfaces"]) == REQUIRED_COMPATIBILITY_SURFACES
+        assert set(release["roadmap_items"]) <= set(REQUIRED_ROADMAP_ITEMS)
+        checked_roadmap_items.update(release["roadmap_items"])
+
+        for surface_name, surface in release["surfaces"].items():
+            assert surface["compatibility"] in {
+                "introduced",
+                "preserved",
+                "additive",
+            }, f"invalid compatibility status for {release['version']} {surface_name}"
+            assert surface["breaking_changes"] == []
+            assert surface["policy"] == "additive_only"
+            assert surface["notes"], f"missing notes for {release['version']} {surface_name}"
+
+            for relative_path in surface["evidence"]:
+                evidence_path = ROOT / relative_path
+                assert evidence_path.exists(), f"missing evidence: {relative_path}"
+
+    assert sorted(checked_roadmap_items) == REQUIRED_ROADMAP_ITEMS
+
+
 def main():
     require_paths([*SCHEMAS.values(), FAILURE_KINDS, *DOCS])
     for paths in FIXTURES.values():
         require_paths(paths)
 
     schemas = {name: load_json(path) for name, path in SCHEMAS.items()}
+    validate_compatibility_matrix(load_json(COMPATIBILITY_MATRIX))
     failure_kind_registry = load_json(FAILURE_KINDS)
     failure_kinds = failure_kind_registry["failure_kinds"]
     expected_failure_kinds = [
@@ -108,6 +162,7 @@ def main():
         "backend",
         "config",
         "not_implemented",
+        "interrupted",
     ]
     assert failure_kinds == expected_failure_kinds
     for name, schema in schemas.items():
@@ -131,48 +186,10 @@ def main():
         validate_instance(schemas["inspect_report"], report)
         assert report["format_version"] == 1
 
-    validate_instance(
-        schemas["run_result"],
-        {
-            "schema_version": 1,
-            "status": "succeeded",
-            "exit_code": 0,
-            "manifest": {
-                "hash": "sha256:"
-                "0000000000000000000000000000000000000000000000000000000000000000"
-            },
-            "artifacts": {
-                "inspect": "inspect.json",
-                "trace": "trace.jsonl",
-                "events": "events.jsonl",
-                "checkpoint": "checkpoint.json",
-            },
-            "failure": None,
-        },
-    )
-    validate_instance(
-        schemas["run_result"],
-        {
-            "schema_version": 1,
-            "status": "failed",
-            "exit_code": 20,
-            "manifest": {
-                "hash": "sha256:"
-                "1111111111111111111111111111111111111111111111111111111111111111"
-            },
-            "artifacts": {
-                "inspect": "inspect.json",
-                "trace": "trace.jsonl",
-                "events": "events.jsonl",
-                "checkpoint": "checkpoint.json",
-            },
-            "failure": {
-                "kind": "stage_execution",
-                "message": "tool command exited with status 7",
-                "retry_recommendation": "check_stage_or_input",
-            },
-        },
-    )
+    for path in FIXTURES["run_result"]:
+        result = load_json(path)
+        validate_instance(schemas["run_result"], result)
+        assert result["schema_version"] == 1
 
     for path in FIXTURES["event"]:
         validate_jsonl(schemas["event"], path)

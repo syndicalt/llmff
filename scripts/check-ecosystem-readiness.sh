@@ -32,15 +32,20 @@ require_file "scripts/check-package-manager-metadata.sh"
 require_file "scripts/check-release-publication-wiring.sh"
 require_file "scripts/check-release-assets.sh"
 require_file "scripts/check-provider-smoke-readiness.sh"
+require_file "scripts/check-real-world-workflows.sh"
 require_file ".github/workflows/live-provider-smoke.yml"
 require_file "docs/schemas/pipeline-manifest-v1.schema.json"
 require_file "docs/manifest-reproducibility.md"
+require_file "docs/compatibility/core-contract-v1-matrix.json"
 require_file "docs/schemas/inspect-report-v1.schema.json"
 require_file "docs/events.md"
 require_file "docs/opentelemetry-bridge.md"
 require_file "docs/plugins/registry.v1.json"
+require_file "docs/plugins/promotion-policy.md"
 require_file "docs/provider-troubleshooting.md"
 require_file "docs/provider-smoke-readiness.md"
+require_file "docs/providers/support-tiers.md"
+require_file "docs/providers/live-smoke-history.json"
 require_file "docs/agent-workflows.md"
 require_file "docs/adoption/agent-runner.md"
 require_file "docs/package-manager-roadmap.md"
@@ -53,6 +58,7 @@ for integration in \
   "CLI JSON output" \
   "Plugin protocol" \
   "Provider onboarding" \
+  "Production workflow examples" \
   "Agent subprocess embedding" \
   "Agent runner adoption" \
   "Package-manager metadata" \
@@ -69,6 +75,7 @@ for gate in \
   "cargo test -p llmff --test cli_run inspect_json_reports_reproducible_execution_contract" \
   "scripts/check-plugin-fixtures.sh" \
   "scripts/check-provider-smoke-readiness.sh" \
+  "scripts/check-real-world-workflows.sh" \
   "cargo test -p llmff --test example_catalog agent_workflow_docs_link_to_a_runnable_supervisor_example" \
   "scripts/check-agent-adoption-guide.sh" \
   "scripts/check-package-manager-metadata.sh" \
@@ -80,8 +87,14 @@ done
 
 require_text "$guide" "support commitments"
 require_text "$guide" "explicitly opt-in"
+require_text "$guide" "core-contract-v1-matrix.json"
+require_text "$guide" "promotion-policy.md"
+require_text "$guide" "live-smoke-history.json"
 require_text "docs/manifest-reproducibility.md" "manifest lockfile remains parked"
 require_text "docs/provider-smoke-readiness.md" "certification is a support commitment"
+require_text "docs/providers/support-tiers.md" "Provider Matrix"
+require_text "docs/providers/live-smoke-history.json" '"schema_version": 1'
+require_text "docs/plugins/promotion-policy.md" "Promotion is a support commitment"
 require_text "docs/opentelemetry-bridge.md" "no network telemetry by default"
 require_text "docs/adoption/agent-runner.md" "bounded execution tool"
 require_text "docs/roadmap.md" "Keep every public integration path covered by a local validation gate or a"

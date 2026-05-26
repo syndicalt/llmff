@@ -41,7 +41,8 @@
         "stage_execution",
         "backend",
         "config",
-        "not_implemented"
+        "not_implemented",
+        "interrupted"
       ]
     },
     "failure_message": { "type": "string", "minLength": 1 }

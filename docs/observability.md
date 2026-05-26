@@ -30,6 +30,7 @@ examples/supervision/local-observability.sh
 - retry totals, retrying stage counts, and maximum stage attempts
 - prompt, completion, and total token usage
 - cache hits, misses, and hit rate
+- output artifact locations and cache artifact locations
 - backend and timeout error counts and rates
 - failure counts and stable failure classes
 
@@ -62,7 +63,8 @@ network connections and do not require collectors, agents, or cloud services.
 Published fixtures live under `examples/supervision/fixtures/`:
 
 - `event.schema.json`: JSON Schema for one lifecycle event.
-- `success-trace.jsonl`: successful run with timing, usage, and cache metadata.
+- `success-trace.jsonl`: successful run with timing, usage, output artifact,
+  and cache artifact metadata.
 - `backend-error-trace.jsonl`: failed run with `failure_kind=backend`.
 
 Consumers should ignore unknown fields. New optional fields can appear in minor

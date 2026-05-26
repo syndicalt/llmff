@@ -916,6 +916,18 @@ outputs:
     assert_eq!(result["artifacts"]["events"], "events.jsonl");
     assert_eq!(result["artifacts"]["checkpoint"], "checkpoint.json");
     assert_eq!(result["failure"], serde_json::Value::Null);
+
+    let inspect: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("inspect.json")).unwrap())
+            .expect("inspect artifact should be valid JSON");
+    let checkpoint: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("checkpoint.json")).unwrap())
+            .expect("checkpoint artifact should be valid JSON");
+    assert_eq!(result["manifest"]["hash"], inspect["manifest"]["hash"]);
+    assert_eq!(
+        result["manifest"]["hash"],
+        format!("sha256:{}", checkpoint["manifest_hash"].as_str().unwrap())
+    );
 }
 
 #[test]
@@ -1490,6 +1502,173 @@ outputs:
 }
 
 #[test]
+fn run_dir_batch_input_writes_supervisor_artifacts_and_batch_outputs() {
+    let dir = tempfile::tempdir().unwrap();
+    let batch_input = dir.path().join("batch.txt");
+    let batch_output = dir.path().join("batch-out");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&batch_input, "first\nsecond\n").unwrap();
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+inputs:
+  prompt:
+    path: placeholder.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: answer.txt
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--batch-input",
+            batch_input.to_str().unwrap(),
+            "--batch-output-dir",
+            batch_output.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    assert!(run_dir.join("inspect.json").exists());
+    assert!(run_dir.join("trace.jsonl").exists());
+    assert!(run_dir.join("events.jsonl").exists());
+    assert!(run_dir.join("checkpoint.json").exists());
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("run-dir batch result should be valid JSON");
+    assert_eq!(result["status"], "succeeded");
+    assert_eq!(result["exit_code"], 0);
+    assert_eq!(result["failure"], serde_json::Value::Null);
+
+    assert_eq!(
+        std::fs::read_to_string(batch_output.join("items/000000/answer.txt")).unwrap(),
+        "first"
+    );
+    assert_eq!(
+        std::fs::read_to_string(batch_output.join("items/000001/answer.txt")).unwrap(),
+        "second"
+    );
+    let report = std::fs::read_to_string(batch_output.join("batch-report.jsonl")).unwrap();
+    assert!(report.contains(r#""status":"succeeded""#));
+    let trace = std::fs::read_to_string(run_dir.join("trace.jsonl")).unwrap();
+    assert!(trace.contains(r#""event":"batch_item_finished""#));
+    assert!(trace.contains(r#""status":"success""#));
+    let checkpoint = std::fs::read_to_string(run_dir.join("checkpoint.json")).unwrap();
+    assert!(checkpoint.contains(r#""batch:000000""#));
+    assert!(checkpoint.contains(r#""batch:000001""#));
+}
+
+#[test]
+fn run_dir_batch_failure_writes_failed_result_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let batch_input = dir.path().join("batch.txt");
+    let batch_output = dir.path().join("batch-out");
+    let tool = dir.path().join("batch-tool");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&batch_input, "first\nfail\n").unwrap();
+    std::fs::write(
+        &tool,
+        r#"#!/bin/sh
+payload=$(cat)
+if [ "$payload" = "fail" ]; then
+  printf 'item failed\n' >&2
+  exit 7
+fi
+printf '%s' "$payload"
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&tool).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+    }
+    std::fs::set_permissions(&tool, permissions).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: placeholder.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: call_tool
+    op: tool
+    from: load_prompt
+    command: [{}]
+outputs:
+  final:
+    from: call_tool
+    path: answer.txt
+"#,
+            tool.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--batch-input",
+            batch_input.to_str().unwrap(),
+            "--batch-output-dir",
+            batch_output.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(20)
+        .stderr(predicate::str::contains("one or more batch items failed"));
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("failed run-dir batch result should be valid JSON");
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["exit_code"], 20);
+    assert_eq!(result["failure"]["kind"], "stage_execution");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "check_stage_or_input"
+    );
+
+    let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    assert!(events.contains(r#""event":"run_started""#));
+    assert!(events.contains(r#""event":"run_failed""#));
+    assert!(events.contains(r#""failure_kind":"stage_execution""#));
+
+    let report = std::fs::read_to_string(batch_output.join("batch-report.jsonl")).unwrap();
+    assert!(report.contains(r#""index":0"#));
+    assert!(report.contains(r#""index":1"#));
+    assert!(report.contains(r#""status":"succeeded""#));
+    assert!(report.contains(r#""status":"failed""#));
+    assert!(report.contains(r#""exit_code":20"#));
+    assert!(report.contains(r#""failure_kind":"stage_execution""#));
+    assert!(report.contains(r#""retry_recommendation":"check_stage_or_input""#));
+}
+
+#[test]
 fn run_batch_input_rejects_parent_directory_outputs() {
     let dir = tempfile::tempdir().unwrap();
     let batch_input = dir.path().join("batch.txt");
@@ -1530,6 +1709,142 @@ outputs:
         .stderr(predicate::str::contains(
             "batch mode output paths cannot contain parent directory components",
         ));
+}
+
+#[test]
+fn run_dir_batch_timeout_failure_preserves_failure_class() {
+    let dir = tempfile::tempdir().unwrap();
+    let batch_input = dir.path().join("batch.txt");
+    let batch_output = dir.path().join("batch-out");
+    let tool = dir.path().join("slow-tool");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&batch_input, "first\n").unwrap();
+    std::fs::write(
+        &tool,
+        r#"#!/bin/sh
+cat >/dev/null
+sleep 30
+"#,
+    )
+    .unwrap();
+    let mut permissions = std::fs::metadata(&tool).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+    }
+    std::fs::set_permissions(&tool, permissions).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: placeholder.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: call_tool
+    op: tool
+    from: load_prompt
+    command: [{}]
+    timeout_ms: 1
+outputs:
+  final:
+    from: call_tool
+    path: answer.txt
+"#,
+            tool.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--batch-input",
+            batch_input.to_str().unwrap(),
+            "--batch-output-dir",
+            batch_output.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(21)
+        .stderr(predicate::str::contains("one or more batch items failed"));
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("failed timeout batch result should be valid JSON");
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["exit_code"], 21);
+    assert_eq!(result["failure"]["kind"], "timeout");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "check_stage_or_input"
+    );
+
+    let report = std::fs::read_to_string(batch_output.join("batch-report.jsonl")).unwrap();
+    assert!(report.contains(r#""exit_code":21"#));
+    assert!(report.contains(r#""failure_kind":"timeout""#));
+    assert!(report.contains(r#""retry_recommendation":"check_stage_or_input""#));
+    let trace = std::fs::read_to_string(run_dir.join("trace.jsonl")).unwrap();
+    assert!(trace.contains(r#""event":"batch_item_finished""#));
+    assert!(trace.contains(r#""failure_kind":"timeout""#));
+}
+
+#[test]
+fn run_batch_input_rejects_unsupported_supervision_flags() {
+    let dir = tempfile::tempdir().unwrap();
+    let batch_input = dir.path().join("batch.txt");
+    let batch_output = dir.path().join("batch-out");
+    let events = dir.path().join("events.jsonl");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&batch_input, "first\nsecond\n").unwrap();
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+inputs:
+  prompt:
+    path: placeholder.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: answer.txt
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--batch-input",
+            batch_input.to_str().unwrap(),
+            "--batch-output-dir",
+            batch_output.to_str().unwrap(),
+            "--events",
+            events.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "batch mode does not support explicit trace, events, checkpoint, resume, replay-trace, or stream-stage flags",
+        ));
+
+    assert!(!events.exists());
+    assert!(!batch_output.exists());
 }
 
 #[test]
@@ -3279,6 +3594,199 @@ outputs:
 
     let event_text = std::fs::read_to_string(events).unwrap();
     assert!(!event_text.contains("do not leak this interrupted prompt"));
+}
+
+#[cfg(unix)]
+#[test]
+fn run_dir_interrupted_run_writes_result_summary() {
+    use std::os::unix::process::CommandExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output_path = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, "do not leak this interrupted prompt").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: slow_tool
+    op: tool
+    from: load_prompt
+    command: ["sh", "-c", "sleep 30"]
+outputs:
+  final:
+    from: slow_tool
+    path: {}
+"#,
+            prompt.display(),
+            output_path.display()
+        ),
+    )
+    .unwrap();
+
+    let child = unsafe {
+        let mut command = StdCommand::new(assert_cmd::cargo::cargo_bin("llmff"));
+        command
+            .args([
+                "run",
+                "--run-dir",
+                run_dir.to_str().unwrap(),
+                manifest.to_str().unwrap(),
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .pre_exec(|| {
+                if libc::setpgid(0, 0) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        command.spawn().unwrap()
+    };
+
+    let events = run_dir.join("events.jsonl");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if std::fs::read_to_string(&events)
+            .map(|text| text.contains(r#""event":"stage_started""#))
+            .unwrap_or(false)
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let event_text = std::fs::read_to_string(&events).unwrap_or_default();
+    assert!(
+        event_text.contains(r#""event":"stage_started""#),
+        "run should start before interrupt, events were: {event_text}"
+    );
+
+    let pid = child.id() as libc::pid_t;
+    let signal_result = unsafe { libc::kill(pid, libc::SIGINT) };
+    assert_eq!(signal_result, 0, "SIGINT should reach llmff");
+
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(130));
+    assert!(output.stdout.is_empty());
+
+    let result: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+            .expect("interrupted run result should be valid JSON");
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["exit_code"], 130);
+    assert_eq!(result["failure"]["kind"], "interrupted");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "resume_with_matching_checkpoint"
+    );
+
+    let event_text = std::fs::read_to_string(events).unwrap();
+    assert!(event_text.contains(r#""event":"run_failed""#));
+    assert!(event_text.contains(r#""failure_kind":"interrupted""#));
+    assert!(!event_text.contains("do not leak this interrupted prompt"));
+}
+
+#[cfg(unix)]
+#[test]
+fn run_dir_interrupted_run_preserves_completed_checkpoint() {
+    use std::os::unix::process::CommandExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output_path = dir.path().join("answer.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, "checkpoint-safe prompt").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: slow_tool
+    op: tool
+    from: load_prompt
+    command: ["sh", "-c", "sleep 30"]
+outputs:
+  final:
+    from: slow_tool
+    path: {}
+"#,
+            prompt.display(),
+            output_path.display()
+        ),
+    )
+    .unwrap();
+
+    let child = unsafe {
+        let mut command = StdCommand::new(assert_cmd::cargo::cargo_bin("llmff"));
+        command
+            .args([
+                "run",
+                "--run-dir",
+                run_dir.to_str().unwrap(),
+                manifest.to_str().unwrap(),
+            ])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .pre_exec(|| {
+                if libc::setpgid(0, 0) == 0 {
+                    Ok(())
+                } else {
+                    Err(std::io::Error::last_os_error())
+                }
+            });
+        command.spawn().unwrap()
+    };
+
+    let checkpoint = run_dir.join("checkpoint.json");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if std::fs::read_to_string(&checkpoint)
+            .map(|text| text.contains(r#""load_prompt""#) && !text.contains(r#""slow_tool""#))
+            .unwrap_or(false)
+        {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let checkpoint_text = std::fs::read_to_string(&checkpoint).unwrap_or_default();
+    assert!(
+        checkpoint_text.contains(r#""load_prompt""#),
+        "completed stage should be checkpointed: {checkpoint_text}"
+    );
+    assert!(
+        !checkpoint_text.contains(r#""slow_tool""#),
+        "interrupted stage should not be checkpointed: {checkpoint_text}"
+    );
+
+    let pid = child.id() as libc::pid_t;
+    let signal_result = unsafe { libc::kill(pid, libc::SIGINT) };
+    assert_eq!(signal_result, 0, "SIGINT should reach llmff");
+
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(130));
+
+    let checkpoint_text = std::fs::read_to_string(checkpoint).unwrap();
+    assert!(checkpoint_text.contains(r#""load_prompt""#));
+    assert!(!checkpoint_text.contains(r#""slow_tool""#));
 }
 
 #[test]

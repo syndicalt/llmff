@@ -40,70 +40,90 @@ backend registrations, plugin protocol metadata, plugin manifests, stdout
 ownership, and default execution controls. Agents can store this report next to
 the trace and checkpoint to explain what was expected to run.
 
-## Recommended Subprocess Shape
+## Canonical Subprocess Patterns
 
-Use file-backed streams when the agent needs both payload output and event
-monitoring:
+Agents should prefer a caller-owned run directory for ordinary single-run
+work. The run directory is the supported bundle for inspect, trace, events,
+checkpoint, and result metadata:
+
+```bash
+llmff run --run-dir .llmff/runs/job-42 pipeline.yaml
+```
+
+Use explicit artifact flags when the agent needs a different stream owner or
+when an older wrapper has not adopted `--run-dir`:
 
 ```bash
 llmff run pipeline.yaml \
   --trace .llmff/runs/job-42/trace.jsonl \
   --events .llmff/runs/job-42/events.jsonl \
-  --checkpoint .llmff/runs/job-42/checkpoint.json \
-  --timeout-ms 30000 \
-  --retry-attempts 3 \
-  --retry-backoff-ms 250
+  --checkpoint .llmff/runs/job-42/checkpoint.json
 ```
 
-Use `--events -` when the supervisor wants lifecycle JSONL on stdout and the
-manifest writes final payloads to files:
-
-```bash
-llmff run pipeline.yaml --events - --trace .llmff/runs/job-42/trace.jsonl
-```
-
-Do not combine multiple stdout owners. If an agent needs streamed stage payloads
-with `--stream-stage`, write events to a file instead of `--events -`.
+Do not combine multiple stdout owners. If an agent streams lifecycle events
+with `--events -`, manifest outputs and `--stream-stage` must write somewhere
+else. If an agent streams a stage payload with `--stream-stage`, lifecycle
+events must be file-backed.
 
 ### Short Jobs
 
-For a bounded single request, inspect first, run once, and treat the process
-exit code as authoritative:
+For a bounded single request, allocate a unique run directory, run once, and
+treat the process exit code as authoritative. `--run-dir` writes
+`inspect.json`, `trace.jsonl`, `events.jsonl`, `checkpoint.json`, and
+`result.json` under the directory:
 
 ```bash
-llmff inspect pipeline.yaml --format json > .llmff/runs/job-42/inspect.json
-llmff run pipeline.yaml \
-  --trace .llmff/runs/job-42/trace.jsonl \
-  --events .llmff/runs/job-42/events.jsonl
+llmff run --run-dir .llmff/runs/job-42 pipeline.yaml \
+  --timeout-ms 30000 \
+  --retry-attempts 2 \
+  --retry-backoff-ms 250
 ```
 
-The agent should read payload artifacts from declared output paths, not from
-trace or event metadata.
+The agent should read payload artifacts from declared output paths after exit
+code `0`, not from trace, events, stderr, or result metadata.
 
 ### Long Jobs
 
-For jobs that may be interrupted, add a checkpoint path on the first run and
-reuse the same path with `--resume` only after verifying the manifest has not
-changed:
+For jobs that may be interrupted, use `--run-dir` or an explicit checkpoint
+path from the first attempt. Resume only with a checkpoint produced by the same
+manifest hash:
 
 ```bash
-llmff run pipeline.yaml \
-  --checkpoint .llmff/runs/job-42/checkpoint.json \
-  --trace .llmff/runs/job-42/trace.jsonl \
-  --events .llmff/runs/job-42/events.jsonl
+llmff run --run-dir .llmff/runs/job-42 pipeline.yaml \
+  --timeout-ms 60000
+
+llmff run --run-dir .llmff/runs/job-42 pipeline.yaml \
+  --resume .llmff/runs/job-42/checkpoint.json \
+  --timeout-ms 60000
 ```
+
+The harness may also enforce its own host timeout around the subprocess. If the
+host kills the process before `llmff` writes `run_failed`, preserve the host
+status separately and use the absence of a final event as evidence only, not as
+success.
 
 ### Batch Jobs
 
 For batch work, keep item inputs and item outputs in explicit directories so
-the agent can retry failed items without mixing payloads:
+the agent can retry failed items without mixing payloads. Current `llmff`
+behavior supports the run-directory metadata bundle while keeping batch input
+and output paths explicit; batch mode can use `--run-dir` with explicit batch
+paths:
 
 ```bash
-llmff run pipeline.yaml \
-  --batch-input .llmff/runs/job-42/items.jsonl \
-  --batch-output-dir .llmff/runs/job-42/items \
-  --trace .llmff/runs/job-42/trace.jsonl
+llmff run --run-dir .llmff/runs/job-42 pipeline.yaml \
+  --batch-input .llmff/runs/job-42/items.txt \
+  --batch-output-dir .llmff/runs/job-42/batch-output \
+  --timeout-ms 30000
 ```
+
+Batch mode writes `batch-output/batch-report.jsonl` plus isolated item
+artifacts under `batch-output/items/<index>/`. With `--run-dir`, `trace.jsonl`
+records batch item lifecycle summaries and `checkpoint.json` records completed
+item progress. If any item fails, `llmff` keeps the report, writes the
+run-directory result summary, and exits non-zero after processing the batch.
+The agent should preserve the original llmff exit code while using the report
+to choose which items to repair or retry.
 
 The runnable batch supervisor example performs an inspect preflight, writes a
 line-based batch input, runs batch mode, summarizes the batch report, and
@@ -115,7 +135,8 @@ python3 examples/agent-workflows/batch-supervisor.py
 
 ### Streaming Jobs
 
-For live supervision, stream events only when manifest outputs write to files:
+For live supervision, stream events only when manifest outputs write to files
+and no stage payload is streamed to stdout:
 
 ```bash
 llmff run pipeline.yaml \
@@ -128,8 +149,34 @@ For streamed model or stage payloads, keep lifecycle events file-backed:
 ```bash
 llmff run pipeline.yaml \
   --stream-stage draft \
-  --events .llmff/runs/job-42/events.jsonl
+  --events .llmff/runs/job-42/events.jsonl \
+  --trace .llmff/runs/job-42/trace.jsonl
 ```
+
+Streaming does not change the success contract. The agent should wait for the
+subprocess exit, preserve the original llmff exit code, and treat streamed
+events or payload chunks as partial evidence until the process has exited.
+
+## Artifact Ownership
+
+The agent owns job identity, run-directory allocation, input materialization,
+host timeout/cancellation, task-level retry policy, and retention policy.
+`llmff` owns the contents of artifacts it writes:
+
+| Artifact | Preferred writer | Agent use |
+| --- | --- | --- |
+| `inspect.json` | `llmff run --run-dir` or `llmff inspect --format json` | Preflight contract: manifest hash, stdout ownership, resolved inputs and outputs, execution controls. |
+| `events.jsonl` | `llmff run --run-dir` or `--events` | Live lifecycle supervision. Safe metadata, not payload recovery. |
+| `trace.jsonl` | `llmff run --run-dir` or `--trace` | Post-run debugging, summaries, and metrics. |
+| `checkpoint.json` | `llmff run --run-dir` or `--checkpoint` | Resume state. Treat as sensitive because it can include stage values. |
+| `result.json` | `llmff run --run-dir` | Final run summary with status, exit code, artifact names, failure kind, and retry recommendation. |
+| `batch-report.jsonl` | `--batch-output-dir` batch mode | Per-item batch status and artifact paths. |
+| declared outputs | manifest stages | Payload artifacts the agent may consume after successful completion. |
+
+If `--run-dir` is used, do not also pass `--trace`, `--events`, or
+`--checkpoint`; the CLI rejects that combination because the run directory owns
+those paths. Batch mode may still pass `--batch-input` and `--batch-output-dir`
+because those are payload item paths, not metadata paths.
 
 ## Failure Handling
 
@@ -150,11 +197,21 @@ The exit code is the primary contract:
 
 When events are available, use `failure_kind` to decide the agent response:
 
-- `graph_validation`, `manifest_parse`, `schema`, or `config`: fix the
+- `graph_validation`, `manifest_parse`, `unknown_stage`, or `config`: fix the
   manifest or invocation before retrying
+- `io` or `json`: repair local paths, permissions, files, or malformed JSON
+  before retrying
 - `backend`, `http`, or `timeout`: retry later, switch backend, or lower
   concurrency
 - `stage_execution`: inspect the named stage and tool/backend configuration
+- `interrupted`: preserve exit code `130` and resume only with a matching
+  checkpoint and unchanged manifest hash
+
+If `run_failed.failure_kind` is missing, unknown, or newer than the harness,
+record the value when present, preserve the original llmff exit code, and fall
+back to the exit-code posture above. Never translate a non-zero `llmff` status
+into framework-level success merely because the harness understood the failure
+kind.
 
 `failure_message` is a sanitized operational summary. It intentionally omits
 prompts, secrets, tool bodies, backend payloads, and provider response bodies.
