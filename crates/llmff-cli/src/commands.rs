@@ -1,7 +1,9 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -17,6 +19,7 @@ use llmff_core::plugin::{
     PLUGIN_PROTOCOL_VERSION,
 };
 use llmff_core::stage::builtin_stage_metadata;
+use llmff_core::value::{StageStatus, Value};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +33,42 @@ struct AliasValue {
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Debug, Clone)]
+pub struct InterruptContext {
+    run_dir: PathBuf,
+    manifest_hash: String,
+}
+
+pub fn interrupt_context(cli: &Cli) -> Option<InterruptContext> {
+    match &cli.command {
+        Command::Run {
+            manifest,
+            graph,
+            run_dir: Some(run_dir),
+            ..
+        } => Some(InterruptContext {
+            run_dir: run_dir.clone(),
+            manifest_hash: manifest_hash_for_interrupt(manifest.as_ref(), graph.as_ref()),
+        }),
+        _ => None,
+    }
+}
+
+pub fn write_interrupted_run_result(context: &InterruptContext) -> Result<()> {
+    let artifacts = RunDirArtifacts::new(&context.run_dir)?;
+    append_interrupted_run_event(&artifacts)?;
+    let result = interrupted_run_result_summary(&context.manifest_hash, &artifacts);
+    write_json_file(&artifacts.result_path, &result)?;
+    Ok(())
+}
+
+pub fn batch_exit_code(error: &anyhow::Error) -> Option<i32> {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<BatchRunError>())
+        .map(|error| error.exit_code)
 }
 
 #[derive(Debug, Subcommand)]
@@ -523,7 +562,7 @@ fn inspect_report(
                 "path": source_path,
                 "cwd": loaded.cwd.to_string_lossy(),
             },
-            "hash": format!("sha256:{}", sha256_hex(loaded.source.content.as_bytes())),
+            "hash": format!("sha256:{}", manifest_fingerprint(&loaded.manifest)?),
         },
         "inputs": loaded.manifest.inputs,
         "outputs": loaded.manifest.outputs,
@@ -1335,8 +1374,17 @@ async fn run_pipeline(
             "--run-dir owns trace, events, and checkpoint paths; do not combine it with --trace, --events, or --checkpoint"
         );
     }
-    if run_dir.is_some() && (batch_input.is_some() || batch_output_dir.is_some()) {
-        anyhow::bail!("--run-dir cannot be used with batch mode yet");
+    let batch_mode = batch_input.is_some() || batch_output_dir.is_some();
+    if batch_mode {
+        let unsupported_explicit_metadata =
+            run_dir.is_none() && (trace.is_some() || events.is_some() || checkpoint.is_some());
+        let unsupported_run_control =
+            resume.is_some() || replay_trace.is_some() || stream_stage.is_some();
+        if unsupported_explicit_metadata || unsupported_run_control {
+            anyhow::bail!(
+                "batch mode does not support explicit trace, events, checkpoint, resume, replay-trace, or stream-stage flags; use --run-dir for batch supervisor metadata"
+            );
+        }
     }
     if max_concurrency == Some(0) {
         anyhow::bail!("max-concurrency must be greater than 0");
@@ -1358,14 +1406,16 @@ async fn run_pipeline(
         Ok(loaded) => loaded,
         Err(error) => {
             if let Some(artifacts) = run_dir_artifacts.as_ref() {
+                let failure_manifest_hash = sha256_hex(&failure_manifest_bytes);
                 let summary =
-                    run_result_summary_for_error(&failure_manifest_bytes, artifacts, &error);
+                    run_result_summary_for_error(&failure_manifest_hash, artifacts, &error);
                 write_json_file(&artifacts.result_path, &summary)?;
             }
             return Err(error);
         }
     };
     let manifest = loaded.manifest.clone();
+    let manifest_hash = manifest_fingerprint(&manifest)?;
     let cwd = loaded.cwd.clone();
     let backend_args = backend.clone();
     let ollama_args = ollama.clone();
@@ -1373,18 +1423,66 @@ async fn run_pipeline(
         Ok(engine) => engine,
         Err(error) => {
             if let Some(artifacts) = run_dir_artifacts.as_ref() {
-                let summary = run_result_summary_for_error(
-                    loaded.source.content.as_bytes(),
-                    artifacts,
-                    &error,
-                );
+                let summary = run_result_summary_for_error(&manifest_hash, artifacts, &error);
                 write_json_file(&artifacts.result_path, &summary)?;
             }
             return Err(error);
         }
     };
-    if batch_input.is_some() || batch_output_dir.is_some() {
-        return run_batch_pipeline(
+    let trace = trace.or_else(|| {
+        run_dir_artifacts
+            .as_ref()
+            .map(|artifacts| artifacts.trace_path.clone())
+    });
+    let events = events.or_else(|| {
+        run_dir_artifacts
+            .as_ref()
+            .map(|artifacts| artifacts.events_path.clone())
+    });
+    let checkpoint = checkpoint.or_else(|| {
+        run_dir_artifacts
+            .as_ref()
+            .map(|artifacts| artifacts.checkpoint_path.clone())
+    });
+    if batch_mode {
+        if let Some(artifacts) = run_dir_artifacts.as_ref() {
+            let graph = match engine
+                .validate_manifest_with_plugin_dirs(manifest.clone(), &plugin_dir)
+            {
+                Ok(graph) => graph,
+                Err(error) => {
+                    let summary =
+                        run_result_summary_for_llmff_error(&manifest_hash, artifacts, Some(&error));
+                    write_json_file(&artifacts.result_path, &summary)?;
+                    return Err(error.into());
+                }
+            };
+            let inspect_options = InspectExecutionOptions::new(
+                trace.clone(),
+                events.clone(),
+                parallel,
+                max_concurrency,
+                timeout_ms,
+                retry_attempts,
+                retry_backoff_ms,
+                checkpoint.clone(),
+                resume.clone(),
+                stream_stage.clone(),
+            )?;
+            inspect_options.validate_stdout_ownership(&manifest)?;
+            let inspect = inspect_report(
+                loaded.clone(),
+                graph,
+                &plugin_dir,
+                &backend_args,
+                &ollama_args,
+                &inspect_options,
+            )?;
+            write_json_file(&artifacts.inspect_path, &inspect)?;
+            initialize_batch_run_dir_artifacts(artifacts, &manifest)?;
+        }
+
+        let result = run_batch_pipeline(
             manifest,
             &cwd,
             &engine,
@@ -1396,8 +1494,23 @@ async fn run_pipeline(
             retry_attempts,
             retry_backoff_ms,
             plugin_dir,
+            run_dir_artifacts.as_ref(),
         )
         .await;
+
+        if let Some(artifacts) = run_dir_artifacts.as_ref() {
+            finish_batch_run_dir_events(artifacts, result.as_ref().err())?;
+            let summary = run_result_summary_for_error_result(
+                &manifest_hash,
+                artifacts,
+                result.as_ref().err(),
+            );
+            write_json_file(&artifacts.result_path, &summary)?;
+        }
+
+        result?;
+
+        return Ok(());
     }
     if stream_stage.is_some() && events.as_deref() == Some(Path::new("-")) {
         anyhow::bail!("stream-stage cannot write to stdout while events stream to stdout");
@@ -1420,36 +1533,17 @@ async fn run_pipeline(
             "stream-stage cannot write to stdout while manifest outputs write to stdout"
         );
         if let Some(artifacts) = run_dir_artifacts.as_ref() {
-            let summary =
-                run_result_summary_for_error(loaded.source.content.as_bytes(), artifacts, &error);
+            let summary = run_result_summary_for_error(&manifest_hash, artifacts, &error);
             write_json_file(&artifacts.result_path, &summary)?;
         }
         return Err(error);
     }
-    let trace = trace.or_else(|| {
-        run_dir_artifacts
-            .as_ref()
-            .map(|artifacts| artifacts.trace_path.clone())
-    });
-    let events = events.or_else(|| {
-        run_dir_artifacts
-            .as_ref()
-            .map(|artifacts| artifacts.events_path.clone())
-    });
-    let checkpoint = checkpoint.or_else(|| {
-        run_dir_artifacts
-            .as_ref()
-            .map(|artifacts| artifacts.checkpoint_path.clone())
-    });
     if let Some(artifacts) = run_dir_artifacts.as_ref() {
         let graph = match engine.validate_manifest_with_plugin_dirs(manifest.clone(), &plugin_dir) {
             Ok(graph) => graph,
             Err(error) => {
-                let summary = run_result_summary_for_llmff_error(
-                    loaded.source.content.as_bytes(),
-                    artifacts,
-                    Some(&error),
-                );
+                let summary =
+                    run_result_summary_for_llmff_error(&manifest_hash, artifacts, Some(&error));
                 write_json_file(&artifacts.result_path, &summary)?;
                 return Err(error.into());
             }
@@ -1512,16 +1606,10 @@ async fn run_pipeline(
 
     if let Some(artifacts) = run_dir_artifacts.as_ref() {
         let summary = match &result {
-            Ok(_) => run_result_summary_for_llmff_error(
-                loaded.source.content.as_bytes(),
-                artifacts,
-                None,
-            ),
-            Err(error) => run_result_summary_for_llmff_error(
-                loaded.source.content.as_bytes(),
-                artifacts,
-                Some(error),
-            ),
+            Ok(_) => run_result_summary_for_llmff_error(&manifest_hash, artifacts, None),
+            Err(error) => {
+                run_result_summary_for_llmff_error(&manifest_hash, artifacts, Some(error))
+            }
         };
         write_json_file(&artifacts.result_path, &summary)?;
     }
@@ -1554,7 +1642,7 @@ impl RunDirArtifacts {
 }
 
 fn run_result_summary_for_llmff_error(
-    manifest_bytes: &[u8],
+    manifest_hash: &str,
     artifacts: &RunDirArtifacts,
     error: Option<&LlmffError>,
 ) -> serde_json::Value {
@@ -1570,7 +1658,7 @@ fn run_result_summary_for_llmff_error(
         "status": if error.is_some() { "failed" } else { "succeeded" },
         "exit_code": error.map(llmff_exit_code).unwrap_or(0),
         "manifest": {
-            "hash": format!("sha256:{}", sha256_hex(manifest_bytes)),
+            "hash": format!("sha256:{manifest_hash}"),
         },
         "artifacts": {
             "inspect": relative_artifact_name(&artifacts.inspect_path),
@@ -1583,14 +1671,72 @@ fn run_result_summary_for_llmff_error(
 }
 
 fn run_result_summary_for_error(
-    manifest_bytes: &[u8],
+    manifest_hash: &str,
     artifacts: &RunDirArtifacts,
     error: &anyhow::Error,
 ) -> serde_json::Value {
+    run_result_summary_for_error_result(manifest_hash, artifacts, Some(error))
+}
+
+fn run_result_summary_for_error_result(
+    manifest_hash: &str,
+    artifacts: &RunDirArtifacts,
+    error: Option<&anyhow::Error>,
+) -> serde_json::Value {
+    let Some(error) = error else {
+        return run_result_summary_for_llmff_error(manifest_hash, artifacts, None);
+    };
+
     for cause in error.chain() {
         if let Some(error) = cause.downcast_ref::<LlmffError>() {
-            return run_result_summary_for_llmff_error(manifest_bytes, artifacts, Some(error));
+            return run_result_summary_for_llmff_error(manifest_hash, artifacts, Some(error));
         }
+        if let Some(error) = cause.downcast_ref::<BatchRunError>() {
+            return serde_json::json!({
+                "schema_version": 1,
+                "status": "failed",
+                "exit_code": error.exit_code,
+                "manifest": {
+                    "hash": format!("sha256:{manifest_hash}"),
+                },
+                "artifacts": {
+                    "inspect": relative_artifact_name(&artifacts.inspect_path),
+                    "trace": relative_artifact_name(&artifacts.trace_path),
+                    "events": relative_artifact_name(&artifacts.events_path),
+                    "checkpoint": relative_artifact_name(&artifacts.checkpoint_path),
+                },
+                "failure": {
+                    "kind": error.failure_kind,
+                    "message": error.to_string(),
+                    "retry_recommendation": error.retry_recommendation,
+                },
+            });
+        }
+    }
+
+    if error
+        .to_string()
+        .starts_with("one or more batch items failed")
+    {
+        return serde_json::json!({
+            "schema_version": 1,
+            "status": "failed",
+            "exit_code": 20,
+            "manifest": {
+                "hash": format!("sha256:{manifest_hash}"),
+            },
+            "artifacts": {
+                "inspect": relative_artifact_name(&artifacts.inspect_path),
+                "trace": relative_artifact_name(&artifacts.trace_path),
+                "events": relative_artifact_name(&artifacts.events_path),
+                "checkpoint": relative_artifact_name(&artifacts.checkpoint_path),
+            },
+            "failure": {
+                "kind": "stage_execution",
+                "message": error.to_string(),
+                "retry_recommendation": "check_stage_or_input",
+            },
+        });
     }
 
     serde_json::json!({
@@ -1598,7 +1744,7 @@ fn run_result_summary_for_error(
         "status": "failed",
         "exit_code": pre_run_exit_code(error),
         "manifest": {
-            "hash": format!("sha256:{}", sha256_hex(manifest_bytes)),
+            "hash": format!("sha256:{manifest_hash}"),
         },
         "artifacts": {
             "inspect": relative_artifact_name(&artifacts.inspect_path),
@@ -1614,8 +1760,172 @@ fn run_result_summary_for_error(
     })
 }
 
+fn initialize_batch_run_dir_artifacts(
+    artifacts: &RunDirArtifacts,
+    manifest: &Manifest,
+) -> Result<()> {
+    fs::File::create(&artifacts.trace_path)?;
+    write_batch_checkpoint(
+        artifacts,
+        &manifest_fingerprint(manifest)?,
+        &BTreeMap::new(),
+    )?;
+
+    let mut events = fs::File::create(&artifacts.events_path)?;
+    writeln!(
+        events,
+        "{}",
+        serde_json::json!({
+            "run_id": "cli-batch",
+            "event": "run_started",
+            "timestamp_ms": timestamp_ms(),
+        })
+    )?;
+    Ok(())
+}
+
+fn finish_batch_run_dir_events(
+    artifacts: &RunDirArtifacts,
+    error: Option<&anyhow::Error>,
+) -> Result<()> {
+    let mut events = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&artifacts.events_path)?;
+    let event = if let Some(error) = error {
+        let (kind, message) = run_dir_anyhow_failure(error);
+        serde_json::json!({
+            "run_id": "cli-batch",
+            "event": "run_failed",
+            "status": "failed",
+            "timestamp_ms": timestamp_ms(),
+            "failure_kind": kind,
+            "failure_message": message,
+        })
+    } else {
+        serde_json::json!({
+            "run_id": "cli-batch",
+            "event": "run_finished",
+            "status": "success",
+            "timestamp_ms": timestamp_ms(),
+        })
+    };
+    writeln!(events, "{event}")?;
+    Ok(())
+}
+
+fn run_dir_anyhow_failure(error: &anyhow::Error) -> (&'static str, String) {
+    for cause in error.chain() {
+        if let Some(error) = cause.downcast_ref::<LlmffError>() {
+            return (failure_kind(error), error.to_string());
+        }
+        if let Some(error) = cause.downcast_ref::<BatchRunError>() {
+            return (error.failure_kind, error.to_string());
+        }
+    }
+    if error
+        .to_string()
+        .starts_with("one or more batch items failed")
+    {
+        ("stage_execution", error.to_string())
+    } else {
+        ("config", error.to_string())
+    }
+}
+
+fn write_batch_trace_event(
+    artifacts: Option<&RunDirArtifacts>,
+    event: serde_json::Value,
+) -> Result<()> {
+    let Some(artifacts) = artifacts else {
+        return Ok(());
+    };
+    let mut trace = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&artifacts.trace_path)?;
+    writeln!(trace, "{event}")?;
+    Ok(())
+}
+
+fn write_batch_checkpoint(
+    artifacts: &RunDirArtifacts,
+    manifest_hash: &str,
+    statuses: &BTreeMap<String, StageStatus>,
+) -> Result<()> {
+    let checkpoint = serde_json::json!({
+        "version": 1,
+        "manifest_hash": manifest_hash,
+        "statuses": statuses,
+    });
+    write_json_file(&artifacts.checkpoint_path, &checkpoint)
+}
+
+fn append_interrupted_run_event(artifacts: &RunDirArtifacts) -> Result<()> {
+    let mut events = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&artifacts.events_path)?;
+    writeln!(
+        events,
+        "{}",
+        serde_json::json!({
+            "run_id": "cli-run",
+            "event": "run_failed",
+            "status": "failed",
+            "timestamp_ms": timestamp_ms(),
+            "failure_kind": "interrupted",
+            "failure_message": "interrupted",
+        })
+    )?;
+    Ok(())
+}
+
+fn interrupted_run_result_summary(
+    manifest_hash: &str,
+    artifacts: &RunDirArtifacts,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": 1,
+        "status": "failed",
+        "exit_code": 130,
+        "manifest": {
+            "hash": format!("sha256:{manifest_hash}"),
+        },
+        "artifacts": {
+            "inspect": relative_artifact_name(&artifacts.inspect_path),
+            "trace": relative_artifact_name(&artifacts.trace_path),
+            "events": relative_artifact_name(&artifacts.events_path),
+            "checkpoint": relative_artifact_name(&artifacts.checkpoint_path),
+        },
+        "failure": {
+            "kind": "interrupted",
+            "message": "interrupted",
+            "retry_recommendation": "resume_with_matching_checkpoint",
+        },
+    })
+}
+
+fn manifest_fingerprint(manifest: &Manifest) -> Result<String> {
+    let encoded = serde_json::to_vec(manifest)?;
+    Ok(sha256_hex(&encoded))
+}
+
+fn timestamp_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
 fn pre_run_exit_code(error: &anyhow::Error) -> i32 {
+    if let Some(code) = batch_exit_code(error) {
+        return code;
+    }
     let message = error.to_string();
+    if message.starts_with("one or more batch items failed") {
+        return 20;
+    }
     if [
         "provide either manifest or --graph",
         "stream-stage cannot write to stdout",
@@ -1623,13 +1933,13 @@ fn pre_run_exit_code(error: &anyhow::Error) -> i32 {
         "max-concurrency must be greater than 0",
         "timeout-ms must be greater than 0",
         "retry-attempts must be greater than 0",
+        "batch mode does not support explicit trace, events, checkpoint, resume, replay-trace, or stream-stage flags",
         "batch mode requires",
         "batch mode output paths cannot contain parent directory components",
         "expected alias=value",
         "expected non-empty alias",
         "expected non-empty value",
         "--run-dir owns trace, events, and checkpoint paths",
-        "--run-dir cannot be used with batch mode yet",
     ]
     .iter()
     .any(|prefix| message.starts_with(prefix))
@@ -1650,6 +1960,18 @@ fn manifest_bytes_for_failure(
     manifest_path
         .and_then(|path| fs::read(path).ok())
         .unwrap_or_default()
+}
+
+fn manifest_hash_for_interrupt(
+    manifest_path: Option<&PathBuf>,
+    inline_graph: Option<&String>,
+) -> String {
+    let Ok(loaded) = load_pipeline_manifest(manifest_path.cloned(), None, inline_graph.cloned())
+    else {
+        return sha256_hex(&manifest_bytes_for_failure(manifest_path, inline_graph));
+    };
+    manifest_fingerprint(&loaded.manifest)
+        .unwrap_or_else(|_| sha256_hex(loaded.source.content.as_bytes()))
 }
 
 fn relative_artifact_name(path: &Path) -> String {
@@ -1718,6 +2040,7 @@ async fn run_batch_pipeline(
     retry_attempts: Option<usize>,
     retry_backoff_ms: Option<u64>,
     plugin_dirs: Vec<PathBuf>,
+    run_dir_artifacts: Option<&RunDirArtifacts>,
 ) -> Result<()> {
     let batch_input =
         batch_input.ok_or_else(|| anyhow::anyhow!("batch mode requires --batch-input"))?;
@@ -1760,7 +2083,9 @@ async fn run_batch_pipeline(
             backoff_ms: retry_backoff_ms.unwrap_or(0),
         })
         .unwrap_or_default();
-    let mut failed = false;
+    let manifest_hash = manifest_fingerprint(&manifest)?;
+    let mut checkpoint_statuses: BTreeMap<String, StageStatus> = BTreeMap::new();
+    let mut batch_failure: Option<BatchRunError> = None;
 
     for (index, item) in batch_source.lines().enumerate() {
         let item_id = format!("{index:06}");
@@ -1813,6 +2138,25 @@ async fn run_batch_pipeline(
             .await
         {
             Ok(_) => {
+                checkpoint_statuses.insert(
+                    format!("batch:{item_id}"),
+                    StageStatus::Success(Value::Json(serde_json::json!({
+                        "index": index,
+                        "status": "succeeded"
+                    }))),
+                );
+                if let Some(artifacts) = run_dir_artifacts {
+                    write_batch_checkpoint(artifacts, &manifest_hash, &checkpoint_statuses)?;
+                }
+                write_batch_trace_event(
+                    run_dir_artifacts,
+                    serde_json::json!({
+                        "run_id": format!("cli-batch-{item_id}"),
+                        "event": "batch_item_finished",
+                        "status": "success",
+                        "timestamp_ms": timestamp_ms(),
+                    }),
+                )?;
                 writeln!(
                     report,
                     "{}",
@@ -1820,13 +2164,35 @@ async fn run_batch_pipeline(
                 )?;
             }
             Err(error) => {
-                failed = true;
+                let kind = failure_kind(&error);
+                let exit_code = llmff_exit_code(&error);
+                let recommendation = retry_recommendation(&error);
+                batch_failure.get_or_insert_with(|| BatchRunError {
+                    report_path: report_path.clone(),
+                    exit_code,
+                    failure_kind: kind,
+                    retry_recommendation: recommendation,
+                });
+                write_batch_trace_event(
+                    run_dir_artifacts,
+                    serde_json::json!({
+                        "run_id": format!("cli-batch-{item_id}"),
+                        "event": "batch_item_finished",
+                        "status": "failed",
+                        "timestamp_ms": timestamp_ms(),
+                        "failure_kind": kind,
+                        "failure_message": error.to_string(),
+                    }),
+                )?;
                 writeln!(
                     report,
                     "{}",
                     serde_json::json!({
                         "index": index,
                         "status": "failed",
+                        "exit_code": exit_code,
+                        "failure_kind": kind,
+                        "retry_recommendation": recommendation,
                         "message": error.to_string()
                     })
                 )?;
@@ -1835,15 +2201,32 @@ async fn run_batch_pipeline(
     }
     report.flush()?;
 
-    if failed {
-        anyhow::bail!(
-            "one or more batch items failed; see {}",
-            report_path.display()
-        );
+    if let Some(error) = batch_failure {
+        return Err(error.into());
     }
 
     Ok(())
 }
+
+#[derive(Debug)]
+struct BatchRunError {
+    report_path: PathBuf,
+    exit_code: i32,
+    failure_kind: &'static str,
+    retry_recommendation: &'static str,
+}
+
+impl std::fmt::Display for BatchRunError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "one or more batch items failed; see {}",
+            self.report_path.display()
+        )
+    }
+}
+
+impl std::error::Error for BatchRunError {}
 
 fn build_engine(
     backend: Vec<String>,

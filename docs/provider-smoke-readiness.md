@@ -43,10 +43,38 @@ Required configuration:
 The workflow must keep Ollama model setup explicit because model size, download
 time, and runner capacity are support assumptions.
 
+## Provider Capability Report
+
+Before a provider is promoted, run the provider capability report against the
+same backend alias and API-key environment that the smoke will use:
+
+```bash
+scripts/provider-capability-report.sh --backend provider=https://api.openai.com/v1 --api-key-env provider=OPENAI_API_KEY
+```
+
+The provider capability report keeps certification scoped to the contract
+surface that manifests and supervisors depend on: JSON mode, streaming, seed,
+stop sequences, usage metadata, authentication configuration, and backend
+diagnostics.
+
+## Support Tiers And History
+
+Provider support tiers are documented in
+[`docs/providers/support-tiers.md`](providers/support-tiers.md). The tier matrix
+separates opt-in live smoke paths from documented hosted gateways,
+adapter-only paths, and local-provider setups.
+
+Live smoke readiness and historical status are tracked in
+[`docs/providers/live-smoke-history.json`](providers/live-smoke-history.json).
+The history file is intentionally explicit: providers without configured live
+smokes are recorded as `not configured`, while OpenAI-compatible and Ollama
+paths require `workflow_dispatch` before any live endpoint is called.
+
 ## Maintainer Checklist
 
 Before running or advertising provider certification:
 
+- Capture the provider capability report output for the target backend alias.
 - Confirm the provider choice, model, and expected request fields are still
   supported.
 - Confirm secrets and variables are configured for the repository.

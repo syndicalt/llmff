@@ -9,7 +9,7 @@ resolver = "2"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/syndicalt/llmff"
-version = "0.1.5"
+version = "0.1.6"
 
 [workspace.dependencies]
 anyhow = "1"

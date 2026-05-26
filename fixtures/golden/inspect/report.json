@@ -18,13 +18,25 @@
   "inputs": {
     "prompt": {
       "path": "./question.txt",
-      "format": null
+      "format": "text"
+    },
+    "stdin": {
+      "path": null,
+      "format": "text"
+    },
+    "batch": {
+      "path": "./batch-items.jsonl",
+      "format": "jsonl"
     }
   },
   "outputs": {
     "final": {
       "from": "choose_final",
       "path": "./answer.json"
+    },
+    "stdout": {
+      "from": "choose_final",
+      "path": null
     }
   },
   "stage_order": [
@@ -57,6 +69,44 @@
       "writes_stdout": false
     },
     {
+      "id": "render_prompt",
+      "op": "template",
+      "input": null,
+      "from": "load_prompt",
+      "model": null,
+      "sampler": null,
+      "plugin": null,
+      "capability_constraints": {
+        "kind": "transform",
+        "required_fields": ["from", "path"],
+        "optional_fields": [],
+        "capabilities": ["file-template"]
+      },
+      "cache_policy": null,
+      "timeout_ms": null,
+      "retry": null,
+      "writes_stdout": false
+    },
+    {
+      "id": "apply_policy",
+      "op": "system",
+      "input": null,
+      "from": "render_prompt",
+      "model": null,
+      "sampler": null,
+      "plugin": null,
+      "capability_constraints": {
+        "kind": "transform",
+        "required_fields": ["from", "path"],
+        "optional_fields": [],
+        "capabilities": ["system-prompt"]
+      },
+      "cache_policy": null,
+      "timeout_ms": null,
+      "retry": null,
+      "writes_stdout": false
+    },
+    {
       "id": "draft",
       "op": "infer",
       "input": null,
@@ -66,7 +116,7 @@
         "alias": "mock",
         "provider_model": "bad"
       },
-      "sampler": null,
+      "sampler": "small-deterministic",
       "plugin": null,
       "capability_constraints": {
         "kind": "model",
@@ -93,34 +143,107 @@
         ]
       },
       "cache_policy": null,
+      "timeout_ms": 30000,
+      "retry": {
+        "attempts": 2,
+        "backoff_ms": 100
+      },
+      "writes_stdout": false
+    },
+    {
+      "id": "validate",
+      "op": "validate_json",
+      "input": null,
+      "from": "draft",
+      "model": null,
+      "sampler": null,
+      "plugin": null,
+      "capability_constraints": {
+        "kind": "validation",
+        "required_fields": ["from", "schema_path"],
+        "optional_fields": [],
+        "capabilities": ["json-schema"]
+      },
+      "cache_policy": null,
       "timeout_ms": null,
       "retry": null,
       "writes_stdout": false
+    },
+    {
+      "id": "repair",
+      "op": "repair",
+      "input": null,
+      "from": "validate",
+      "model": {
+        "id": "mock:json",
+        "alias": "mock",
+        "provider_model": "json"
+      },
+      "sampler": null,
+      "plugin": null,
+      "capability_constraints": {
+        "kind": "model",
+        "required_fields": ["from", "model", "schema_path"],
+        "optional_fields": ["temperature", "max_tokens", "timeout_ms", "retry"],
+        "capabilities": ["json-repair", "usage-metadata"]
+      },
+      "cache_policy": "read-refresh",
+      "timeout_ms": null,
+      "retry": null,
+      "writes_stdout": false
+    },
+    {
+      "id": "choose_final",
+      "op": "plugin:postprocessor.strip",
+      "input": null,
+      "from": "repair",
+      "model": null,
+      "sampler": null,
+      "plugin": {
+        "name": "postprocessor-strip",
+        "version": "0.1.0",
+        "capability": "postprocessor.strip",
+        "protocol_version": 1
+      },
+      "capability_constraints": {
+        "kind": "plugin-stage",
+        "required_fields": ["from"],
+        "optional_fields": [],
+        "capabilities": ["command-protocol-v1"],
+        "plugin": {
+          "name": "postprocessor-strip",
+          "protocol_version": 1
+        }
+      },
+      "cache_policy": null,
+      "timeout_ms": null,
+      "retry": null,
+      "writes_stdout": true
     }
   ],
   "execution": {
-    "scheduler": "sequential",
-    "max_concurrency": null,
-    "default_timeout_ms": null,
+    "scheduler": "parallel",
+    "max_concurrency": 2,
+    "default_timeout_ms": 60000,
     "default_retry": {
       "attempts": 1,
       "backoff_ms": 0
     },
     "checkpoint": {
-      "enabled": false,
-      "resume": false,
-      "path": null,
-      "resume_path": null
+      "enabled": true,
+      "resume": true,
+      "path": ".llmff/checkpoints/run.json",
+      "resume_path": ".llmff/checkpoints/run.json"
     },
     "stdout": {
-      "events": false,
+      "events": true,
       "stream_stage": false,
       "manifest_outputs": false
     },
     "artifacts": {
-      "trace": null,
-      "events": null,
-      "stream_stage": null
+      "trace": ".llmff/runs/example/trace.jsonl",
+      "events": ".llmff/runs/example/events.jsonl",
+      "stream_stage": "choose_final"
     }
   },
   "backends": {
@@ -184,6 +307,17 @@
             "kind": "backend",
             "name": "echo-backend",
             "entrypoint": "./bin/backend"
+          }
+        ]
+      },
+      {
+        "name": "postprocessor-strip",
+        "version": "0.1.0",
+        "capabilities": [
+          {
+            "kind": "stage",
+            "name": "postprocessor.strip",
+            "entrypoint": "./bin/postprocess"
           }
         ]
       }

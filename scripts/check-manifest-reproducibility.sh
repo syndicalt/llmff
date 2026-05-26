@@ -48,6 +48,7 @@ done
 
 for text in \
   '"hash"' \
+  '"compatibility"' \
   '"inputs"' \
   '"outputs"' \
   '"stage_order"' \
@@ -61,6 +62,50 @@ do
   require_text "$schema" "$text"
   require_text "$fixture" "$text"
 done
+
+python3 - "$fixture" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+fixture = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+
+stage_order = fixture["stage_order"]
+stage_ids = [stage["id"] for stage in fixture["stages"]]
+if stage_ids != stage_order:
+    raise SystemExit("inspect fixture stages must exactly match stage_order")
+
+inputs = fixture["inputs"]
+for required in ["prompt", "stdin", "batch"]:
+    if required not in inputs:
+        raise SystemExit(f"inspect fixture must include {required} input metadata")
+
+outputs = fixture["outputs"]
+if "final" not in outputs or "stdout" not in outputs:
+    raise SystemExit("inspect fixture must include final and stdout output metadata")
+
+if not any(stage.get("cache_policy") for stage in fixture["stages"]):
+    raise SystemExit("inspect fixture must include cache policy metadata")
+if not any(stage.get("timeout_ms") is not None for stage in fixture["stages"]):
+    raise SystemExit("inspect fixture must include stage timeout metadata")
+if not any(stage.get("retry") for stage in fixture["stages"]):
+    raise SystemExit("inspect fixture must include stage retry metadata")
+if not any(stage.get("plugin") for stage in fixture["stages"]):
+    raise SystemExit("inspect fixture must include plugin dependency metadata")
+if not any(stage.get("writes_stdout") for stage in fixture["stages"]):
+    raise SystemExit("inspect fixture must include stdout-producing stage metadata")
+
+execution = fixture["execution"]
+stdout_owners = [
+    execution["stdout"]["events"],
+    execution["stdout"]["stream_stage"],
+    execution["stdout"]["manifest_outputs"],
+]
+if sum(1 for owner in stdout_owners if owner) != 1:
+    raise SystemExit("inspect fixture must show exactly one stdout owner")
+if not execution["artifacts"]["trace"] or not execution["artifacts"]["events"]:
+    raise SystemExit("inspect fixture must show trace and events artifact paths")
+PY
 
 require_text "docs/roadmap.md" "Explore lockfile or manifest-lock support only if it materially improves"
 require_text "docs/roadmap.md" "Maintain schema compatibility fixtures for every additive manifest contract"

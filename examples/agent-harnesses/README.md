@@ -29,6 +29,40 @@ stdout. The subprocess is also bounded by Python's `subprocess.run(...,
 timeout=...)`, so a stuck process cannot outlive the agent tool call
 indefinitely.
 
+## Embedding Patterns
+
+Short jobs should use one unique run directory per agent tool call:
+
+```bash
+llmff run --run-dir .llmff/agent-runs/job-42 pipeline.yaml --timeout-ms 30000
+```
+
+Long jobs use the same run-directory artifact bundle plus `--resume` when a
+matching checkpoint exists:
+
+```bash
+llmff run --run-dir .llmff/agent-runs/job-42 pipeline.yaml \
+  --resume .llmff/agent-runs/job-42/checkpoint.json
+```
+
+Batch jobs can use the run-directory metadata bundle while keeping batch item
+paths explicit:
+
+```bash
+llmff run --run-dir .llmff/agent-runs/job-42 pipeline.yaml \
+  --batch-input .llmff/agent-runs/job-42/items.txt \
+  --batch-output-dir .llmff/agent-runs/job-42/batch-output
+```
+
+Streaming jobs should pick one stdout owner. Use `--events -` only when all
+payloads write to files; use `--events <path>` when `--stream-stage` owns
+stdout.
+
+Do not translate non-zero llmff statuses into framework-specific success.
+Propagate or store the subprocess status, then use `run_failed.failure_kind`
+from `events.jsonl` or `result.json` only to classify the retry, repair, or
+escalation decision.
+
 Template manifests should declare the placeholder where the run-scoped input
 path belongs:
 

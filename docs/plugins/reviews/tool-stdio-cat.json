@@ -1,0 +1,30 @@
+{
+  "format_version": 1,
+  "plugin": "tool-stdio-cat",
+  "version": "0.1.0",
+  "category": "tool-transport",
+  "manifest": "../../examples/plugins/tool-stdio-cat/llmff-plugin.yaml",
+  "promotion": {
+    "status": "promoted",
+    "support_commitment": "protocol-v1-fixture-backed",
+    "policy": "promotion-policy.md",
+    "review": "reviews/tool-stdio-cat.json",
+    "reviewed_at": "2026-05-26"
+  },
+  "validation": {
+    "command": "scripts/check-plugin-fixtures.sh",
+    "manifest_checked": true,
+    "protocol_fixtures": [
+      "tool-transport/stdin.txt",
+      "tool-transport/stdout.txt"
+    ]
+  },
+  "trust_boundary": {
+    "sandboxed": false,
+    "filesystem_access": "stdin-stdout-only",
+    "network_access": "none",
+    "process_access": "entrypoint-shell",
+    "environment_access": "none-required"
+  },
+  "decision": "approved-for-registry-promotion"
+}

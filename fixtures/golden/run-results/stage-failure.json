@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "status": "failed",
+  "exit_code": 20,
+  "manifest": {
+    "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "artifacts": {
+    "inspect": "inspect.json",
+    "trace": "trace.jsonl",
+    "events": "events.jsonl",
+    "checkpoint": "checkpoint.json"
+  },
+  "failure": {
+    "kind": "stage_execution",
+    "message": "tool command exited with status 7",
+    "retry_recommendation": "check_stage_or_input"
+  }
+}

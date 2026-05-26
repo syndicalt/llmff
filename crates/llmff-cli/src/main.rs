@@ -6,6 +6,7 @@ mod commands;
 #[tokio::main]
 async fn main() {
     let cli = commands::Cli::parse();
+    let interrupt_context = commands::interrupt_context(&cli);
     let code = tokio::select! {
         result = commands::run(cli) => match result {
             Ok(()) => 0,
@@ -19,6 +20,11 @@ async fn main() {
                 eprintln!("Error: failed to listen for interrupt signal: {error}");
                 1
             } else {
+                if let Some(context) = interrupt_context.as_ref() {
+                    if let Err(error) = commands::write_interrupted_run_result(context) {
+                        eprintln!("Error: failed to write interrupted run result: {error:#}");
+                    }
+                }
                 eprintln!("Error: interrupted");
                 130
             }
@@ -53,6 +59,9 @@ fn exit_code(error: &anyhow::Error) -> i32 {
         if let Some(error) = cause.downcast_ref::<LlmffError>() {
             return llmff_exit_code(error);
         }
+    }
+    if let Some(code) = commands::batch_exit_code(error) {
+        return code;
     }
 
     let message = error.to_string();
@@ -92,7 +101,7 @@ fn is_cli_usage_error(message: &str) -> bool {
         "max-concurrency must be greater than 0",
         "timeout-ms must be greater than 0",
         "retry-attempts must be greater than 0",
-        "--run-dir cannot be used with batch mode yet",
+        "batch mode does not support explicit trace, events, checkpoint, resume, replay-trace, or stream-stage flags",
         "batch mode requires",
         "batch mode output paths cannot contain parent directory components",
         "expected alias=value",

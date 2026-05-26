@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "status": "succeeded",
+  "exit_code": 0,
+  "manifest": {
+    "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "artifacts": {
+    "inspect": "inspect.json",
+    "trace": "trace.jsonl",
+    "events": "events.jsonl",
+    "checkpoint": "checkpoint.json"
+  },
+  "failure": null
+}

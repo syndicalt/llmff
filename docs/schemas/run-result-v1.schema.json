@@ -89,7 +89,8 @@
                 "stage_execution",
                 "backend",
                 "config",
-                "not_implemented"
+                "not_implemented",
+                "interrupted"
               ]
             },
             "message": {
@@ -101,7 +102,8 @@
                 "retry_with_backoff",
                 "check_stage_or_input",
                 "check_filesystem",
-                "do_not_retry_without_changes"
+                "do_not_retry_without_changes",
+                "resume_with_matching_checkpoint"
               ]
             }
           }

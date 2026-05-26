@@ -31,14 +31,19 @@ in-process embedding.
 
 ## Run Directory Layout
 
-This branch adds the contract for:
+The canonical single-run harness contract is:
 
 ```bash
 llmff run <manifest> --run-dir <dir>
 ```
 
-If the local binary does not yet expose `--run-dir`, use the equivalent
-explicit flags:
+`--run-dir <dir>` creates the directory when needed and writes run-scoped
+metadata under it. It owns trace, events, and checkpoint paths, so the CLI
+rejects attempts to combine it with explicit `--trace`, `--events`, or
+`--checkpoint` arguments.
+
+For wrappers that intentionally manage each artifact path themselves, use the
+explicit equivalent:
 
 ```bash
 llmff inspect <manifest> --format json > <dir>/inspect.json
@@ -48,9 +53,7 @@ llmff run <manifest> \
   --checkpoint <dir>/checkpoint.json
 ```
 
-`--run-dir <dir>` is the canonical agent harness artifact directory. It should
-create the directory when needed and write only run-scoped artifacts under it.
-The intended layout is:
+The run-directory layout is:
 
 | Path | Owner | Purpose |
 | --- | --- | --- |
@@ -66,6 +69,21 @@ The intended layout is:
 declared manifest outputs. If the manifest writes output paths outside the run
 directory, `inspect.json` and `result.json` should record those paths rather
 than copying payloads implicitly.
+
+Batch mode can use `--run-dir` while still requiring explicit batch item paths.
+In other words, batch mode can use `--run-dir` and keep item payload ownership
+separate:
+
+```bash
+llmff run <manifest> --run-dir <dir> \
+  --batch-input <dir>/batch/items.txt \
+  --batch-output-dir <dir>/batch/output
+```
+
+The run directory owns inspect, trace, events, checkpoint, and result metadata.
+For batch runs, trace and checkpoint artifacts describe batch item lifecycle
+and completed item progress rather than per-stage resume state. The batch
+output directory owns `batch-report.jsonl` and per-item payload artifacts.
 
 ## Stdout Ownership
 
@@ -142,7 +160,8 @@ contract.
 When a `run_failed` event or trace record is available, `failure_kind` gives a
 stable machine-readable class. Current values are `manifest_parse`, `io`,
 `json`, `graph_validation`, `unknown_stage`, `timeout`, `http`,
-`stage_execution`, `backend`, `config`, and `not_implemented`.
+`stage_execution`, `backend`, `config`, `not_implemented`, and
+`interrupted`.
 
 Recommended harness behavior:
 
@@ -156,10 +175,13 @@ Recommended harness behavior:
   configuration; retry only after changing a relevant condition.
 - `not_implemented`: choose a different pipeline or capability; retrying the
   same invocation is not useful.
+- `interrupted`: preserve exit code `130`; resume only with a matching
+  checkpoint and unchanged manifest hash.
 
 New failure kinds are additive. Harnesses should handle unknown values by
 recording them, preserving the original exit code, and falling back to the
-broad exit-code posture.
+broad exit-code posture. The same rule applies when no `run_failed` event is
+available: preserve the original exit code and use it as the final authority.
 
 ## Safe Metadata Handling
 

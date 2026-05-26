@@ -123,9 +123,14 @@ bash scripts/check-release-publication-wiring.sh
 bash scripts/check-release-signing-wiring.sh
 bash scripts/check-windows-signing-wiring.sh
 bash scripts/check-macos-signing-wiring.sh
+python3 scripts/check-schema-contract.py
+bash scripts/check-manifest-reproducibility.sh
+bash scripts/check-plugin-fixtures.sh
+bash scripts/check-provider-smoke-readiness.sh
 bash scripts/check-ecosystem-readiness.sh
 bash scripts/check-agent-adoption-guide.sh
 bash scripts/check-opentelemetry-bridge.sh
+bash scripts/check-real-world-workflows.sh
 
 if [ "$check_github_secrets" -eq 1 ]; then
   bash scripts/check-github-release-secrets.sh

@@ -14,6 +14,12 @@ These JSON Schemas freeze the llmff core contract at version 1:
 
 Schemas use JSON Schema draft 2020-12. YAML fixtures are loaded as normal JSON-compatible data before validation.
 
+The multi-release compatibility matrix in
+`docs/compatibility/core-contract-v1-matrix.json` records which release first
+introduced or preserved each schema, event, trace, and CLI JSON surface. The
+schema contract checker validates that matrix together with the schema files
+and golden fixtures.
+
 ## Inline Graph Metadata
 
 Pipeline manifests may include:

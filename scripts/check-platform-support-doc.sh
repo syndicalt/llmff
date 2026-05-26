@@ -22,6 +22,10 @@ if [ "$#" -ne 0 ]; then
 fi
 
 doc="docs/platform-support.md"
+workspace_version="$(
+  sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1
+)"
+release_tag="v${workspace_version}"
 
 if [ ! -f "$doc" ]; then
   printf 'error: missing %s\n' "$doc" >&2
@@ -58,9 +62,9 @@ require_text "$doc" 'Windows Authenticode signing remains a future paid distribu
 require_text "$doc" 'llmff inspect examples/json-repair.yaml'
 
 require_text 'README.md' 'docs/platform-support.md'
-require_text 'README.md' 'scripts/release-preflight.sh v0.1.5'
+require_text 'README.md' "scripts/release-preflight.sh ${release_tag}"
 require_text 'docs/release-readiness.md' 'docs/platform-support.md'
-require_text 'docs/release-readiness.md' 'scripts/release-preflight.sh v0.1.5'
+require_text 'docs/release-readiness.md' "scripts/release-preflight.sh ${release_tag}"
 
 if grep -Eq 'Packaged installers .*on the roadmap|Future Capability Tracks|--mock llmff:good|Add published-asset verification' README.md docs/roadmap.md docs/platform-support.md; then
   printf 'error: release docs still describe completed package or capability tracks as future work\n' >&2

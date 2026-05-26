@@ -68,6 +68,18 @@ prompt bodies, model payloads, tool request bodies, or final output artifacts
 from metadata streams. The rule for agent hosts is simple:
 do not read prompt payloads from metadata.
 
+## Preserve Exit Codes
+
+Always preserve the original `llmff` process exit code in the agent job record
+and in any framework exception or tool result. `run_failed.failure_kind`,
+`failure_message`, `result.json`, events, traces, and batch reports are
+classification evidence; they do not replace process status.
+
+If the agent host applies its own host timeout and kills the subprocess before
+`llmff` exits, record that host timeout separately from the `llmff` exit-code
+contract. In that case, a missing `run_failed` event is expected and must not
+be treated as success.
+
 ## Retry Decisions
 
 Treat exit code as the first decision input:
@@ -85,12 +97,17 @@ Treat exit code as the first decision input:
 
 When `run_failed.failure_kind` is available:
 
-- `graph_validation`, `manifest_parse`, `schema`, and `config` require manifest
-  or invocation repair.
+- `graph_validation`, `manifest_parse`, `unknown_stage`, and `config` require
+  manifest or invocation repair.
+- `io` and `json` require local file, path, permission, or JSON repair.
 - `backend`, `http`, and `timeout` may be retried according to the agent's
   provider policy.
 - `stage_execution` requires inspecting the stage contract and inputs before a
   retry.
+- `interrupted` requires preserving exit code `130`; resume only with a
+  matching checkpoint and unchanged manifest hash.
+- unknown values should be recorded while falling back to the exit-code
+  posture above.
 
 ## Long Jobs
 
@@ -115,6 +132,10 @@ llmff run pipeline.yaml \
   --batch-input .llmff/runs/job-42/items.txt \
   --batch-output-dir .llmff/runs/job-42/batch-output
 ```
+
+Current batch mode can use `--run-dir` with explicit batch paths. Store the
+run-directory metadata, batch input, `batch-report.jsonl`, item output
+directories, and process exit code together in the agent job record.
 
 Use the batch report to identify failed items. Preserve item output directories
 as artifacts so the agent can retry only the failed units.

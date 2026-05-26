@@ -227,9 +227,14 @@ fn release_preflight_runs_ecosystem_readiness_gate() {
 
     let source = std::fs::read_to_string(&preflight).expect("preflight should be readable");
     for required in [
+        "scripts/check-schema-contract.py",
+        "scripts/check-manifest-reproducibility.sh",
+        "scripts/check-plugin-fixtures.sh",
+        "scripts/check-provider-smoke-readiness.sh",
         "scripts/check-ecosystem-readiness.sh",
         "scripts/check-agent-adoption-guide.sh",
         "scripts/check-opentelemetry-bridge.sh",
+        "scripts/check-real-world-workflows.sh",
     ] {
         assert!(
             source.contains(required),

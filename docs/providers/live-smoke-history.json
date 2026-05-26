@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-05-26",
+  "providers": [
+    {
+      "provider": "anthropic",
+      "support_tier": "Documented adapter",
+      "live_smoke": "not configured",
+      "latest_result": "not_run",
+      "readiness_evidence": [
+        "docs/providers/anthropic.md",
+        "examples/providers/anthropic.yaml",
+        "scripts/provider-capability-report.sh"
+      ]
+    },
+    {
+      "provider": "azure-openai",
+      "support_tier": "Documented gateway",
+      "live_smoke": "not configured",
+      "latest_result": "not_run",
+      "readiness_evidence": [
+        "docs/providers/azure-openai.md",
+        "examples/providers/azure-openai.yaml",
+        "scripts/provider-capability-report.sh"
+      ]
+    },
+    {
+      "provider": "groq",
+      "support_tier": "Documented gateway",
+      "live_smoke": "not configured",
+      "latest_result": "not_run",
+      "readiness_evidence": [
+        "docs/providers/groq.md",
+        "examples/providers/groq.yaml",
+        "scripts/provider-capability-report.sh"
+      ]
+    },
+    {
+      "provider": "lm-studio",
+      "support_tier": "Local documented",
+      "live_smoke": "not configured",
+      "latest_result": "not_run",
+      "readiness_evidence": [
+        "docs/providers/lm-studio.md",
+        "examples/providers/lm-studio.yaml",
+        "scripts/provider-capability-report.sh"
+      ]
+    },
+    {
+      "provider": "localai",
+      "support_tier": "Local documented",
+      "live_smoke": "not configured",
+      "latest_result": "not_run",
+      "readiness_evidence": [
+        "docs/providers/localai.md",
+        "examples/providers/localai.yaml",
+        "scripts/provider-capability-report.sh"
+      ]
+    },
+    {
+      "provider": "ollama",
+      "support_tier": "Opt-in live smoke",
+      "live_smoke": "workflow_dispatch",
+      "latest_result": "pending",
+      "readiness_evidence": [
+        ".github/workflows/live-provider-smoke.yml",
+        "scripts/smoke-ollama-provider.sh",
+        "docs/provider-smoke-readiness.md",
+        "examples/providers/ollama.yaml"
+      ]
+    },
+    {
+      "provider": "openai",
+      "support_tier": "Documented gateway",
+      "live_smoke": "via openai-compatible",
+      "latest_result": "covered_by_openai_compatible",
+      "readiness_evidence": [
+        "docs/providers/openai.md",
+        "examples/providers/openai.yaml",
+        "scripts/provider-capability-report.sh"
+      ]
+    },
+    {
+      "provider": "openai-compatible",
+      "support_tier": "Opt-in live smoke",
+      "live_smoke": "workflow_dispatch",
+      "latest_result": "pending",
+      "readiness_evidence": [
+        ".github/workflows/live-provider-smoke.yml",
+        "scripts/smoke-openai-compatible-provider.sh",
+        "docs/provider-smoke-readiness.md",
+        "examples/providers/openai-compatible.yaml"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "support_tier": "Documented gateway",
+      "live_smoke": "not configured",
+      "latest_result": "not_run",
+      "readiness_evidence": [
+        "docs/providers/openrouter.md",
+        "examples/providers/openrouter.yaml",
+        "scripts/provider-capability-report.sh"
+      ]
+    },
+    {
+      "provider": "together",
+      "support_tier": "Documented gateway",
+      "live_smoke": "not configured",
+      "latest_result": "not_run",
+      "readiness_evidence": [
+        "docs/providers/together.md",
+        "examples/providers/together.yaml",
+        "scripts/provider-capability-report.sh"
+      ]
+    },
+    {
+      "provider": "vllm",
+      "support_tier": "Local documented",
+      "live_smoke": "not configured",
+      "latest_result": "not_run",
+      "readiness_evidence": [
+        "docs/providers/vllm.md",
+        "examples/providers/vllm.yaml",
+        "scripts/provider-capability-report.sh"
+      ]
+    }
+  ]
+}
