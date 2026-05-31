@@ -49,13 +49,20 @@ this check passes locally:
 scripts/release-preflight.sh v0.8.0
 ```
 
+Cut the final `v1.0.0` tag only after the compatibility review and this local
+preflight pass:
+
+```bash
+scripts/release-preflight.sh v1.0.0
+```
+
 For release tags in the release-candidate train, CI creates the GitHub Release when
 the tag does not already have one, then uploads binary archives, checksums,
 Ubuntu/Debian packages, Arch packaging metadata, Windows MSI packages, and
 macOS `.pkg` packages to the matching GitHub Release assets. Manual dispatch
 keeps those outputs as Actions artifacts only.
 
-Unsigned Windows and macOS artifacts are acceptable for v0.8.0. Windows release
+Unsigned Windows and macOS artifacts are acceptable for v1.0.0. Windows release
 tags publish an unsigned `.zip` and unsigned MSI. macOS release tags publish
 unsigned `.pkg` installers. Trusted Authenticode signing, Apple Developer ID
 signing, and notarization remain deferred paid distribution tracks.
@@ -63,14 +70,14 @@ signing, and notarization remain deferred paid distribution tracks.
 Current packaged artifact targets and installer assumptions are documented in
 [`docs/platform-support.md`](platform-support.md).
 
-After release CI completes for `v0.8.0`, verify the published GitHub Release
+After release CI completes for the final `v1.0.0` tag, verify the published GitHub Release
 contains the expected archive, checksum, Debian, Arch metadata, MSI, and macOS
 package assets. Release publication is handled by a dependent publish job after
 the full artifact matrix succeeds, so partial native-installer releases are not
 published:
 
 ```bash
-scripts/check-release-assets.sh v0.8.0
+scripts/check-release-assets.sh v1.0.0
 ```
 
 The exact release-candidate and final-release evidence requirements are in

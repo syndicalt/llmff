@@ -15,7 +15,7 @@ decision guide.
 Install the latest tagged release with Cargo:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v0.8.0 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v1.0.0 llmff
 ```
 
 If you downloaded a release archive instead, unpack it and put the `llmff`
@@ -33,7 +33,7 @@ llmff stages list
 Expected version:
 
 ```text
-llmff 0.8.0
+llmff 1.0.0
 ```
 
 ## 2. Run The Offline Example
@@ -170,7 +170,7 @@ does not include full prompts, tool bodies, headers, cached values, or secrets.
   before the first colon.
 - `missing API key environment variable`: export the secret and pass
   `--api-key-env alias=ENV_NAME`.
-- Windows and macOS release installers are unsigned in `v0.8.0`; expect normal
+- Windows and macOS release installers are unsigned in `v1.0.0`; expect normal
   OS trust prompts until paid signing and notarization are added.
 
 ## Next Steps

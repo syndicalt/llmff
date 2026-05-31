@@ -79,6 +79,7 @@ Required final evidence:
 - public machine-readable outputs have schema or fixture coverage;
 - package artifacts build and smoke-test on their target platforms;
 - dependency and security review is recorded in the release issue or notes;
+- dependency and security review evidence is recorded before the final tag;
 - `docs/migration/pre-1.0-to-1.0.md` is complete;
 - unsigned Windows and macOS status is repeated unless signing and notarization
   are live;
