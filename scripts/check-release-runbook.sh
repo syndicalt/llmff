@@ -54,8 +54,13 @@ if grep -Fq -- "- [x] **Step 4: Ship \`v1.0.0\` only after compatibility review*
   require_text "docs/superpowers/plans/2026-05-30-llmff-v1-roadmap.md" "scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v1.0.0"
   require_text "docs/superpowers/plans/2026-05-30-llmff-v1-roadmap.md" "docs/release-evidence/v1.0.0.md"
   require_text "docs/release-evidence/v1.0.0.md" "scripts/release-preflight.sh v1.0.0"
+  require_text "docs/release-evidence/v1.0.0.md" "18eb62a18d40935eb1fc0b07109ff0eba3807edb"
+  require_text "docs/release-evidence/v1.0.0.md" "26723793883"
+  require_text "docs/release-evidence/v1.0.0.md" "26723827131"
   require_text "docs/release-evidence/v1.0.0.md" "scripts/check-release-assets.sh v1.0.0"
+  require_text "docs/release-evidence/v1.0.0.md" "release asset verification succeeded for v1.0.0"
   require_text "docs/release-evidence/v1.0.0.md" "scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v1.0.0"
+  require_text "docs/release-evidence/v1.0.0.md" "run cli-run succeeded"
   require_text "docs/release-evidence/v1.0.0.md" "dependency and security review"
 fi
 

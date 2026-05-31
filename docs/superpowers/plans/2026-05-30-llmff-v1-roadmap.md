@@ -479,7 +479,7 @@ Important scope boundary:
   Evidence is recorded in
   `docs/release-evidence/v0.8.0.md`.
 
-- [ ] **Step 4: Ship `v1.0.0` only after compatibility review**
+- [x] **Step 4: Ship `v1.0.0` only after compatibility review**
 
   Required evidence:
 
@@ -492,6 +492,16 @@ Important scope boundary:
   - `docs/release-runbook.md` final-release evidence recorded, including
     `scripts/check-release-assets.sh v1.0.0` and `scripts/smoke-install.sh
     --git https://github.com/syndicalt/llmff --tag v1.0.0`
+
+  Completed for `v1.0.0`. The annotated tag was pushed for commit
+  `18eb62a18d40935eb1fc0b07109ff0eba3807edb`, main CI passed in GitHub
+  Actions run `26723793883`, release-tag CI passed in GitHub Actions run
+  `26723827131`, published release assets verified with
+  `scripts/check-release-assets.sh v1.0.0`, and the GitHub install smoke passed
+  with `scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v1.0.0`.
+  Final evidence is recorded in `docs/release-evidence/v1.0.0.md`; dependency
+  and security review evidence is recorded in
+  `docs/release-evidence/v1.0.0-security.md`.
 
 ## Task 11: Post-V1 Guardrails
 
