@@ -63,6 +63,10 @@ evidence exists for the same commit and tag.
    `scripts/check-release-assets.sh v0.8.0` result, and
    `scripts/smoke-install.sh --git ... --tag v0.8.0` result.
 
+Checked-in release-candidate evidence should live under
+`docs/release-evidence/` when a release-candidate roadmap step is marked
+complete.
+
 ## V1.0.0 Final Release
 
 Do not publish `v1.0.0` until the release-candidate evidence above exists and

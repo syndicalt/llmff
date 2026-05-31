@@ -37,6 +37,11 @@ if grep -Fq -- "- [x] **Step 3: Cut at least one release candidate**" \
   docs/superpowers/plans/2026-05-30-llmff-v1-roadmap.md; then
   require_text "docs/superpowers/plans/2026-05-30-llmff-v1-roadmap.md" "scripts/check-release-assets.sh v0.8.0"
   require_text "docs/superpowers/plans/2026-05-30-llmff-v1-roadmap.md" "scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.8.0"
+  require_text "docs/superpowers/plans/2026-05-30-llmff-v1-roadmap.md" "docs/release-evidence/v0.8.0.md"
+  require_text "docs/release-evidence/v0.8.0.md" "95cd3ebf16cb6e0e6630fba29da183d47e55424f"
+  require_text "docs/release-evidence/v0.8.0.md" "26723385951"
+  require_text "docs/release-evidence/v0.8.0.md" "release asset verification succeeded for v0.8.0"
+  require_text "docs/release-evidence/v0.8.0.md" "run cli-run succeeded"
 fi
 
 if grep -Fq -- "- [x] **Step 4: Ship \`v1.0.0\` only after compatibility review**" \

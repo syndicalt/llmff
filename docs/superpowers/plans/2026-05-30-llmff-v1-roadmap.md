@@ -467,20 +467,17 @@ Important scope boundary:
   scripts/release-preflight.sh v0.8.0
   ```
 
-- [ ] **Step 3: Cut at least one release candidate**
+- [x] **Step 3: Cut at least one release candidate**
 
   Use the RC to validate install, artifacts, docs, examples, and external integration assumptions before `v1.0.0`.
 
-  Local preparation completed: `v0.8.0` release preflight passes, Linux archive
-  and Debian artifacts build and smoke-test locally, macOS payload roots
-  smoke-test locally, Windows WiX source emits locally, Arch metadata is
-  generated, and the release trust manifest is generated under
-  `dist/v0.8.0-local/`. The actual release candidate tag, push, CI artifact
-  matrix, and published GitHub Release assets remain external release actions.
-  `docs/release-runbook.md` defines the evidence that must be recorded before
-  this checkbox can be completed, including `scripts/check-release-assets.sh
-  v0.8.0` and `scripts/smoke-install.sh --git
-  https://github.com/syndicalt/llmff --tag v0.8.0` against the published tag.
+  Completed for `v0.8.0`. The annotated tag was pushed for commit
+  `95cd3ebf16cb6e0e6630fba29da183d47e55424f`, release-tag CI succeeded in
+  GitHub Actions run `26723385951`, published release assets verified with
+  `scripts/check-release-assets.sh v0.8.0`, and the GitHub install smoke passed
+  with `scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.8.0`.
+  Evidence is recorded in
+  `docs/release-evidence/v0.8.0.md`.
 
 - [ ] **Step 4: Ship `v1.0.0` only after compatibility review**
 
