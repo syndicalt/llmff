@@ -10,6 +10,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 if [ -z "${LLMFF_BIN:-}" ]; then
   cargo build -q -p llmff
   export LLMFF_BIN="$repo_root/target/debug/llmff"
+elif [[ "$LLMFF_BIN" != /* ]]; then
+  export LLMFF_BIN="$repo_root/$LLMFF_BIN"
 fi
 
 require_file() {

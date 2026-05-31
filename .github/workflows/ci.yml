@@ -50,7 +50,7 @@ jobs:
       - name: Real-world workflow examples
         run: bash scripts/check-real-world-workflows.sh
         env:
-          LLMFF_BIN: target/debug/llmff
+          LLMFF_BIN: ${{ github.workspace }}/target/debug/llmff
 
       - name: Events and streaming smoke
-        run: LLMFF_BIN=target/debug/llmff bash scripts/smoke-events-streaming.sh
+        run: LLMFF_BIN="${GITHUB_WORKSPACE}/target/debug/llmff" bash scripts/smoke-events-streaming.sh
