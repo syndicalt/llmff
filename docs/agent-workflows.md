@@ -50,6 +50,11 @@ checkpoint, and result metadata:
 llmff run --run-dir .llmff/runs/job-42 pipeline.yaml
 ```
 
+The canonical supervisor sequence is: run `llmff inspect --format json`, run
+`llmff run --run-dir <dir>`, preserve the original process exit code, store the
+run-directory artifacts, and read safe failure kinds from `run_failed` events
+or `result.json` only after a non-zero exit.
+
 Use explicit artifact flags when the agent needs a different stream owner or
 when an older wrapper has not adopted `--run-dir`:
 

@@ -17,7 +17,9 @@ Promoted registry entries must have:
 
 The static registry is still not an installer. Runtime loading continues to use
 `--plugin-dir` and local plugin manifests. Promotion only means the published
-registry entry is maintained as a documented, fixture-backed example.
+registry entry is maintained as a documented, fixture-backed example. Promotion
+does not imply plugin signing, sandboxing, remote trust, or provider
+certification.
 
 ## Review Evidence
 

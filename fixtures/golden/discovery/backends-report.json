@@ -1,0 +1,34 @@
+[
+  {
+    "name": "openai",
+    "kind": "openai-compatible",
+    "source": "cli",
+    "base_url": "https://api.example.test/v1",
+    "requires_api_key": true,
+    "api_key_configured": true,
+    "model_aliases": ["openai:<model>"],
+    "capabilities": {
+      "json_mode": {
+        "supported": true,
+        "detail": "response_format json_object"
+      },
+      "streaming": {
+        "supported": true,
+        "detail": "server-sent chat completion chunks"
+      },
+      "seed": {
+        "supported": true,
+        "detail": "seed request field"
+      },
+      "stop": {
+        "supported": true,
+        "detail": "stop request field"
+      },
+      "usage_metadata": {
+        "supported": true,
+        "detail": "usage response field"
+      }
+    },
+    "diagnostics": []
+  }
+]

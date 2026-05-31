@@ -5,7 +5,7 @@ with `--ollama`.
 
 ## Support Tier
 
-Support tier: Opt-in live smoke
+Support tier: opt-in smoke ready
 
 ## Commands
 

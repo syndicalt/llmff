@@ -26,6 +26,7 @@ require_file "docs/governance.md"
 require_file "CONTRIBUTING.md"
 require_file "docs/distribution-trust.md"
 require_file "docs/release-readiness.md"
+require_file "docs/release-runbook.md"
 require_file "docs/package-manager-roadmap.md"
 require_file "docs/ecosystem-readiness.md"
 require_file "docs/manifest-reproducibility.md"
@@ -36,6 +37,7 @@ require_file "scripts/check-ecosystem-readiness.sh"
 require_file "scripts/check-manifest-reproducibility.sh"
 require_file "scripts/check-apt-repository-design.sh"
 require_file "scripts/check-provider-smoke-readiness.sh"
+require_file "scripts/check-release-runbook.sh"
 
 require_text "docs/package-manager-roadmap.md" "publish only when maintainers decide the channel is support-ready"
 require_text "docs/package-manager-roadmap.md" "apt stays parked until signing, repository metadata, hosting, key rotation, and recovery are designed"
@@ -49,13 +51,45 @@ require_text "docs/governance.md" "Plugin protocol stability"
 require_text "docs/governance.md" "CLI flag stability"
 require_text "docs/governance.md" "Trace and event field stability"
 require_text "docs/governance.md" "Deprecation policy"
+require_text "docs/governance.md" "Post-v1 Semver Examples"
+require_text "docs/governance.md" "Manifest schema semver examples"
+require_text "docs/governance.md" "CLI flag semver examples"
+require_text "docs/governance.md" "Plugin protocol semver examples"
+require_text "docs/governance.md" "Trace and event schema semver examples"
+require_text "docs/governance.md" "Library API semver examples"
+require_text "docs/governance.md" "Deprecation Checklist Template"
+require_text "docs/v1-contract.md" "V1 Review Decisions"
+require_text "docs/v1-contract.md" "fixtures/golden/discovery/"
+require_text "docs/v1-contract.md" "Rust Library API"
+require_text "docs/v1-contract.md" "Decision: resolved for v1.0"
+require_text "docs/v1-contract.md" "Decision: promoted to stable fixture-backed discovery contracts"
+require_text "docs/v1-contract.md" "No provider is live-smoke verified until a real smoke result is recorded"
 require_text "CONTRIBUTING.md" "Stages"
 require_text "CONTRIBUTING.md" "Plugins"
 require_text "CONTRIBUTING.md" "Providers"
+require_text "CONTRIBUTING.md" "Deprecating Public Surface"
+require_text "docs/roadmap.md" "Post-v1 Guardrails"
+require_text "docs/roadmap.md" "patch, minor, and major change examples"
 require_text "docs/release-readiness.md" "Ecosystem compatibility checklist"
+require_text "docs/release-readiness.md" "docs/release-runbook.md"
+require_text "docs/release-runbook.md" "Published release candidate"
+require_text "docs/release-runbook.md" "scripts/check-release-assets.sh v0.8.0"
+require_text "docs/release-runbook.md" "scripts/smoke-install.sh --git https://github.com/syndicalt/llmff --tag v0.8.0"
 require_text "docs/ecosystem-readiness.md" "Integration Gates"
 require_text "docs/manifest-reproducibility.md" "manifest lockfile remains parked"
 require_text "docs/apt-repository-design.md" "signed repository metadata"
 require_text "docs/provider-smoke-readiness.md" "certification is a support commitment"
+
+if grep -Fq "## Pre-1.0 Review Required" docs/v1-contract.md; then
+  printf 'error: docs/v1-contract.md still has open pre-1.0 review-required surfaces\n' >&2
+  exit 1
+fi
+
+if grep -Fq "Any proposed \`llmff doctor\`" docs/v1-contract.md; then
+  printf 'error: docs/v1-contract.md still treats llmff doctor as proposed\n' >&2
+  exit 1
+fi
+
+bash scripts/check-release-runbook.sh
 
 printf 'governance readiness validation succeeded\n'

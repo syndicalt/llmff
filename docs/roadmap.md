@@ -217,6 +217,14 @@ Governance:
   cover manifest schema, plugin protocol, CLI flags, and trace/event fields.
 - `scripts/check-governance-readiness.sh` validates governance readiness docs.
 
+## Post-v1 Guardrails
+
+Post-v1 governance is part of the compatibility roadmap. The project now keeps
+patch, minor, and major change examples for manifest schema, CLI flags, plugin
+protocol, trace/event schemas, and library API surfaces in
+`docs/governance.md`. Any deprecation of public surface should follow the
+deprecation checklist template before release notes describe the change.
+
 ## Next Product Roadmap
 
 The next roadmap tracks move `llmff` toward a dependable FFmpeg-style runner

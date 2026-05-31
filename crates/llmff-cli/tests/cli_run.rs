@@ -1,6 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::Command as StdCommand;
 #[cfg(unix)]
@@ -16,6 +16,11 @@ fn workspace_root() -> PathBuf {
         .and_then(|path| path.parent())
         .expect("CLI crate should live under crates/llmff-cli")
         .to_path_buf()
+}
+
+fn read_run_result(run_dir: &Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(run_dir.join("result.json")).unwrap())
+        .expect("run result should be valid JSON")
 }
 
 #[test]
@@ -76,6 +81,71 @@ fn stages_list_json_prints_stage_metadata() {
         .as_array()
         .unwrap()
         .contains(&serde_json::json!("plugin-tool-transport")));
+}
+
+#[test]
+fn doctor_reports_version_and_writable_run_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let run_dir = dir.path().join("run");
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args(["doctor", "--run-dir", run_dir.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("version"))
+        .stdout(predicate::str::contains("run-dir"))
+        .stdout(predicate::str::contains("writable"));
+}
+
+#[test]
+fn doctor_validates_plugin_dir_without_pipeline_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let plugin = directory.path().join("broken-plugin");
+    std::fs::create_dir(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: broken-plugin
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: missing-backend
+    entrypoint: ./bin/missing-backend
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args(["doctor", "--plugin-dir", directory.path().to_str().unwrap()])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("missing entrypoint"))
+        .stderr(predicate::str::contains("missing-backend"));
+}
+
+#[test]
+fn doctor_checks_api_key_env_without_printing_secret() {
+    let secret = "super-secret-doctor-token";
+    let env_name = "LLMFF_DOCTOR_TEST_KEY";
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "doctor",
+            "--backend",
+            "openai=https://api.example.test/v1",
+            "--api-key-env",
+            &format!("openai={env_name}"),
+        ])
+        .env(env_name, secret)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("api-key-env"))
+        .stdout(predicate::str::contains(env_name))
+        .stdout(predicate::str::contains(secret).not())
+        .stderr(predicate::str::contains(secret).not());
 }
 
 #[test]
@@ -1250,6 +1320,364 @@ outputs:
     assert_eq!(result["status"], "failed");
     assert_eq!(result["exit_code"], 2);
     assert_eq!(result["failure"]["kind"], "config");
+}
+
+#[test]
+fn run_dir_missing_backend_writes_backend_failure_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, "do not leak this prompt").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    from: load_prompt
+    model: missing:model
+outputs:
+  final:
+    from: draft
+    path: answer.txt
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(21)
+        .stderr(predicate::str::contains("backend"));
+
+    let result = read_run_result(&run_dir);
+    assert_eq!(result["exit_code"], 21);
+    assert_eq!(result["failure"]["kind"], "backend");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "retry_with_backoff"
+    );
+
+    assert!(!run_dir.join("events.jsonl").exists());
+}
+
+#[test]
+fn run_dir_invalid_graph_writes_graph_validation_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+graph:
+  - id: draft
+    op: template
+    from: missing_parent
+    path: prompt.tmpl
+outputs:
+  final:
+    from: draft
+    path: answer.txt
+"#,
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(10)
+        .stderr(predicate::str::contains("graph validation"));
+
+    let result = read_run_result(&run_dir);
+    assert_eq!(result["exit_code"], 10);
+    assert_eq!(result["failure"]["kind"], "graph_validation");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "do_not_retry_without_changes"
+    );
+}
+
+#[test]
+fn run_dir_invalid_json_schema_writes_stage_failure_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("draft.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, r#"{"answer":"ok"}"#).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  draft:
+    path: {}
+    format: json
+graph:
+  - id: load_draft
+    op: load
+    input: draft
+  - id: validate
+    op: validate_json
+    from: load_draft
+    schema: "{{not valid json"
+outputs:
+  final:
+    from: validate
+    path: answer.json
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(20)
+        .stderr(predicate::str::contains("invalid inline schema"));
+
+    let result = read_run_result(&run_dir);
+    assert_eq!(result["exit_code"], 20);
+    assert_eq!(result["failure"]["kind"], "stage_execution");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "check_stage_or_input"
+    );
+    let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    assert!(events.contains(r#""failure_kind":"stage_execution""#));
+}
+
+#[test]
+fn run_dir_checkpoint_mismatch_writes_config_failure_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let output = dir.path().join("answer.json");
+    let checkpoint = dir.path().join("checkpoint.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, "Return an answer object").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: {}
+"#,
+            prompt.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--checkpoint",
+            checkpoint.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+outputs:
+  final:
+    from: load_prompt
+    path: changed-answer.json
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--resume",
+            checkpoint.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(10)
+        .stderr(predicate::str::contains(
+            "checkpoint manifest hash does not match current manifest",
+        ))
+        .stderr(predicate::str::contains("run inspect --format json"));
+
+    let result = read_run_result(&run_dir);
+    assert_eq!(result["exit_code"], 10);
+    assert_eq!(result["failure"]["kind"], "config");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "do_not_retry_without_changes"
+    );
+    let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    assert!(events.contains(r#""failure_kind":"config""#));
+}
+
+#[test]
+fn run_without_manifest_reports_usage_failure_contract() {
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args(["run"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains(
+            "provide either manifest or --graph",
+        ));
+}
+
+#[test]
+fn plugins_validate_json_invalid_plugin_reports_stable_failure_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let plugin = dir.path().join("broken-plugin");
+    std::fs::create_dir_all(&plugin).unwrap();
+    std::fs::write(
+        plugin.join("llmff-plugin.yaml"),
+        r#"
+name: broken-plugin
+version: 0.1.0
+capabilities:
+  - kind: backend
+    name: missing-backend
+    entrypoint: ./bin/missing-backend
+"#,
+    )
+    .unwrap();
+
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "plugins",
+            "validate",
+            "--plugin-dir",
+            dir.path().to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("plugin validation failed"))
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value =
+        serde_json::from_slice(&output).expect("plugin validation report should be JSON");
+    assert_eq!(report["valid"], false);
+    assert_eq!(report["diagnostics"][0]["code"], "missing_entrypoint");
+}
+
+#[test]
+fn run_dir_timeout_writes_timeout_failure_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, "slow input").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: slow_tool
+    op: tool
+    from: load_prompt
+    command: ["/bin/sh", "-c", "sleep 1"]
+    timeout_ms: 1
+outputs:
+  final:
+    from: slow_tool
+    path: answer.txt
+"#,
+            prompt.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(21)
+        .stderr(predicate::str::contains("stage timed out"));
+
+    let result = read_run_result(&run_dir);
+    assert_eq!(result["exit_code"], 21);
+    assert_eq!(result["failure"]["kind"], "timeout");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "check_stage_or_input"
+    );
+    let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    assert!(events.contains(r#""failure_kind":"timeout""#));
 }
 
 #[test]
@@ -3129,6 +3557,71 @@ async fn inline_graph_run_executes_http_tool_stage() {
         .success();
 
     assert_eq!(std::fs::read_to_string(output).unwrap(), "tool response");
+}
+
+#[tokio::test]
+async fn run_dir_http_server_error_writes_http_failure_contract() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/process"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("server failed"))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let prompt = dir.path().join("question.txt");
+    let manifest = dir.path().join("pipeline.yaml");
+    let run_dir = dir.path().join("run");
+    std::fs::write(&prompt, "tool body").unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: call_http
+    op: tool
+    from: load_prompt
+    method: POST
+    url: "{}/process"
+outputs:
+  final:
+    from: call_http
+    path: answer.txt
+"#,
+            prompt.display(),
+            server.uri()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("llmff")
+        .unwrap()
+        .args([
+            "run",
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            manifest.to_str().unwrap(),
+        ])
+        .assert()
+        .code(21)
+        .stderr(predicate::str::contains("http tool returned status 500"));
+
+    let result = read_run_result(&run_dir);
+    assert_eq!(result["exit_code"], 21);
+    assert_eq!(result["failure"]["kind"], "http");
+    assert_eq!(
+        result["failure"]["retry_recommendation"],
+        "check_stage_or_input"
+    );
+    let events = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    assert!(events.contains(r#""failure_kind":"http""#));
 }
 
 #[test]

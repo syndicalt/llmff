@@ -4,7 +4,7 @@ vLLM can serve an OpenAI-compatible API.
 
 ## Support Tier
 
-Support tier: Local documented
+Support tier: mock-inspectable
 
 ## Commands
 

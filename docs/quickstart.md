@@ -4,12 +4,18 @@ This guide gets a new `llmff` user from install to a working pipeline without
 requiring provider credentials. It uses the deterministic mock backend first,
 then shows the smallest real-backend configuration.
 
+Use `llmff` when you want explicit, typed inference sub-pipelines that can be
+inspected, versioned, run as a subprocess, and supervised from files. Do not use
+it as an agent framework, model server, scheduler, memory system, or autonomous
+planner. See [`docs/when-to-use-llmff.md`](when-to-use-llmff.md) for the
+decision guide.
+
 ## 1. Install
 
 Install the latest tagged release with Cargo:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v0.1.5 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v0.8.0 llmff
 ```
 
 If you downloaded a release archive instead, unpack it and put the `llmff`
@@ -27,7 +33,7 @@ llmff stages list
 Expected version:
 
 ```text
-llmff 0.1.5
+llmff 0.8.0
 ```
 
 ## 2. Run The Offline Example
@@ -164,12 +170,14 @@ does not include full prompts, tool bodies, headers, cached values, or secrets.
   before the first colon.
 - `missing API key environment variable`: export the secret and pass
   `--api-key-env alias=ENV_NAME`.
-- Windows and macOS release installers are unsigned in `v0.1.5`; expect normal
+- Windows and macOS release installers are unsigned in `v0.8.0`; expect normal
   OS trust prompts until paid signing and notarization are added.
 
 ## Next Steps
 
 - See [`examples/README.md`](../examples/README.md) for the example catalog.
+- See [`docs/cookbook.md`](cookbook.md) for workflow patterns routed to
+  existing offline examples.
 - See [`docs/provider-troubleshooting.md`](provider-troubleshooting.md) for
   OpenAI-compatible and Ollama setup notes.
 - See [`README.md`](../README.md) for the CLI reference and stage semantics.

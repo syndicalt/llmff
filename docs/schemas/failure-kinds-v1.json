@@ -13,5 +13,133 @@
     "config",
     "not_implemented",
     "interrupted"
+  ],
+  "failure_modes": [
+    {
+      "mode": "manifest_parse",
+      "failure_kind": "manifest_parse",
+      "exit_code": 10,
+      "retry_recommendation": "do_not_retry_without_changes",
+      "stderr_contains": "failed to parse manifest",
+      "run_failed_event": false,
+      "run_dir_result": true
+    },
+    {
+      "mode": "missing_input",
+      "failure_kind": "config",
+      "exit_code": 2,
+      "retry_recommendation": "do_not_retry_without_changes",
+      "stderr_contains": "provide either manifest or --graph",
+      "run_failed_event": false,
+      "run_dir_result": false
+    },
+    {
+      "mode": "invalid_graph",
+      "failure_kind": "graph_validation",
+      "exit_code": 10,
+      "retry_recommendation": "do_not_retry_without_changes",
+      "stderr_contains": "graph validation",
+      "run_failed_event": false,
+      "run_dir_result": true
+    },
+    {
+      "mode": "unknown_stage",
+      "failure_kind": "unknown_stage",
+      "exit_code": 10,
+      "retry_recommendation": "do_not_retry_without_changes",
+      "stderr_contains": "unknown stage operation",
+      "run_failed_event": false,
+      "run_dir_result": true
+    },
+    {
+      "mode": "missing_backend",
+      "failure_kind": "backend",
+      "exit_code": 21,
+      "retry_recommendation": "retry_with_backoff",
+      "stderr_contains": "backend",
+      "run_failed_event": true,
+      "run_dir_result": true
+    },
+    {
+      "mode": "invalid_plugin",
+      "failure_kind": "config",
+      "exit_code": 1,
+      "retry_recommendation": "do_not_retry_without_changes",
+      "stderr_contains": "plugin validation failed",
+      "run_failed_event": false,
+      "run_dir_result": false
+    },
+    {
+      "mode": "timeout",
+      "failure_kind": "timeout",
+      "exit_code": 21,
+      "retry_recommendation": "check_stage_or_input",
+      "stderr_contains": "stage timed out",
+      "run_failed_event": true,
+      "run_dir_result": true
+    },
+    {
+      "mode": "http_server_error",
+      "failure_kind": "http",
+      "exit_code": 21,
+      "retry_recommendation": "check_stage_or_input",
+      "stderr_contains": "http tool returned status",
+      "run_failed_event": true,
+      "run_dir_result": true
+    },
+    {
+      "mode": "tool_nonzero",
+      "failure_kind": "stage_execution",
+      "exit_code": 20,
+      "retry_recommendation": "check_stage_or_input",
+      "stderr_contains": "tool command exited with status",
+      "run_failed_event": true,
+      "run_dir_result": true
+    },
+    {
+      "mode": "schema_invalid",
+      "failure_kind": "stage_execution",
+      "exit_code": 20,
+      "retry_recommendation": "check_stage_or_input",
+      "stderr_contains": "invalid inline schema",
+      "run_failed_event": true,
+      "run_dir_result": true
+    },
+    {
+      "mode": "stdout_ownership_conflict",
+      "failure_kind": "config",
+      "exit_code": 2,
+      "retry_recommendation": "do_not_retry_without_changes",
+      "stderr_contains": "stream-stage cannot write to stdout",
+      "run_failed_event": false,
+      "run_dir_result": true
+    },
+    {
+      "mode": "checkpoint_mismatch",
+      "failure_kind": "config",
+      "exit_code": 10,
+      "retry_recommendation": "do_not_retry_without_changes",
+      "stderr_contains": "checkpoint manifest hash does not match current manifest",
+      "run_failed_event": true,
+      "run_dir_result": true
+    },
+    {
+      "mode": "batch_item_failure",
+      "failure_kind": "stage_execution",
+      "exit_code": 20,
+      "retry_recommendation": "check_stage_or_input",
+      "stderr_contains": "one or more batch items failed",
+      "run_failed_event": true,
+      "run_dir_result": true
+    },
+    {
+      "mode": "interrupted_run",
+      "failure_kind": "interrupted",
+      "exit_code": 130,
+      "retry_recommendation": "resume_with_matching_checkpoint",
+      "stderr_contains": "interrupted",
+      "run_failed_event": true,
+      "run_dir_result": true
+    }
   ]
 }

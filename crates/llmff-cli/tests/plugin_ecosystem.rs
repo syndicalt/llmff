@@ -54,6 +54,92 @@ fn plugin_ecosystem_assets_are_ci_checkable() {
 }
 
 #[test]
+fn plugin_template_documents_all_protocol_capability_kinds() {
+    let root = workspace_root();
+    let template_manifest = root.join("examples/plugins/template/llmff-plugin.yaml");
+    let template_readme = root.join("examples/plugins/template/README.md");
+
+    assert!(
+        template_manifest.exists(),
+        "missing plugin template manifest"
+    );
+    assert!(template_readme.exists(), "missing plugin template README");
+
+    let manifest =
+        std::fs::read_to_string(&template_manifest).expect("template manifest should be readable");
+    let readme = std::fs::read_to_string(&template_readme).expect("template README readable");
+
+    for required in [
+        "kind: stage",
+        "kind: backend",
+        "kind: sampler",
+        "kind: tool-transport",
+        "name: template.uppercase",
+        "name: template-echo",
+        "name: template-deterministic",
+        "name: template-stdio",
+    ] {
+        assert!(
+            manifest.contains(required),
+            "template manifest should contain {required}"
+        );
+    }
+
+    for required in [
+        "llmff plugins validate --plugin-dir examples/plugins",
+        "protocol version 1",
+        "unsandboxed local executables",
+        "docs/plugins/fixtures/protocol-v1",
+        "stage",
+        "backend",
+        "sampler",
+        "tool-transport",
+    ] {
+        assert!(
+            readme.contains(required),
+            "template README should cover {required}"
+        );
+    }
+}
+
+#[test]
+fn provider_support_tiers_are_evidence_backed() {
+    let root = workspace_root();
+    let support_tiers = root.join("docs/providers/support-tiers.md");
+    let history_path = root.join("docs/providers/live-smoke-history.json");
+
+    let support = std::fs::read_to_string(&support_tiers).expect("support tiers readable");
+    let history: Value =
+        serde_json::from_str(&std::fs::read_to_string(history_path).expect("history readable"))
+            .expect("history should be valid JSON");
+
+    for tier in [
+        "documented only",
+        "mock-inspectable",
+        "opt-in smoke ready",
+        "live-smoke verified",
+    ] {
+        assert!(support.contains(tier), "support tiers should define {tier}");
+    }
+
+    let tiers = history["providers"]
+        .as_array()
+        .expect("history providers should be an array")
+        .iter()
+        .map(|provider| provider["support_tier"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+
+    for tier in ["mock-inspectable", "opt-in smoke ready"] {
+        assert!(tiers.contains(tier), "history should include {tier}");
+    }
+
+    assert!(
+        support.contains("no provider is live-smoke verified"),
+        "support tiers should avoid implying live certification before evidence exists"
+    );
+}
+
+#[test]
 fn ecosystem_integration_paths_are_readiness_gated() {
     let root = workspace_root();
     let guide = root.join("docs/ecosystem-readiness.md");

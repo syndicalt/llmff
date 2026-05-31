@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::{BufWriter, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -14,7 +13,7 @@ use tokio::process::Command;
 
 use crate::backend::{Backend, InferRequest, InferResponse, UsageMetadata};
 use crate::error::LlmffError;
-use crate::graph::{stage_dependencies, Graph};
+use crate::graph::Graph;
 use crate::manifest::{Manifest, RetrySpec, StageSpec};
 use crate::plugin::{
     discover_plugin_samplers, discover_plugin_stages, discover_plugin_tool_transports,
@@ -23,6 +22,16 @@ use crate::plugin::{
 use crate::stage::execute_deterministic_stage;
 use crate::trace::{TraceEvent, TraceWriter};
 use crate::value::{Message, StageStatus, Value};
+
+mod checkpoint;
+mod scheduler;
+mod streaming;
+mod trace_failure;
+
+use checkpoint::{manifest_fingerprint, read_checkpoint, validate_replay_trace};
+use scheduler::{run_stages_in_parallel, run_stages_sequentially};
+use streaming::{create_stage_stream_writer, StageStreamWriter};
+use trace_failure::{create_trace_writers, write_run_failed, write_trace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunStatus {
@@ -56,7 +65,7 @@ impl Default for RetryPolicy {
     }
 }
 
-struct StageOutcome {
+pub(super) struct StageOutcome {
     status: StageStatus,
     usage: Option<UsageMetadata>,
     cache_hit: Option<bool>,
@@ -73,6 +82,22 @@ struct InferAttemptResult {
 struct ToolAttemptResult {
     status: StageStatus,
     attempts: usize,
+}
+
+pub(super) struct PluginExecutionContext<'a> {
+    tool_transports: &'a BTreeMap<String, PluginToolTransport>,
+    stages: &'a BTreeMap<String, PluginStage>,
+    samplers: &'a BTreeMap<String, PluginSampler>,
+}
+
+pub(super) struct ExecutionContext<'a> {
+    manifest: &'a Manifest,
+    pub(super) graph: &'a Graph,
+    cwd: &'a Path,
+    pub(super) run_id: &'a str,
+    plugins: PluginExecutionContext<'a>,
+    pub(super) options: &'a RunOptions,
+    pub(super) manifest_hash: &'a str,
 }
 
 impl StageOutcome {
@@ -271,6 +296,19 @@ impl Engine {
         } else {
             BTreeMap::new()
         };
+        let context = ExecutionContext {
+            manifest: &manifest,
+            graph: &graph,
+            cwd,
+            run_id: &options.run_id,
+            plugins: PluginExecutionContext {
+                tool_transports: &plugin_tool_transports,
+                stages: &plugin_stages,
+                samplers: &plugin_samplers,
+            },
+            options: &options,
+            manifest_hash: &manifest_hash,
+        };
 
         write_trace(
             trace,
@@ -302,37 +340,17 @@ impl Engine {
 
         match options.scheduler {
             SchedulerMode::Sequential => {
-                self.run_stages_sequentially(
-                    &manifest,
-                    &graph,
-                    cwd,
+                run_stages_sequentially(
+                    self,
+                    &context,
                     &mut statuses,
                     trace,
-                    &options.run_id,
-                    &plugin_tool_transports,
-                    &plugin_stages,
-                    &plugin_samplers,
                     stream_writer.as_mut(),
-                    &options,
-                    &manifest_hash,
                 )
                 .await?;
             }
             SchedulerMode::Parallel => {
-                self.run_stages_in_parallel(
-                    &manifest,
-                    &graph,
-                    cwd,
-                    &mut statuses,
-                    trace,
-                    &options.run_id,
-                    &plugin_tool_transports,
-                    &plugin_stages,
-                    &plugin_samplers,
-                    &options,
-                    &manifest_hash,
-                )
-                .await?;
+                run_stages_in_parallel(self, &context, &mut statuses, trace).await?;
             }
         }
 
@@ -393,132 +411,6 @@ impl Engine {
         )?;
 
         Ok(report)
-    }
-
-    async fn run_stages_sequentially(
-        &self,
-        manifest: &Manifest,
-        graph: &Graph,
-        cwd: &Path,
-        statuses: &mut BTreeMap<String, StageStatus>,
-        trace: &mut Vec<TraceWriter>,
-        run_id: &str,
-        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
-        plugin_stages: &BTreeMap<String, PluginStage>,
-        plugin_samplers: &BTreeMap<String, PluginSampler>,
-        mut stream_writer: Option<&mut StageStreamWriter>,
-        options: &RunOptions,
-        manifest_hash: &str,
-    ) -> Result<(), LlmffError> {
-        for stage in graph.stages() {
-            if statuses.contains_key(&stage.id) {
-                continue;
-            }
-            let stage_started = self.start_stage_trace(trace, run_id, stage)?;
-            let outcome = self
-                .execute_stage_with_timeout(
-                    manifest,
-                    stage,
-                    statuses,
-                    cwd,
-                    plugin_tool_transports,
-                    plugin_stages,
-                    plugin_samplers,
-                    stream_writer.as_deref_mut(),
-                    options,
-                )
-                .await?;
-            stream_stage_payload_if_selected(stream_writer.as_deref_mut(), stage, &outcome)?;
-            self.finish_stage_trace(trace, run_id, stage, stage_started, outcome, statuses)?;
-            write_checkpoint_if_configured(
-                options.checkpoint_path.as_deref(),
-                statuses,
-                &manifest_hash,
-            )?;
-        }
-
-        Ok(())
-    }
-
-    async fn run_stages_in_parallel(
-        &self,
-        manifest: &Manifest,
-        graph: &Graph,
-        cwd: &Path,
-        statuses: &mut BTreeMap<String, StageStatus>,
-        trace: &mut Vec<TraceWriter>,
-        run_id: &str,
-        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
-        plugin_stages: &BTreeMap<String, PluginStage>,
-        plugin_samplers: &BTreeMap<String, PluginSampler>,
-        options: &RunOptions,
-        manifest_hash: &str,
-    ) -> Result<(), LlmffError> {
-        let mut pending = graph.stages().iter().collect::<Vec<_>>();
-
-        while !pending.is_empty() {
-            let mut ready = Vec::new();
-            let mut waiting = Vec::new();
-
-            for stage in pending {
-                if statuses.contains_key(&stage.id) {
-                    continue;
-                }
-                if stage_dependencies(stage)
-                    .iter()
-                    .all(|dependency| statuses.contains_key(dependency))
-                {
-                    ready.push(stage);
-                } else {
-                    waiting.push(stage);
-                }
-            }
-
-            if ready.is_empty() && waiting.is_empty() {
-                break;
-            }
-            if ready.is_empty() {
-                return Err(LlmffError::GraphValidation(
-                    "cycle detected in graph".to_string(),
-                ));
-            }
-
-            let max_concurrency = options.max_concurrency.unwrap_or(ready.len()).max(1);
-            for chunk in ready.chunks(max_concurrency) {
-                let starts = chunk
-                    .iter()
-                    .map(|stage| self.start_stage_trace(trace, run_id, stage))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let status_snapshot = statuses.clone();
-                let outcomes = futures::future::join_all(chunk.iter().map(|stage| {
-                    self.execute_stage_with_timeout(
-                        manifest,
-                        stage,
-                        &status_snapshot,
-                        cwd,
-                        plugin_tool_transports,
-                        plugin_stages,
-                        plugin_samplers,
-                        None,
-                        options,
-                    )
-                }))
-                .await;
-
-                for ((stage, started), outcome) in chunk.iter().zip(starts).zip(outcomes) {
-                    self.finish_stage_trace(trace, run_id, stage, started, outcome?, statuses)?;
-                    write_checkpoint_if_configured(
-                        options.checkpoint_path.as_deref(),
-                        statuses,
-                        &manifest_hash,
-                    )?;
-                }
-            }
-
-            pending = waiting;
-        }
-
-        Ok(())
     }
 
     fn start_stage_trace(
@@ -743,28 +635,13 @@ impl Engine {
 
     async fn execute_stage_with_timeout(
         &self,
-        manifest: &Manifest,
+        context: &ExecutionContext<'_>,
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
-        cwd: &Path,
-        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
-        plugin_stages: &BTreeMap<String, PluginStage>,
-        plugin_samplers: &BTreeMap<String, PluginSampler>,
         stream_writer: Option<&mut StageStreamWriter>,
-        options: &RunOptions,
     ) -> Result<StageOutcome, LlmffError> {
-        let timeout_ms = stage.timeout_ms.or(options.default_timeout_ms);
-        let run = self.execute_stage(
-            manifest,
-            stage,
-            statuses,
-            cwd,
-            plugin_tool_transports,
-            plugin_stages,
-            plugin_samplers,
-            stream_writer,
-            options.default_retry,
-        );
+        let timeout_ms = stage.timeout_ms.or(context.options.default_timeout_ms);
+        let run = self.execute_stage(context, stage, statuses, stream_writer);
         if let Some(timeout_ms) = timeout_ms {
             return tokio::time::timeout(Duration::from_millis(timeout_ms), run)
                 .await
@@ -779,15 +656,10 @@ impl Engine {
 
     async fn execute_stage(
         &self,
-        manifest: &Manifest,
+        context: &ExecutionContext<'_>,
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
-        cwd: &Path,
-        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
-        plugin_stages: &BTreeMap<String, PluginStage>,
-        plugin_samplers: &BTreeMap<String, PluginSampler>,
         stream_writer: Option<&mut StageStreamWriter>,
-        default_retry: RetryPolicy,
     ) -> Result<StageOutcome, LlmffError> {
         if !should_execute_stage(stage, statuses)? {
             return Ok(StageOutcome::without_usage(StageStatus::Skipped));
@@ -795,15 +667,15 @@ impl Engine {
 
         match stage.op.as_str() {
             "load" => self
-                .execute_load(manifest, stage, cwd)
+                .execute_load(context.manifest, stage, context.cwd)
                 .map(StageOutcome::without_usage),
             "infer" => {
                 self.execute_infer(
                     stage,
                     statuses,
-                    plugin_samplers,
+                    context.plugins.samplers,
                     stream_writer,
-                    default_retry,
+                    context.options.default_retry,
                 )
                 .await
             }
@@ -813,22 +685,34 @@ impl Engine {
                     .as_ref()
                     .and_then(|parent| statuses.get(parent))
                     .and_then(success_value);
-                execute_deterministic_stage(stage, input, cwd).map(StageOutcome::without_usage)
+                execute_deterministic_stage(stage, input, context.cwd)
+                    .map(StageOutcome::without_usage)
             }
-            "cache" => self.execute_cache(stage, statuses, cwd),
+            "cache" => self.execute_cache(stage, statuses, context.cwd),
             "repair" => {
-                self.execute_repair(stage, statuses, plugin_samplers, default_retry)
-                    .await
+                self.execute_repair(
+                    stage,
+                    statuses,
+                    context.plugins.samplers,
+                    context.options.default_retry,
+                )
+                .await
             }
             "route" => self
                 .execute_route(stage, statuses)
                 .map(StageOutcome::without_usage),
             "tool" => {
-                self.execute_tool(stage, statuses, cwd, plugin_tool_transports, default_retry)
-                    .await
+                self.execute_tool(
+                    stage,
+                    statuses,
+                    context.cwd,
+                    context.plugins.tool_transports,
+                    context.options.default_retry,
+                )
+                .await
             }
             "write" => self
-                .execute_write(stage, statuses, cwd)
+                .execute_write(stage, statuses, context.cwd)
                 .map(StageOutcome::without_usage),
             other => {
                 if let Some(plugin_stage_name) = plugin_stage_name(other) {
@@ -836,8 +720,8 @@ impl Engine {
                         .execute_plugin_stage(
                             stage,
                             statuses,
-                            cwd,
-                            plugin_stages,
+                            context.cwd,
+                            context.plugins.stages,
                             plugin_stage_name,
                         )
                         .await
@@ -1572,19 +1456,11 @@ fn plugin_stage_name(op: &str) -> Option<&str> {
 }
 
 const CACHE_RECORD_VERSION: u32 = 1;
-const CHECKPOINT_RECORD_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct CacheRecord {
     version: u32,
     value: Value,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct CheckpointRecord {
-    version: u32,
-    manifest_hash: String,
-    statuses: BTreeMap<String, StageStatus>,
 }
 
 fn parent_success_value<'a>(
@@ -1667,96 +1543,6 @@ fn write_cache_file(
             cache_file.display()
         ),
     })?;
-
-    Ok(())
-}
-
-fn read_checkpoint(
-    path: &Path,
-    expected_manifest_hash: &str,
-) -> Result<BTreeMap<String, StageStatus>, LlmffError> {
-    let source = std::fs::read_to_string(path)?;
-    let record: CheckpointRecord = serde_json::from_str(&source)?;
-    if record.version != CHECKPOINT_RECORD_VERSION {
-        return Err(LlmffError::Config(format!(
-            "unsupported checkpoint version {}",
-            record.version
-        )));
-    }
-    if record.manifest_hash != expected_manifest_hash {
-        return Err(LlmffError::Config(format!(
-            "checkpoint manifest hash does not match current manifest: checkpoint={} checkpoint_hash={} current_manifest_hash={}; run inspect --format json on the manifest used for this run and resume only from a checkpoint produced by the same manifest",
-            path.display(),
-            record.manifest_hash,
-            expected_manifest_hash
-        )));
-    }
-
-    Ok(record.statuses)
-}
-
-fn write_checkpoint_if_configured(
-    checkpoint_path: Option<&Path>,
-    statuses: &BTreeMap<String, StageStatus>,
-    manifest_hash: &str,
-) -> Result<(), LlmffError> {
-    let Some(path) = checkpoint_path else {
-        return Ok(());
-    };
-    let record = CheckpointRecord {
-        version: CHECKPOINT_RECORD_VERSION,
-        manifest_hash: manifest_hash.to_string(),
-        statuses: statuses.clone(),
-    };
-    let encoded = serde_json::to_vec_pretty(&record).map_err(LlmffError::Json)?;
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
-    }
-    let tmp_file = path.with_extension(format!("tmp.{}.{}", std::process::id(), timestamp_ms()));
-    std::fs::write(&tmp_file, encoded)?;
-    std::fs::rename(&tmp_file, path)?;
-
-    Ok(())
-}
-
-fn manifest_fingerprint(manifest: &Manifest) -> Result<String, LlmffError> {
-    let encoded = serde_json::to_vec(manifest).map_err(LlmffError::Json)?;
-    let mut hasher = Sha256::new();
-    hasher.update(encoded);
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-fn validate_replay_trace(path: &Path, has_checkpoint: bool) -> Result<(), LlmffError> {
-    let source = std::fs::read_to_string(path)?;
-    let mut has_stage_finished = false;
-    for (index, line) in source.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let event: serde_json::Value = serde_json::from_str(line).map_err(|error| {
-            LlmffError::Config(format!(
-                "invalid replay trace JSON on line {}: {error}",
-                index + 1
-            ))
-        })?;
-        if event.get("event").and_then(serde_json::Value::as_str) == Some("stage_finished") {
-            has_stage_finished = true;
-        }
-    }
-    if !has_stage_finished {
-        return Err(LlmffError::Config(
-            "replay trace does not contain completed stages".to_string(),
-        ));
-    }
-
-    if !has_checkpoint {
-        return Err(LlmffError::Config(
-            "trace replay requires a checkpoint because traces intentionally omit stage payloads"
-                .to_string(),
-        ));
-    }
 
     Ok(())
 }
@@ -2035,90 +1821,6 @@ fn apply_sampler_overrides(request: &mut InferRequest, overrides: SamplerOverrid
     }
     if let Some(stop) = overrides.stop {
         request.stop = stop;
-    }
-}
-
-struct StageStreamWriter {
-    stage_id: String,
-    writer: BufWriter<Box<dyn Write + Send>>,
-}
-
-impl StageStreamWriter {
-    fn stdout(stage_id: String) -> Self {
-        Self {
-            stage_id,
-            writer: BufWriter::new(Box::new(std::io::stdout())),
-        }
-    }
-
-    fn create(stage_id: String, path: &Path) -> Result<Self, LlmffError> {
-        Ok(Self {
-            stage_id,
-            writer: BufWriter::new(Box::new(File::create(path)?)),
-        })
-    }
-
-    fn write_delta(&mut self, delta: &str) -> Result<(), LlmffError> {
-        self.writer.write_all(delta.as_bytes())?;
-        self.writer.flush()?;
-        Ok(())
-    }
-
-    fn write_value(&mut self, value: &Value) -> Result<(), LlmffError> {
-        self.writer.write_all(serialize_value(value)?.as_bytes())?;
-        self.writer.flush()?;
-        Ok(())
-    }
-}
-
-fn stream_stage_payload_if_selected(
-    stream_writer: Option<&mut StageStreamWriter>,
-    stage: &StageSpec,
-    outcome: &StageOutcome,
-) -> Result<(), LlmffError> {
-    let Some(writer) = stream_writer else {
-        return Ok(());
-    };
-    if writer.stage_id != stage.id || outcome.stream_written {
-        return Ok(());
-    }
-    match &outcome.status {
-        StageStatus::Success(value) | StageStatus::Invalid { value, .. } => {
-            writer.write_value(value)
-        }
-        StageStatus::Skipped => Ok(()),
-    }
-}
-
-fn create_stage_stream_writer(
-    options: &RunOptions,
-    graph: &Graph,
-    cwd: &Path,
-) -> Result<Option<StageStreamWriter>, LlmffError> {
-    let Some(stage_id) = options.stream_stage.as_ref() else {
-        return Ok(None);
-    };
-    graph
-        .stages()
-        .iter()
-        .find(|stage| stage.id == *stage_id)
-        .ok_or_else(|| {
-            LlmffError::Config(format!(
-                "stream-stage references unknown stage `{stage_id}`"
-            ))
-        })?;
-
-    let path = options
-        .stream_path
-        .as_deref()
-        .unwrap_or_else(|| Path::new("-"));
-    if path == Path::new("-") {
-        Ok(Some(StageStreamWriter::stdout(stage_id.clone())))
-    } else {
-        Ok(Some(StageStreamWriter::create(
-            stage_id.clone(),
-            &resolve_path_buf(cwd, path),
-        )?))
     }
 }
 
@@ -2597,108 +2299,6 @@ fn write_output(cwd: &Path, path: &str, value: &str) -> Result<(), LlmffError> {
     }
 
     Ok(())
-}
-
-fn create_trace_writers(options: &RunOptions) -> Result<Vec<TraceWriter>, LlmffError> {
-    let mut writers = Vec::new();
-
-    if let Some(path) = options.trace_path.as_ref() {
-        writers.push(TraceWriter::create(path)?);
-    }
-
-    if let Some(path) = options.event_path.as_ref() {
-        if path == Path::new("-") {
-            writers.push(TraceWriter::stdout());
-        } else {
-            writers.push(TraceWriter::create(path)?);
-        }
-    }
-
-    Ok(writers)
-}
-
-fn write_trace(trace: &mut Vec<TraceWriter>, event: TraceEvent) -> Result<(), LlmffError> {
-    for trace in trace {
-        trace.write_event(&event)?;
-    }
-    Ok(())
-}
-
-fn write_run_failed(
-    trace: &mut Vec<TraceWriter>,
-    run_id: &str,
-    error: &LlmffError,
-) -> Result<(), LlmffError> {
-    write_trace(
-        trace,
-        TraceEvent {
-            run_id: run_id.to_string(),
-            event: "run_failed".to_string(),
-            stage_id: failure_stage_id(error),
-            op: None,
-            status: Some("failed".to_string()),
-            timestamp_ms: timestamp_ms(),
-            duration_ms: None,
-            attempts: None,
-            model: None,
-            backend: None,
-            provider_model: None,
-            validation_errors: None,
-            tool_kind: None,
-            tool_target: None,
-            output_path: None,
-            prompt_tokens: None,
-            completion_tokens: None,
-            total_tokens: None,
-            cache_hit: None,
-            cache_path: None,
-            failure_kind: Some(failure_kind(error).to_string()),
-            failure_message: Some(failure_message(error).to_string()),
-        },
-    )
-}
-
-fn failure_stage_id(error: &LlmffError) -> Option<String> {
-    match error {
-        LlmffError::StageExecution { stage_id, .. } => Some(stage_id.clone()),
-        _ => None,
-    }
-}
-
-fn failure_kind(error: &LlmffError) -> &'static str {
-    match error {
-        LlmffError::ManifestParse(_) => "manifest_parse",
-        LlmffError::Io(_) => "io",
-        LlmffError::Json(_) => "json",
-        LlmffError::GraphValidation(_) => "graph_validation",
-        LlmffError::UnknownStage(_) => "unknown_stage",
-        LlmffError::StageExecution { message, .. } if message == "stage timed out" => "timeout",
-        LlmffError::StageExecution { message, .. } if message.starts_with("http tool ") => "http",
-        LlmffError::StageExecution { .. } => "stage_execution",
-        LlmffError::Backend(_) => "backend",
-        LlmffError::Config(_) => "config",
-        LlmffError::NotImplemented(_) => "not_implemented",
-    }
-}
-
-fn failure_message(error: &LlmffError) -> &'static str {
-    match error {
-        LlmffError::ManifestParse(_) => "manifest parse failed",
-        LlmffError::Io(_) => "I/O operation failed",
-        LlmffError::Json(_) => "JSON operation failed",
-        LlmffError::GraphValidation(_) => "graph validation failed",
-        LlmffError::UnknownStage(_) => "unknown stage operation",
-        LlmffError::StageExecution { message, .. } if message == "stage timed out" => {
-            "stage timed out"
-        }
-        LlmffError::StageExecution { message, .. } if message.starts_with("http tool ") => {
-            "HTTP stage failed"
-        }
-        LlmffError::StageExecution { .. } => "stage execution failed",
-        LlmffError::Backend(_) => "backend request failed",
-        LlmffError::Config(_) => "configuration failed",
-        LlmffError::NotImplemented(_) => "feature is not implemented",
-    }
 }
 
 fn timestamp_ms() -> u128 {

@@ -4,7 +4,7 @@ LocalAI can expose OpenAI-compatible chat completions for local models.
 
 ## Support Tier
 
-Support tier: Local documented
+Support tier: mock-inspectable
 
 ## Commands
 

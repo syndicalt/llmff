@@ -224,6 +224,8 @@ support commitment, but it still does not sandbox plugin code.
 
 See `examples/plugins` for minimal working examples:
 
+- `template`: copyable protocol version `1` template with `stage`, `backend`,
+  `sampler`, and `tool-transport` capabilities.
 - `stage-uppercase`: `stage` capability.
 - `retrieval-static`: retrieval-provider example implemented as a `stage`
   capability.

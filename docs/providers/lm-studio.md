@@ -5,7 +5,7 @@ enabled.
 
 ## Support Tier
 
-Support tier: Local documented
+Support tier: mock-inspectable
 
 ## Commands
 

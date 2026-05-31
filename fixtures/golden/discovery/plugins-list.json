@@ -1,0 +1,28 @@
+[
+  {
+    "name": "template",
+    "version": "0.1.0",
+    "capabilities": [
+      {
+        "kind": "stage",
+        "name": "template.uppercase",
+        "entrypoint": "./bin/uppercase"
+      },
+      {
+        "kind": "backend",
+        "name": "template-echo",
+        "entrypoint": "./bin/backend"
+      },
+      {
+        "kind": "sampler",
+        "name": "template-deterministic",
+        "entrypoint": "./bin/sampler"
+      },
+      {
+        "kind": "tool-transport",
+        "name": "template-stdio",
+        "entrypoint": "./bin/stdio"
+      }
+    ]
+  }
+]

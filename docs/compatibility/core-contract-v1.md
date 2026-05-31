@@ -1,6 +1,10 @@
 # Core Contract Compatibility v1
 
-llmff core contract v1 covers pipeline manifests, inline graph syntax metadata, lifecycle events, traces, inspect reports, plugin manifests, plugin process protocol, and plugin validation reports.
+llmff core contract v1 covers pipeline manifests, inline graph syntax
+metadata, lifecycle events, traces, inspect reports, plugin manifests, plugin
+process protocol, plugin validation reports, and run-result artifacts. The
+broader v1.0 release surface is classified in `docs/v1-contract.md`; this
+compatibility document is the machine-contract subset.
 
 `docs/compatibility/core-contract-v1-matrix.json` is the machine-readable
 multi-release proof for this contract. The schema contract gate checks that the
@@ -45,7 +49,10 @@ Future breaking syntax changes require a new inline graph syntax version.
 
 ## Events And Traces
 
-Events and traces are newline-delimited JSON. Consumers should correlate records by `run_id` and `stage_id`, and should treat unknown future fields as additive.
+Events and traces are newline-delimited JSON. Consumers should correlate
+records by `run_id` and `stage_id`. Within a specific v1 schema file, fields
+are closed for fixture validation; future additive fields require schema and
+fixture updates, and consumers should ignore fields they do not understand.
 
 Trace `stage_finished` records may include `attempts` when a retryable stage
 needed more than one attempt. Missing `attempts` means one attempt.

@@ -7,8 +7,12 @@
 ## Start Here
 
 - New users: follow [`docs/quickstart.md`](docs/quickstart.md).
+- Deciding fit: read [`docs/when-to-use-llmff.md`](docs/when-to-use-llmff.md).
 - Example catalog: see [`examples/README.md`](examples/README.md).
+- Pattern cookbook: see [`docs/cookbook.md`](docs/cookbook.md).
 - Agent integrations: see [`docs/agent-workflows.md`](docs/agent-workflows.md).
+- Pre-1.0 migration checklist: see
+  [`docs/migration/pre-1.0-to-1.0.md`](docs/migration/pre-1.0-to-1.0.md).
 - Platform packages and installer assumptions: see
   [`docs/platform-support.md`](docs/platform-support.md).
 
@@ -20,10 +24,11 @@ Install from GitHub:
 cargo install --git https://github.com/syndicalt/llmff llmff
 ```
 
-Install a tagged release:
+After the `v0.8.0` release-candidate tag is published, install that tagged
+release with:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v0.1.6 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v0.8.0 llmff
 ```
 
 For a local checkout:
@@ -39,6 +44,17 @@ llmff --version
 llmff stages list
 ```
 
+Check local prerequisites without running a pipeline or calling provider
+endpoints:
+
+```bash
+llmff doctor \
+  --run-dir .llmff/run \
+  --plugin-dir ./plugins \
+  --backend openai=https://api.openai.com/v1 \
+  --api-key-env openai=OPENAI_API_KEY
+```
+
 Supported release targets and installer assumptions are documented in
 [`docs/platform-support.md`](docs/platform-support.md).
 
@@ -51,32 +67,33 @@ scripts/smoke-install.sh --path .
 Smoke test a generated release archive without installing:
 
 ```bash
-scripts/smoke-archive.sh --archive dist/llmff-0.1.6-x86_64-unknown-linux-gnu.tar.gz
+scripts/smoke-archive.sh --archive dist/llmff-0.8.0-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 Run the release metadata preflight before creating or pushing a release tag:
 
 ```bash
-scripts/release-preflight.sh v0.1.6
+scripts/release-preflight.sh v0.8.0
 ```
 
-Verify a published release's assets, checksums, and host-compatible packages:
+After release-tag CI completes, verify a published release's assets, checksums,
+and host-compatible packages:
 
 ```bash
-scripts/check-release-assets.sh v0.1.6
+scripts/check-release-assets.sh v0.8.0
 ```
 
 Generate and validate Windows MSI packaging metadata:
 
 ```bash
-scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.6 --target x86_64-pc-windows-msvc --out-dir dist --emit-wxs-only
+scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.8.0 --target x86_64-pc-windows-msvc --out-dir dist --emit-wxs-only
 ```
 
 Build a Windows MSI on a Windows host:
 
 ```bash
 dotnet tool restore
-scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.1.6 --target x86_64-pc-windows-msvc --out-dir dist
+scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 0.8.0 --target x86_64-pc-windows-msvc --out-dir dist
 ```
 
 Smoke test a staged Windows MSI payload without installing:
@@ -88,19 +105,19 @@ scripts/smoke-windows-msi.sh --payload-root dist/windows-msi-smoke-root
 Generate and validate macOS installer payload metadata:
 
 ```bash
-scripts/package-macos-pkg.sh --binary target/release/llmff --version 0.1.6 --target aarch64-apple-darwin --out-dir dist --emit-payload-only
+scripts/package-macos-pkg.sh --binary target/release/llmff --version 0.8.0 --target aarch64-apple-darwin --out-dir dist --emit-payload-only
 ```
 
 Smoke test a generated macOS installer payload without installing:
 
 ```bash
-scripts/smoke-macos-pkg.sh --payload-root dist/llmff-0.1.6-aarch64-apple-darwin.pkgroot
+scripts/smoke-macos-pkg.sh --payload-root dist/llmff-0.8.0-aarch64-apple-darwin.pkgroot
 ```
 
 Smoke test a generated Debian package without root:
 
 ```bash
-scripts/smoke-deb.sh --deb dist/llmff_0.1.6_amd64.deb
+scripts/smoke-deb.sh --deb dist/llmff_0.8.0_amd64.deb
 ```
 
 Release tags build compressed binary archives, Ubuntu/Debian `.deb` packages, Arch `PKGBUILD` metadata, unsigned Windows MSI packages, and unsigned macOS `.pkg` packages in CI. Trusted Windows Authenticode signing and Apple Developer ID signing/notarization are deferred until paid credentials are available. See [`docs/platform-support.md`](docs/platform-support.md) for the current target matrix.
@@ -118,6 +135,7 @@ Tagged release builds publish archives, checksums, `.deb` packages, Arch metadat
 - `llmff models list --format json` prints runtime model metadata for built-in mock models, CLI-registered OpenAI-compatible or Ollama aliases, and plugin command backends.
 - `llmff plugins list --plugin-dir <path>` discovers `llmff-plugin.yaml` manifests and prints plugin capability metadata.
 - `llmff run --plugin-dir <path>` can execute plugin-provided stages, backends, and tool transports declared in those manifests.
+- `llmff doctor` checks local prerequisites such as binary version, run-dir writability, plugin manifest validity, API-key environment wiring, and optional release trust manifest presence without making network calls.
 - The core crate owns execution semantics; the CLI is a thin adapter.
 - Mock backends are available for deterministic local runs and tests.
 - An OpenAI-compatible backend exists in the core crate for `/v1/chat/completions` servers.

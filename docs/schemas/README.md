@@ -12,6 +12,11 @@ These JSON Schemas freeze the llmff core contract at version 1:
 - `failure-kinds-v1.json`: stable `run_failed.failure_kind` values shared by
   lifecycle events, traces, and compatibility documentation.
 
+Discovery JSON outputs that do not have dedicated schemas are fixture-backed
+under `fixtures/golden/discovery/`: stages list, backends list, backends
+report, models list, and plugins list. The fixture checker validates their
+representative record shapes as part of `scripts/check-schema-contract.py`.
+
 Schemas use JSON Schema draft 2020-12. YAML fixtures are loaded as normal JSON-compatible data before validation.
 
 The multi-release compatibility matrix in

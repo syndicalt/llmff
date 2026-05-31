@@ -4,7 +4,7 @@ OpenRouter is an OpenAI-compatible gateway with provider-qualified model ids.
 
 ## Support Tier
 
-Support tier: Documented gateway
+Support tier: mock-inspectable
 
 ## Commands
 

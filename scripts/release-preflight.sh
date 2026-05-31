@@ -128,6 +128,7 @@ bash scripts/check-manifest-reproducibility.sh
 bash scripts/check-plugin-fixtures.sh
 bash scripts/check-provider-smoke-readiness.sh
 bash scripts/check-ecosystem-readiness.sh
+bash scripts/check-release-runbook.sh
 bash scripts/check-agent-adoption-guide.sh
 bash scripts/check-opentelemetry-bridge.sh
 bash scripts/check-real-world-workflows.sh

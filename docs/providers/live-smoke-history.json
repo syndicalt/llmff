@@ -4,7 +4,7 @@
   "providers": [
     {
       "provider": "anthropic",
-      "support_tier": "Documented adapter",
+      "support_tier": "mock-inspectable",
       "live_smoke": "not configured",
       "latest_result": "not_run",
       "readiness_evidence": [
@@ -15,7 +15,7 @@
     },
     {
       "provider": "azure-openai",
-      "support_tier": "Documented gateway",
+      "support_tier": "mock-inspectable",
       "live_smoke": "not configured",
       "latest_result": "not_run",
       "readiness_evidence": [
@@ -26,7 +26,7 @@
     },
     {
       "provider": "groq",
-      "support_tier": "Documented gateway",
+      "support_tier": "mock-inspectable",
       "live_smoke": "not configured",
       "latest_result": "not_run",
       "readiness_evidence": [
@@ -37,7 +37,7 @@
     },
     {
       "provider": "lm-studio",
-      "support_tier": "Local documented",
+      "support_tier": "mock-inspectable",
       "live_smoke": "not configured",
       "latest_result": "not_run",
       "readiness_evidence": [
@@ -48,7 +48,7 @@
     },
     {
       "provider": "localai",
-      "support_tier": "Local documented",
+      "support_tier": "mock-inspectable",
       "live_smoke": "not configured",
       "latest_result": "not_run",
       "readiness_evidence": [
@@ -59,7 +59,7 @@
     },
     {
       "provider": "ollama",
-      "support_tier": "Opt-in live smoke",
+      "support_tier": "opt-in smoke ready",
       "live_smoke": "workflow_dispatch",
       "latest_result": "pending",
       "readiness_evidence": [
@@ -71,7 +71,7 @@
     },
     {
       "provider": "openai",
-      "support_tier": "Documented gateway",
+      "support_tier": "mock-inspectable",
       "live_smoke": "via openai-compatible",
       "latest_result": "covered_by_openai_compatible",
       "readiness_evidence": [
@@ -82,7 +82,7 @@
     },
     {
       "provider": "openai-compatible",
-      "support_tier": "Opt-in live smoke",
+      "support_tier": "opt-in smoke ready",
       "live_smoke": "workflow_dispatch",
       "latest_result": "pending",
       "readiness_evidence": [
@@ -94,7 +94,7 @@
     },
     {
       "provider": "openrouter",
-      "support_tier": "Documented gateway",
+      "support_tier": "mock-inspectable",
       "live_smoke": "not configured",
       "latest_result": "not_run",
       "readiness_evidence": [
@@ -105,7 +105,7 @@
     },
     {
       "provider": "together",
-      "support_tier": "Documented gateway",
+      "support_tier": "mock-inspectable",
       "live_smoke": "not configured",
       "latest_result": "not_run",
       "readiness_evidence": [
@@ -116,7 +116,7 @@
     },
     {
       "provider": "vllm",
-      "support_tier": "Local documented",
+      "support_tier": "mock-inspectable",
       "live_smoke": "not configured",
       "latest_result": "not_run",
       "readiness_evidence": [

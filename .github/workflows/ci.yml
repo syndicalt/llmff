@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  required:
+    name: required checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test workspace
+        run: cargo test --workspace --locked --no-fail-fast
+
+      - name: Build CLI for smoke gates
+        run: cargo build --locked -p llmff
+
+      - name: Schema contract
+        run: python3 scripts/check-schema-contract.py
+
+      - name: Plugin fixtures
+        run: bash scripts/check-plugin-fixtures.sh
+
+      - name: Governance readiness
+        run: bash scripts/check-governance-readiness.sh
+
+      - name: Ecosystem readiness
+        run: bash scripts/check-ecosystem-readiness.sh
+
+      - name: Real-world workflow examples
+        run: bash scripts/check-real-world-workflows.sh
+        env:
+          LLMFF_BIN: target/debug/llmff
+
+      - name: Events and streaming smoke
+        run: LLMFF_BIN=target/debug/llmff bash scripts/smoke-events-streaming.sh

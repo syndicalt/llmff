@@ -1,0 +1,27 @@
+[
+  {
+    "name": "infer",
+    "kind": "model",
+    "required_fields": ["from", "model"],
+    "optional_fields": [
+      "temperature",
+      "top_p",
+      "max_tokens",
+      "seed",
+      "response_format",
+      "stop",
+      "sampler",
+      "timeout_ms",
+      "retry"
+    ],
+    "capabilities": [
+      "chat-messages",
+      "plugin-sampler",
+      "response-format-json",
+      "sampling",
+      "seed-control",
+      "stop-sequences",
+      "usage-metadata"
+    ]
+  }
+]

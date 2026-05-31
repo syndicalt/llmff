@@ -6,6 +6,12 @@ This is the canonical product boundary and roadmap document for `llmff`.
 pipelines. It executes declared manifests and graphs; it does not plan work,
 own memory, coordinate agents, or act as an agent framework.
 
+First-reader decision guidance lives in
+[`docs/when-to-use-llmff.md`](docs/when-to-use-llmff.md). Workflow recipes live
+in [`docs/cookbook.md`](docs/cookbook.md), and the pre-1.0 compatibility
+checklist lives in
+[`docs/migration/pre-1.0-to-1.0.md`](docs/migration/pre-1.0-to-1.0.md).
+
 ## Current Implementation
 
 `llmff` is currently a command-line and library runner for typed LLM inference

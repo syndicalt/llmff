@@ -1,0 +1,20 @@
+[
+  {
+    "model": "openai:<model>",
+    "backend": "openai",
+    "backend_kind": "openai-compatible",
+    "runtime": "remote-chat",
+    "source": "cli",
+    "registration_flag": "--backend openai=<base-url>",
+    "requires_api_key": true,
+    "capabilities": [
+      "chat-messages",
+      "response-format-json",
+      "sampling",
+      "seed-control",
+      "stop-sequences",
+      "streaming-inference",
+      "usage-metadata"
+    ]
+  }
+]

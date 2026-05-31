@@ -45,6 +45,21 @@ Live provider certification is covered by
 [`docs/provider-smoke-readiness.md`](provider-smoke-readiness.md). Those smokes
 remain opt-in and are not run from pull requests or pushes.
 
+## Local preflight
+
+Use `llmff doctor` to check local provider wiring before a run:
+
+```bash
+llmff doctor \
+  --backend openai=https://api.openai.com/v1 \
+  --api-key-env openai=OPENAI_API_KEY
+```
+
+The command verifies that the referenced API-key environment variable exists
+without printing the secret value. It does not call the provider endpoint. Add
+`--run-dir <path>` to verify that run artifacts can be written, and
+`--plugin-dir <path>` to validate discovered plugin manifests.
+
 ## base URL normalization
 
 OpenAI-compatible base URLs are normalized to include `/v1`.

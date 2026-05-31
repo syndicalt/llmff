@@ -61,8 +61,8 @@ diagnostics.
 
 Provider support tiers are documented in
 [`docs/providers/support-tiers.md`](providers/support-tiers.md). The tier matrix
-separates opt-in live smoke paths from documented hosted gateways,
-adapter-only paths, and local-provider setups.
+separates documented only, mock-inspectable, opt-in smoke ready, and
+live-smoke verified evidence levels.
 
 Live smoke readiness and historical status are tracked in
 [`docs/providers/live-smoke-history.json`](providers/live-smoke-history.json).

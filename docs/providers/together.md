@@ -4,7 +4,7 @@ Together exposes OpenAI-compatible chat-completion endpoints.
 
 ## Support Tier
 
-Support tier: Documented gateway
+Support tier: mock-inspectable
 
 ## Commands
 

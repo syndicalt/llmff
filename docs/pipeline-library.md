@@ -7,6 +7,9 @@ when adapting a template for production.
 
 Each example writes output under `examples/templates/`. Remove generated files
 with `rm -f examples/templates/*.answer.* examples/templates/*.result.json`.
+The cookbook in [`docs/cookbook.md`](cookbook.md) routes common use cases to
+these templates and to the real-world examples without duplicating CLI
+reference material.
 
 ## Summarization
 

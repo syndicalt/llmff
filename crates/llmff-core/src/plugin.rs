@@ -213,7 +213,7 @@ pub fn validate_plugin_directory(
                 }
                 plugins.push(manifest);
             }
-            Err(diagnostic) => diagnostics.push(diagnostic),
+            Err(diagnostic) => diagnostics.push(*diagnostic),
         }
     }
 
@@ -415,22 +415,24 @@ fn read_plugin_manifest(manifest_path: &Path) -> Result<PluginManifest, LlmffErr
 
 fn read_plugin_manifest_for_report(
     manifest_path: &Path,
-) -> Result<PluginManifest, PluginDiagnostic> {
-    let source = std::fs::read_to_string(manifest_path).map_err(|error| PluginDiagnostic {
-        severity: PluginDiagnosticSeverity::Error,
-        code: "manifest_read_failed".to_string(),
-        message: format!(
-            "failed to read plugin manifest `{}`: {error}",
-            manifest_path.display()
-        ),
-        manifest_path: manifest_path.display().to_string(),
-        plugin_name: None,
-        capability_kind: None,
-        capability_name: None,
-        entrypoint: None,
+) -> Result<PluginManifest, Box<PluginDiagnostic>> {
+    let source = std::fs::read_to_string(manifest_path).map_err(|error| {
+        Box::new(PluginDiagnostic {
+            severity: PluginDiagnosticSeverity::Error,
+            code: "manifest_read_failed".to_string(),
+            message: format!(
+                "failed to read plugin manifest `{}`: {error}",
+                manifest_path.display()
+            ),
+            manifest_path: manifest_path.display().to_string(),
+            plugin_name: None,
+            capability_kind: None,
+            capability_name: None,
+            entrypoint: None,
+        })
     })?;
-    let manifest: PluginManifest =
-        serde_yaml::from_str(&source).map_err(|error| PluginDiagnostic {
+    let manifest: PluginManifest = serde_yaml::from_str(&source).map_err(|error| {
+        Box::new(PluginDiagnostic {
             severity: PluginDiagnosticSeverity::Error,
             code: "manifest_parse_failed".to_string(),
             message: format!(
@@ -442,10 +444,10 @@ fn read_plugin_manifest_for_report(
             capability_kind: None,
             capability_name: None,
             entrypoint: None,
-        })?;
-    manifest
-        .validate(manifest_path)
-        .map_err(|error| PluginDiagnostic {
+        })
+    })?;
+    manifest.validate(manifest_path).map_err(|error| {
+        Box::new(PluginDiagnostic {
             severity: PluginDiagnosticSeverity::Error,
             code: "manifest_invalid".to_string(),
             message: error.to_string(),
@@ -454,7 +456,8 @@ fn read_plugin_manifest_for_report(
             capability_kind: None,
             capability_name: None,
             entrypoint: None,
-        })?;
+        })
+    })?;
     Ok(manifest)
 }
 

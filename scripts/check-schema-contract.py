@@ -53,6 +53,13 @@ FIXTURES = {
         ROOT / "fixtures/golden/run-results/stage-failure.json",
         ROOT / "fixtures/golden/run-results/interrupted.json",
     ],
+    "discovery": [
+        ROOT / "fixtures/golden/discovery/stages-list.json",
+        ROOT / "fixtures/golden/discovery/backends-list.json",
+        ROOT / "fixtures/golden/discovery/backends-report.json",
+        ROOT / "fixtures/golden/discovery/models-list.json",
+        ROOT / "fixtures/golden/discovery/plugins-list.json",
+    ],
 }
 
 DOCS = [
@@ -102,6 +109,73 @@ def validate_jsonl(schema, path):
 
 def validate_instance(schema, instance):
     jsonschema.Draft202012Validator(schema).validate(instance)
+
+
+def validate_discovery_fixture(path):
+    payload = load_json(path)
+    assert isinstance(payload, list), f"{path} must contain a JSON array"
+    assert payload, f"{path} must contain at least one representative record"
+    for item in payload:
+        assert isinstance(item, dict), f"{path} records must be JSON objects"
+
+    name = path.name
+    if name == "stages-list.json":
+        required = {"name", "kind", "required_fields", "optional_fields", "capabilities"}
+        for item in payload:
+            assert required <= set(item), f"{path} stage record missing fields"
+            assert isinstance(item["required_fields"], list)
+            assert isinstance(item["optional_fields"], list)
+            assert isinstance(item["capabilities"], list)
+    elif name == "backends-list.json":
+        required = {
+            "name",
+            "kind",
+            "registration_flag",
+            "requires_api_key",
+            "model_aliases",
+            "capabilities",
+        }
+        for item in payload:
+            assert required <= set(item), f"{path} backend record missing fields"
+            assert isinstance(item["requires_api_key"], bool)
+    elif name == "backends-report.json":
+        required = {
+            "name",
+            "kind",
+            "source",
+            "requires_api_key",
+            "api_key_configured",
+            "capabilities",
+            "diagnostics",
+        }
+        capability_keys = {"json_mode", "streaming", "seed", "stop", "usage_metadata"}
+        for item in payload:
+            assert required <= set(item), f"{path} report record missing fields"
+            assert capability_keys <= set(item["capabilities"])
+            for capability in capability_keys:
+                detail = item["capabilities"][capability]
+                assert {"supported", "detail"} <= set(detail)
+                assert isinstance(detail["supported"], bool)
+    elif name == "models-list.json":
+        required = {
+            "model",
+            "backend",
+            "backend_kind",
+            "runtime",
+            "source",
+            "registration_flag",
+            "requires_api_key",
+            "capabilities",
+        }
+        for item in payload:
+            assert required <= set(item), f"{path} model record missing fields"
+    elif name == "plugins-list.json":
+        for item in payload:
+            assert {"name", "version", "capabilities"} <= set(item)
+            for capability in item["capabilities"]:
+                assert {"kind", "name", "entrypoint"} <= set(capability)
+    else:
+        raise AssertionError(f"unknown discovery fixture: {path}")
 
 
 def validate_compatibility_matrix(matrix):
@@ -165,6 +239,37 @@ def main():
         "interrupted",
     ]
     assert failure_kinds == expected_failure_kinds
+    expected_failure_modes = [
+        "manifest_parse",
+        "missing_input",
+        "invalid_graph",
+        "unknown_stage",
+        "missing_backend",
+        "invalid_plugin",
+        "timeout",
+        "http_server_error",
+        "tool_nonzero",
+        "schema_invalid",
+        "stdout_ownership_conflict",
+        "checkpoint_mismatch",
+        "batch_item_failure",
+        "interrupted_run",
+    ]
+    failure_modes = failure_kind_registry.get("failure_modes", [])
+    assert [mode["mode"] for mode in failure_modes] == expected_failure_modes
+    for mode in failure_modes:
+        assert mode["failure_kind"] in failure_kinds
+        assert mode["exit_code"] in {1, 2, 10, 20, 21, 22, 30, 130}
+        assert mode["retry_recommendation"] in {
+            "retry_with_backoff",
+            "check_stage_or_input",
+            "check_filesystem",
+            "do_not_retry_without_changes",
+            "resume_with_matching_checkpoint",
+        }
+        assert mode["stderr_contains"]
+        assert isinstance(mode["run_failed_event"], bool)
+        assert isinstance(mode["run_dir_result"], bool)
     for name, schema in schemas.items():
         jsonschema.Draft202012Validator.check_schema(schema)
         assert schema["$id"].endswith(SCHEMA_IDS[name])
@@ -190,6 +295,9 @@ def main():
         result = load_json(path)
         validate_instance(schemas["run_result"], result)
         assert result["schema_version"] == 1
+
+    for path in FIXTURES["discovery"]:
+        validate_discovery_fixture(path)
 
     for path in FIXTURES["event"]:
         validate_jsonl(schemas["event"], path)

@@ -66,6 +66,34 @@ missing = sorted(required - categories)
 if missing:
     raise SystemExit(f"registry missing categories: {', '.join(missing)}")
 
+template_manifest = root / "examples/plugins/template/llmff-plugin.yaml"
+template_readme = root / "examples/plugins/template/README.md"
+if not template_manifest.is_file():
+    raise SystemExit(f"missing plugin template manifest: {template_manifest}")
+if not template_readme.is_file():
+    raise SystemExit(f"missing plugin template README: {template_readme}")
+template_manifest_text = template_manifest.read_text()
+for text in [
+    "kind: stage",
+    "kind: backend",
+    "kind: sampler",
+    "kind: tool-transport",
+    "name: template.uppercase",
+    "name: template-echo",
+    "name: template-deterministic",
+    "name: template-stdio",
+]:
+    if text not in template_manifest_text:
+        raise SystemExit(f"plugin template manifest must contain: {text}")
+template_readme_text = template_readme.read_text()
+for text in [
+    "protocol version 1",
+    "unsandboxed local executables",
+    "docs/plugins/fixtures/protocol-v1",
+]:
+    if text not in template_readme_text:
+        raise SystemExit(f"plugin template README must contain: {text}")
+
 if registry.get("promotion_policy") != "promotion-policy.md":
     raise SystemExit("registry must link promotion_policy to promotion-policy.md")
 

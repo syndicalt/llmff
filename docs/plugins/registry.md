@@ -30,5 +30,6 @@ Promotion is a support commitment. A plugin with `promotion.status` set to
 must use `protocol-v1-fixture-backed` as its support commitment, and must pass
 `scripts/check-plugin-fixtures.sh`.
 
-The registry is not an installer. llmff plugin loading still uses `--plugin-dir`
-and the plugin manifests on disk.
+The registry is not an installer and does not provide plugin signing, sandboxing,
+or remote trust. llmff plugin loading still uses `--plugin-dir` and the plugin
+manifests on disk.

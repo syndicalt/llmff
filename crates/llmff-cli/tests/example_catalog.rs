@@ -70,6 +70,96 @@ fn product_spec_defines_scope_goal_and_open_items() {
 }
 
 #[test]
+fn adoption_docs_cover_decision_cookbook_and_migration_paths() {
+    let root = workspace_root();
+    let readme = std::fs::read_to_string(root.join("README.md")).expect("README readable");
+    let quickstart =
+        std::fs::read_to_string(root.join("docs/quickstart.md")).expect("quickstart readable");
+    let decision = std::fs::read_to_string(root.join("docs/when-to-use-llmff.md"))
+        .expect("decision guide readable");
+    let cookbook =
+        std::fs::read_to_string(root.join("docs/cookbook.md")).expect("cookbook readable");
+    let migration = std::fs::read_to_string(root.join("docs/migration/pre-1.0-to-1.0.md"))
+        .expect("migration guide readable");
+    let workflows = std::fs::read_to_string(root.join("docs/agent-workflows.md"))
+        .expect("agent workflows readable");
+
+    for path in [
+        "docs/when-to-use-llmff.md",
+        "docs/cookbook.md",
+        "docs/migration/pre-1.0-to-1.0.md",
+    ] {
+        assert!(readme.contains(path), "README should link {path}");
+    }
+
+    for required in [
+        "typed inference sub-pipelines",
+        "agent framework",
+        "model server",
+        "scheduler",
+        "memory system",
+        "autonomous planner",
+        "llmff inspect pipeline.yaml --format json",
+        "llmff run pipeline.yaml --run-dir",
+    ] {
+        assert!(
+            decision.contains(required),
+            "decision guide should cover {required}"
+        );
+        assert!(
+            quickstart.contains("docs/when-to-use-llmff.md"),
+            "quickstart should route first-reader decision guidance"
+        );
+    }
+
+    for required in [
+        "offline-runnable by default",
+        "examples/templates/rag-answer.yaml",
+        "examples/templates/tool-calling.yaml",
+        "examples/templates/eval-harness.yaml",
+        "examples/templates/batch-processing.yaml",
+        "examples/real-world/issue-triage.yaml",
+        "examples/agent-workflows/supervisor.py",
+        "examples/agent-workflows/batch-supervisor.py",
+        "examples/agent-workflows/node-supervisor.mjs",
+        "docs/pipeline-library.md",
+    ] {
+        assert!(
+            cookbook.contains(required),
+            "cookbook should route to {required}"
+        );
+    }
+
+    for required in [
+        "pre-1.0",
+        "llmff inspect <manifest> --format json",
+        "--run-dir <dir>",
+        "failure_kind",
+        "llmff doctor",
+        "llmff plugins validate --plugin-dir <dir>",
+        "llmff backends report",
+    ] {
+        assert!(
+            migration.contains(required),
+            "migration guide should cover {required}"
+        );
+    }
+
+    for required in [
+        "inspect",
+        "preserve the original process exit code",
+        "run-directory artifacts",
+        "safe failure kinds",
+        "result.json",
+    ] {
+        assert!(
+            workflows.contains(required),
+            "agent workflows should state canonical supervisor pattern: {required}"
+        );
+    }
+}
+
+#[test]
 fn pipeline_library_catalog_is_documented_and_inspectable_offline() {
     let root = workspace_root();
     let examples_docs = root.join("examples/README.md");

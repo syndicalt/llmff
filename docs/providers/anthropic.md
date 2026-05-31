@@ -5,7 +5,7 @@ not implemented by the current backend code.
 
 ## Support Tier
 
-Support tier: Documented adapter
+Support tier: mock-inspectable
 
 ## Commands
 

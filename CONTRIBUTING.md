@@ -12,11 +12,25 @@ opening a release-facing pull request.
 Useful gates:
 
 ```bash
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test
-scripts/check-schema-contract.py
-scripts/check-plugin-fixtures.sh
-scripts/check-governance-readiness.sh
+python3 scripts/check-schema-contract.py
+bash scripts/check-plugin-fixtures.sh
+bash scripts/check-governance-readiness.sh
 ```
+
+Release-facing pull requests should also run the CI-equivalent local gate:
+
+```bash
+cargo test --workspace --locked --no-fail-fast
+bash scripts/check-ecosystem-readiness.sh
+bash scripts/check-real-world-workflows.sh
+LLMFF_BIN=target/debug/llmff bash scripts/smoke-events-streaming.sh
+```
+
+Live provider smoke checks remain explicit and opt-in; do not require provider
+secrets for ordinary pull requests.
 
 For release packaging or distribution docs, also run the relevant shell gate
 from `scripts/`.
@@ -79,3 +93,19 @@ the channel is support-ready.
 
 Deprecations must follow `docs/governance.md`: document the replacement,
 warning behavior when practical, release-note impact, and removal timing.
+
+## Deprecating Public Surface
+
+Before deprecating a public manifest field, CLI flag, plugin protocol behavior,
+trace/event field, run-directory artifact, provider configuration key, package
+metadata channel, or library API:
+
+- identify whether the change is patch, minor, or major under
+  `docs/governance.md`;
+- write the replacement or explain why there is no replacement;
+- add tests, fixtures, schemas, or docs for the old and new behavior during the
+  deprecation window;
+- add release-note coverage with first deprecated release and earliest removal
+  timing;
+- keep warnings or diagnostics actionable and avoid breaking automation unless
+  the old behavior is unsafe.
