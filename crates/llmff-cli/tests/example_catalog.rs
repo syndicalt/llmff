@@ -41,6 +41,29 @@ const REAL_WORLD_EXAMPLES: &[(&str, &str)] = &[
     ),
 ];
 
+const LOOP_EXAMPLES: &[(&str, &str, &str)] = &[
+    (
+        "Self-Refining Answer",
+        "examples/loops/self-refining-answer-loop.yaml",
+        r#"{"answer":"Use llmff for bounded, inspectable LLM pipelines.","confidence":0.93}"#,
+    ),
+    (
+        "ReAct-Style Tool Loop",
+        "examples/loops/react-style-tool-use-loop.yaml",
+        r#"{"thought":"The answer can be produced directly.","action":"answer","task_complete":true,"final_answer":"Use a bounded loop and inspect the trace."}"#,
+    ),
+    (
+        "Best-of-N Sampling Skeleton",
+        "examples/loops/best-of-n-sampling+selection-loop.yaml",
+        r#"{"candidate":"Candidate answer from a bounded sample.","score":8}"#,
+    ),
+    (
+        "Iterative Research And Fact Check",
+        "examples/loops/iterative-research-fact-check-loop.yaml",
+        r#"{"supported":true,"claims":["Rust and Python are available in the local context."],"sources":["retrieval/rust.txt","retrieval/python.txt"]}"#,
+    ),
+];
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -403,6 +426,71 @@ fn wisepick_eventloom_flow_example_runs_offline_dry_run() {
             append_calls.contains(expected),
             "Eventloom append calls should contain {expected}"
         );
+    }
+}
+
+#[test]
+fn loop_examples_are_documented_inspectable_and_runnable_offline() {
+    let root = workspace_root();
+    let readme_path = root.join("examples/loops/README.md");
+    let readme = std::fs::read_to_string(&readme_path).expect("loop README should be readable");
+    let examples_source = std::fs::read_to_string(root.join("examples/README.md"))
+        .expect("README should be readable");
+    let quickstart = std::fs::read_to_string(root.join("docs/quickstart.md"))
+        .expect("quickstart should be readable");
+    let pipeline_library = std::fs::read_to_string(root.join("docs/pipeline-library.md"))
+        .expect("pipeline library should be readable");
+
+    assert!(
+        quickstart.contains("Run A Bounded Loop"),
+        "quickstart should introduce the v1.1 loop path"
+    );
+    assert!(
+        examples_source.contains("examples/loops/README.md"),
+        "examples README should link the loop catalog"
+    );
+    assert!(
+        pipeline_library.contains("Loop Example Catalog"),
+        "pipeline library should route loop adoption examples"
+    );
+
+    for (name, manifest, mock_response) in LOOP_EXAMPLES {
+        let manifest_path = root.join(manifest);
+        assert!(manifest_path.exists(), "missing loop example {manifest}");
+        assert!(
+            readme.contains(&format!("## {name}")),
+            "loop README should document {name}"
+        );
+        assert!(
+            readme.contains(&format!("llmff inspect {manifest}")),
+            "loop README should include inspect command for {manifest}"
+        );
+        assert!(
+            readme.contains(&format!("llmff run {manifest}")),
+            "loop README should include run command for {manifest}"
+        );
+
+        Command::cargo_bin("llmff")
+            .unwrap()
+            .args(["inspect", manifest_path.to_str().unwrap()])
+            .assert()
+            .success();
+
+        Command::cargo_bin("llmff")
+            .unwrap()
+            .env("LLMFF_MOCK_GOOD_RESPONSE", mock_response)
+            .args(["run", manifest_path.to_str().unwrap()])
+            .assert()
+            .success();
+    }
+
+    for path in [
+        "self-refining-answer.output.json",
+        "react-style-tool-use.output.json",
+        "best-of-n-sampling.output.json",
+        "iterative-research-fact-check.output.json",
+    ] {
+        let _ = std::fs::remove_file(root.join("examples/loops").join(path));
     }
 }
 

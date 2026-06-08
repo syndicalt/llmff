@@ -1,0 +1,38 @@
+version: 1
+inputs:
+  question:
+    path: ../question.txt
+graph:
+  - id: load_question
+    op: load
+    input: question
+
+  - id: refine_loop
+    op: loop
+    from: load_question
+    max_iterations: 3
+    break_on:
+      type: stage_success
+      stage: quality_check
+    final:
+      from: draft
+      require_status: success
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:good
+        response_format: json
+        temperature: 0.2
+        prompt: |
+          Draft a concise answer. Return JSON:
+          {"answer":"...", "confidence":0.0}
+
+      - id: quality_check
+        op: validate_json
+        from: draft
+        schema: '{"type":"object","required":["answer","confidence"],"properties":{"answer":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}}}'
+outputs:
+  final:
+    from: refine_loop
+    path: ./self-refining-answer.output.json

@@ -1,0 +1,48 @@
+version: 1
+inputs:
+  question:
+    path: ../question.txt
+graph:
+  - id: load_question
+    op: load
+    input: question
+
+  - id: research_loop
+    op: loop
+    from: load_question
+    max_iterations: 3
+    break_on:
+      type: field_true
+      stage: fact_check
+      field: supported
+    final:
+      from: fact_check
+      require_status: success
+    body:
+      - id: retrieve_context
+        op: retrieve
+        from: input
+        documents:
+          - ../retrieval/python.txt
+          - ../retrieval/rust.txt
+        strategy: lexical
+        top_k: 2
+
+      - id: synthesize
+        op: infer
+        from: retrieve_context
+        model: mock:good
+        response_format: json
+        temperature: 0.2
+        prompt: |
+          Synthesize claims from the retrieved context. Return JSON:
+          {"supported":true, "claims":["..."], "sources":["..."]}
+
+      - id: fact_check
+        op: validate_json
+        from: synthesize
+        schema: '{"type":"object","required":["supported","claims","sources"],"properties":{"supported":{"type":"boolean"},"claims":{"type":"array","items":{"type":"string"}},"sources":{"type":"array","items":{"type":"string"}}}}'
+outputs:
+  final:
+    from: research_loop
+    path: ./iterative-research-fact-check.output.json

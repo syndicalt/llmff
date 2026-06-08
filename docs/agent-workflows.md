@@ -55,6 +55,14 @@ The canonical supervisor sequence is: run `llmff inspect --format json`, run
 run-directory artifacts, and read safe failure kinds from `run_failed` events
 or `result.json` only after a non-zero exit.
 
+When the manifest contains `op: loop`, the same subprocess contract applies.
+Loops are bounded stages inside the pipeline, not agent-level retry policy.
+Use `llmff inspect --format json` to read each loop's `max_iterations`,
+`body_stage_count`, `max_expanded_stage_count`, break condition, and final
+stage before dispatch. Trace and event records from loop bodies include
+`loop_id`, `loop_iteration`, and `loop_stage_id`, which lets a supervisor show
+per-iteration progress without owning the loop body itself.
+
 Use explicit artifact flags when the agent needs a different stream owner or
 when an older wrapper has not adopted `--run-dir`:
 

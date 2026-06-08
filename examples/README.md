@@ -193,6 +193,29 @@ Copy-this-and-run-it commands for every template are documented in
 cost/latency examples are simulations built from currently available stages;
 the pipeline library doc explains exactly what they do.
 
+## Loop Examples
+
+Bounded v1.1 loop examples live in `examples/loops/`:
+
+- `examples/loops/self-refining-answer-loop.yaml`
+- `examples/loops/react-style-tool-use-loop.yaml`
+- `examples/loops/best-of-n-sampling+selection-loop.yaml`
+- `examples/loops/iterative-research-fact-check-loop.yaml`
+
+Start with the self-refining answer loop:
+
+```bash
+llmff inspect examples/loops/self-refining-answer-loop.yaml
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"Use llmff for bounded, inspectable LLM pipelines.","confidence":0.93}' \
+llmff run examples/loops/self-refining-answer-loop.yaml \
+  --trace /tmp/llmff-self-refining-answer.trace.jsonl
+```
+
+The examples demonstrate `stage_success`, `field_true`, and `never` break
+conditions while staying offline-friendly. See
+[`examples/loops/README.md`](loops/README.md) for the full copy-run catalog and
+real-provider adaptation notes.
+
 ## Real-World Workflows
 
 Production-shaped examples live in `examples/real-world/`. They are offline mock

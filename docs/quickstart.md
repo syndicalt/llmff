@@ -15,7 +15,7 @@ decision guide.
 Install the latest tagged release with Cargo:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v1.0.0 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v1.1.0 llmff
 ```
 
 If you downloaded a release archive instead, unpack it and put the `llmff`
@@ -33,7 +33,7 @@ llmff stages list
 Expected version:
 
 ```text
-llmff 1.0.0
+llmff 1.1.0
 ```
 
 ## 2. Run The Offline Example
@@ -115,7 +115,45 @@ Expected output:
 {"answer":"ok"}
 ```
 
-## 5. Use A Real Backend
+## 5. Run A Bounded Loop
+
+`llmff` v1.1 adds `op: loop` for bounded refinement, retry, and agent-style
+sub-pipelines. Loops always require `max_iterations`, an explicit `break_on`
+condition, and a body DAG.
+
+Inspect the self-refining answer loop before running it:
+
+```bash
+llmff inspect examples/loops/self-refining-answer-loop.yaml --format json
+```
+
+Run it with the mock backend and write a trace:
+
+```bash
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"Use llmff for bounded, inspectable LLM pipelines.","confidence":0.93}' \
+llmff run examples/loops/self-refining-answer-loop.yaml \
+  --trace /tmp/llmff-self-refining-answer.trace.jsonl
+```
+
+The loop writes:
+
+```text
+examples/loops/self-refining-answer.output.json
+```
+
+Inspect the trace summary:
+
+```bash
+llmff trace /tmp/llmff-self-refining-answer.trace.jsonl
+```
+
+Loop body records include `loop_id`, `loop_iteration`, and `loop_stage_id`, so
+supervisors can explain which iteration produced each body-stage event.
+
+More loop patterns are documented in
+[`examples/loops/README.md`](../examples/loops/README.md).
+
+## 6. Use A Real Backend
 
 Register an OpenAI-compatible backend explicitly:
 
@@ -146,7 +184,7 @@ Then use model ids such as:
 model: ollama:llama3.1
 ```
 
-## 6. Read The Trace
+## 7. Read The Trace
 
 The `--trace` file is JSONL. Summarize it with:
 
@@ -170,12 +208,14 @@ does not include full prompts, tool bodies, headers, cached values, or secrets.
   before the first colon.
 - `missing API key environment variable`: export the secret and pass
   `--api-key-env alias=ENV_NAME`.
-- Windows and macOS release installers are unsigned in `v1.0.0`; expect normal
+- Windows and macOS release installers are unsigned in `v1.1.0`; expect normal
   OS trust prompts until paid signing and notarization are added.
 
 ## Next Steps
 
 - See [`examples/README.md`](../examples/README.md) for the example catalog.
+- See [`examples/loops/README.md`](../examples/loops/README.md) for bounded
+  loop examples introduced in v1.1.
 - See [`docs/cookbook.md`](cookbook.md) for workflow patterns routed to
   existing offline examples.
 - See [`docs/provider-troubleshooting.md`](provider-troubleshooting.md) for

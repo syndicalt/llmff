@@ -1,0 +1,37 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+
+  - id: best_of_n_loop
+    op: loop
+    from: load_prompt
+    max_iterations: 3
+    break_on:
+      type: never
+    final:
+      from: score
+      require_status: success
+    body:
+      - id: generate
+        op: infer
+        from: input
+        model: mock:good
+        response_format: json
+        temperature: 0.9
+        prompt: |
+          Generate one candidate answer. Return JSON:
+          {"candidate":"...", "score":0}
+
+      - id: score
+        op: validate_json
+        from: generate
+        schema: '{"type":"object","required":["candidate","score"],"properties":{"candidate":{"type":"string"},"score":{"type":"number","minimum":0,"maximum":10}}}'
+outputs:
+  final:
+    from: best_of_n_loop
+    path: ./best-of-n-sampling.output.json

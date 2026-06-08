@@ -9,6 +9,7 @@
 - New users: follow [`docs/quickstart.md`](docs/quickstart.md).
 - Deciding fit: read [`docs/when-to-use-llmff.md`](docs/when-to-use-llmff.md).
 - Example catalog: see [`examples/README.md`](examples/README.md).
+- Loop examples: see [`examples/loops/README.md`](examples/loops/README.md).
 - Pattern cookbook: see [`docs/cookbook.md`](docs/cookbook.md).
 - Agent integrations: see [`docs/agent-workflows.md`](docs/agent-workflows.md).
 - Pre-1.0 migration checklist: see

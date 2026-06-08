@@ -1,0 +1,35 @@
+version: 1
+inputs:
+  task:
+    path: ../question.txt
+graph:
+  - id: load_task
+    op: load
+    input: task
+
+  - id: react_loop
+    op: loop
+    from: load_task
+    max_iterations: 4
+    break_on:
+      type: field_true
+      stage: decide
+      field: task_complete
+    final:
+      from: decide
+      require_status: success
+    body:
+      - id: decide
+        op: infer
+        from: input
+        model: mock:good
+        response_format: json
+        temperature: 0.2
+        prompt: |
+          Decide the next bounded action. Return JSON:
+          {"thought":"...", "action":"answer", "task_complete":true, "final_answer":"..."}
+
+outputs:
+  final:
+    from: react_loop
+    path: ./react-style-tool-use.output.json

@@ -67,6 +67,30 @@ validator succeeds or `max_iterations` is reached. The loop remains a single
 stage in the outer graph and produces a JSON object with `final` and
 `metadata`.
 
+## Loop Example Catalog
+
+Use `examples/loops/` when you want copy-run manifests for v1.1 loop patterns
+beyond the single template above:
+
+- `examples/loops/self-refining-answer-loop.yaml`: schema-validated
+  refinement with `break_on: stage_success`.
+- `examples/loops/react-style-tool-use-loop.yaml`: ReAct-style control shape
+  with `break_on: field_true`.
+- `examples/loops/best-of-n-sampling+selection-loop.yaml`: fixed-count
+  sampling skeleton with `break_on: never`.
+- `examples/loops/iterative-research-fact-check-loop.yaml`: retrieval,
+  synthesis, and JSON fact-check validation with `break_on: field_true`.
+
+```bash
+llmff inspect examples/loops/self-refining-answer-loop.yaml
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"Use llmff for bounded, inspectable LLM pipelines.","confidence":0.93}' \
+llmff run examples/loops/self-refining-answer-loop.yaml \
+  --trace /tmp/llmff-self-refining-answer.trace.jsonl
+```
+
+See [`examples/loops/README.md`](../examples/loops/README.md) for run commands
+for each loop pattern and notes on adapting them to real providers.
+
 ## RAG Answer
 
 Use this for local file-backed retrieval, lexical reranking, and answer
