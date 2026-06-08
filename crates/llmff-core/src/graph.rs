@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use crate::error::LlmffError;
-use crate::manifest::{LoopBreakSpec, Manifest, StageSpec};
+use crate::manifest::{LoopBreakSpec, LoopRetentionSpec, Manifest, StageSpec};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Graph {
@@ -219,6 +219,23 @@ fn validate_loop_stage(stage: &StageSpec) -> Result<(), LlmffError> {
             )));
         }
     }
+    for initial_key in stage.initial_carry.keys() {
+        if initial_key == "input" {
+            return Err(LlmffError::GraphValidation(
+                "initial_carry cannot override reserved loop input".to_string(),
+            ));
+        }
+        if body_ids.contains(initial_key) {
+            return Err(LlmffError::GraphValidation(format!(
+                "initial_carry key `{initial_key}` collides with loop body stage id"
+            )));
+        }
+        if !stage.carry.contains_key(initial_key) {
+            return Err(LlmffError::GraphValidation(format!(
+                "initial_carry key `{initial_key}` must match a carry alias"
+            )));
+        }
+    }
 
     for body_stage in &stage.body {
         if let Some(parent) = &body_stage.from {
@@ -262,6 +279,7 @@ fn validate_loop_stage(stage: &StageSpec) -> Result<(), LlmffError> {
             )));
         }
     }
+    validate_loop_retention(stage, &body_ids)?;
 
     let _ordered_body = order_loop_body_stages(stage)?;
     Ok(())
@@ -283,6 +301,23 @@ fn validate_loop_break_reference(
         if !body_ids.contains(stage) {
             return Err(LlmffError::GraphValidation(format!(
                 "unknown loop break stage `{stage}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_loop_retention(
+    stage: &StageSpec,
+    body_ids: &BTreeSet<String>,
+) -> Result<(), LlmffError> {
+    let Some(LoopRetentionSpec::Config { stages, .. }) = &stage.retain_iterations else {
+        return Ok(());
+    };
+    for retained_stage in stages {
+        if !body_ids.contains(retained_stage) {
+            return Err(LlmffError::GraphValidation(format!(
+                "unknown loop retention stage `{retained_stage}`"
             )));
         }
     }

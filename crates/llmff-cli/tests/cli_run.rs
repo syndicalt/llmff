@@ -3168,6 +3168,134 @@ outputs:
 }
 
 #[test]
+fn run_loop_retains_iteration_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("input.json");
+    let output = dir.path().join("loop.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&input, r#"{"value":"kept"}"#).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: keep
+    op: loop
+    from: load_payload
+    max_iterations: 2
+    break_on: {{ type: never }}
+    retain_iterations:
+      mode: all
+      stages: [current]
+      include_values: true
+    final: {{ from: current, require_status: success }}
+    body:
+      - id: current
+        op: extract
+        from: input
+        field: value
+outputs:
+  final:
+    from: keep
+    path: {}
+"#,
+            input.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(written["metadata"]["iterations_run"], 2);
+    assert_eq!(written["iterations"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        written["iterations"][0]["stages"]["current"]["status"],
+        "success"
+    );
+    assert_eq!(
+        written["iterations"][0]["stages"]["current"]["value"],
+        "kept"
+    );
+}
+
+#[test]
+fn run_loop_initial_carry_seeds_accumulator() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("input.json");
+    let output = dir.path().join("loop.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&input, r#"{"id":"a","value":1}"#).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: collect
+    op: loop
+    from: load_payload
+    max_iterations: 2
+    break_on: {{ type: never }}
+    initial_carry:
+      history: []
+    carry:
+      history: updated_history
+    final: {{ from: updated_history, require_status: success }}
+    body:
+      - id: updated_history
+        op: accumulate
+        from: input
+        state_from: history
+        mode: append
+outputs:
+  final:
+    from: collect
+    path: {}
+"#,
+            input.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(
+        written["final"],
+        serde_json::json!([
+            {"id": "a", "value": 1},
+            {"id": "a", "value": 1}
+        ])
+    );
+}
+
+#[test]
 fn inline_graph_run_uses_input_graph_and_write_stage() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");

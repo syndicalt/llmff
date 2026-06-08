@@ -101,7 +101,7 @@ pub struct StageSpec {
     #[serde(default, rename = "final")]
     pub final_output: Option<LoopFinalSpec>,
     pub on_iteration_error: Option<String>,
-    pub retain_iterations: Option<String>,
+    pub retain_iterations: Option<LoopRetentionSpec>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -135,6 +135,18 @@ pub enum LoopBreakSpec {
 pub struct LoopFinalSpec {
     pub from: String,
     pub require_status: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum LoopRetentionSpec {
+    Mode(String),
+    Config {
+        mode: String,
+        #[serde(default)]
+        stages: Vec<String>,
+        include_values: Option<bool>,
+    },
 }
 
 #[cfg(test)]

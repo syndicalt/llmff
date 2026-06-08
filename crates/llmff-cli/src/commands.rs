@@ -643,9 +643,16 @@ fn inspect_loop_metadata(stage: &llmff_core::manifest::StageSpec) -> serde_json:
         "max_expanded_stage_count": max_iterations * body_stage_count,
         "break_on": stage.break_on,
         "final": stage.final_output,
-        "retain_iterations": stage.retain_iterations.as_deref().unwrap_or("none"),
+        "retain_iterations": inspect_loop_retention(stage),
         "on_iteration_error": stage.on_iteration_error.as_deref().unwrap_or("fail")
     })
+}
+
+fn inspect_loop_retention(stage: &llmff_core::manifest::StageSpec) -> serde_json::Value {
+    match &stage.retain_iterations {
+        Some(retention) => serde_json::to_value(retention).unwrap_or(serde_json::Value::Null),
+        None => serde_json::Value::String("none".to_string()),
+    }
 }
 
 fn stage_capability_constraints(op: &str) -> serde_json::Value {

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -14,7 +14,7 @@ use tokio::process::Command;
 use crate::backend::{Backend, InferRequest, InferResponse, UsageMetadata};
 use crate::error::LlmffError;
 use crate::graph::Graph;
-use crate::manifest::{LoopBreakSpec, Manifest, RetrySpec, StageSpec};
+use crate::manifest::{LoopBreakSpec, LoopRetentionSpec, Manifest, RetrySpec, StageSpec};
 use crate::plugin::{
     discover_plugin_samplers, discover_plugin_stages, discover_plugin_tool_transports,
     PluginSampler, PluginStage, PluginToolTransport,
@@ -938,6 +938,8 @@ impl Engine {
                 message: "loop requires final stage".to_string(),
             })?;
         let iteration_error_policy = stage.on_iteration_error.as_deref().unwrap_or("fail");
+        let retention = loop_retention_config(stage)?;
+        let mut retained_iterations = Vec::new();
         let mut previous_body_statuses: BTreeMap<String, StageStatus> = BTreeMap::new();
         let mut last_body_statuses: BTreeMap<String, StageStatus> = BTreeMap::new();
         let mut latest_final_status = None;
@@ -949,6 +951,14 @@ impl Engine {
             iterations_run = iteration;
             let mut body_statuses = BTreeMap::new();
             body_statuses.insert("input".to_string(), StageStatus::Success(source.clone()));
+            if iteration == 1 {
+                for (input_name, value) in &stage.initial_carry {
+                    body_statuses.insert(
+                        input_name.clone(),
+                        StageStatus::Success(Value::Json(value.clone())),
+                    );
+                }
+            }
             for (input_name, previous_stage_id) in &stage.carry {
                 if let Some(previous_status) = previous_body_statuses.get(previous_stage_id) {
                     body_statuses.insert(input_name.clone(), previous_status.clone());
@@ -1058,6 +1068,15 @@ impl Engine {
                 }
             }
 
+            if let Some(retention) = &retention {
+                retained_iterations.push(loop_iteration_record(
+                    iteration,
+                    &ordered_body,
+                    &body_statuses,
+                    retention,
+                )?);
+            }
+
             if matches!(stop_reason, LoopStopReason::Error) {
                 if body_statuses.contains_key(final_stage_id) {
                     last_body_statuses = body_statuses;
@@ -1117,6 +1136,7 @@ impl Engine {
             final_status,
             iterations_run,
             &stop_reason,
+            &retained_iterations,
         )?;
 
         Ok(StageStatus::Success(final_value))
@@ -1769,14 +1789,7 @@ fn validate_loop_policy_fields(stage: &StageSpec) -> Result<(), LlmffError> {
             ));
         }
     }
-    if let Some(retain) = stage.retain_iterations.as_deref() {
-        if !matches!(retain, "none" | "summaries" | "all") {
-            return Err(stage_validation_error(
-                stage,
-                "retain_iterations must be none, summaries, or all",
-            ));
-        }
-    }
+    let _ = loop_retention_config(stage)?;
     if let Some(final_output) = &stage.final_output {
         if let Some(require_status) = final_output.require_status.as_deref() {
             if !matches!(require_status, "success" | "invalid" | "any") {
@@ -2812,6 +2825,102 @@ fn loop_stop_reason_name(reason: &LoopStopReason) -> &'static str {
     }
 }
 
+struct LoopRetentionConfig {
+    mode: String,
+    stages: BTreeSet<String>,
+    include_values: bool,
+}
+
+fn loop_retention_config(stage: &StageSpec) -> Result<Option<LoopRetentionConfig>, LlmffError> {
+    let Some(retention) = &stage.retain_iterations else {
+        return Ok(None);
+    };
+    let (mode, stages, include_values) = match retention {
+        LoopRetentionSpec::Mode(mode) => (
+            mode.clone(),
+            BTreeSet::new(),
+            matches!(mode.as_str(), "all"),
+        ),
+        LoopRetentionSpec::Config {
+            mode,
+            stages,
+            include_values,
+        } => (
+            mode.clone(),
+            stages.iter().cloned().collect::<BTreeSet<_>>(),
+            include_values.unwrap_or_else(|| mode == "all"),
+        ),
+    };
+    if mode == "none" {
+        return Ok(None);
+    }
+    if !matches!(mode.as_str(), "summaries" | "all") {
+        return Err(stage_validation_error(
+            stage,
+            "retain_iterations must be none, summaries, or all",
+        ));
+    }
+
+    Ok(Some(LoopRetentionConfig {
+        mode,
+        stages,
+        include_values,
+    }))
+}
+
+fn loop_iteration_record(
+    iteration: usize,
+    ordered_body: &[StageSpec],
+    body_statuses: &BTreeMap<String, StageStatus>,
+    retention: &LoopRetentionConfig,
+) -> Result<serde_json::Value, LlmffError> {
+    let mut stages = serde_json::Map::new();
+    for body_stage in ordered_body {
+        if !retention.stages.is_empty() && !retention.stages.contains(&body_stage.id) {
+            continue;
+        }
+        let Some(status) = body_statuses.get(&body_stage.id) else {
+            continue;
+        };
+        let mut stage_record = serde_json::Map::new();
+        stage_record.insert(
+            "status".to_string(),
+            serde_json::Value::String(status_name(status).to_string()),
+        );
+        if retention.include_values {
+            match status {
+                StageStatus::Success(value) => {
+                    stage_record.insert("value".to_string(), serialize_value_to_json(value)?);
+                }
+                StageStatus::Invalid { value, errors } => {
+                    stage_record.insert("value".to_string(), serialize_value_to_json(value)?);
+                    stage_record.insert(
+                        "errors".to_string(),
+                        serde_json::Value::Array(
+                            errors
+                                .iter()
+                                .cloned()
+                                .map(serde_json::Value::String)
+                                .collect(),
+                        ),
+                    );
+                }
+                StageStatus::Skipped => {}
+            }
+        }
+        stages.insert(
+            body_stage.id.clone(),
+            serde_json::Value::Object(stage_record),
+        );
+    }
+
+    Ok(serde_json::json!({
+        "iteration": iteration,
+        "mode": retention.mode.clone(),
+        "stages": stages
+    }))
+}
+
 fn evaluate_loop_break(
     break_on: &LoopBreakSpec,
     statuses: &BTreeMap<String, StageStatus>,
@@ -2862,20 +2971,24 @@ fn reject_missing_first_iteration_carry_alias(
     body_stage: &StageSpec,
     body_statuses: &BTreeMap<String, StageStatus>,
 ) -> Result<(), LlmffError> {
-    let Some(parent) = body_stage.from.as_ref() else {
-        return Ok(());
-    };
-    if !loop_stage.carry.contains_key(parent) || body_statuses.contains_key(parent) {
-        return Ok(());
+    for parent in [body_stage.from.as_ref(), body_stage.state_from.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        if !loop_stage.carry.contains_key(parent) || body_statuses.contains_key(parent) {
+            continue;
+        }
+
+        return Err(LlmffError::StageExecution {
+            stage_id: loop_stage.id.clone(),
+            message: format!(
+                "loop `{}` cannot read carry alias `{parent}` on iteration 1 before it has a previous value",
+                loop_stage.id
+            ),
+        });
     }
 
-    Err(LlmffError::StageExecution {
-        stage_id: loop_stage.id.clone(),
-        message: format!(
-            "loop `{}` cannot read carry alias `{parent}` on iteration 1 before it has a previous value",
-            loop_stage.id
-        ),
-    })
+    Ok(())
 }
 
 fn loop_final_value(
@@ -2884,6 +2997,7 @@ fn loop_final_value(
     final_status: &StageStatus,
     iterations_run: usize,
     stop_reason: &LoopStopReason,
+    retained_iterations: &[serde_json::Value],
 ) -> Result<Value, LlmffError> {
     let require_status = loop_stage
         .final_output
@@ -2920,14 +3034,24 @@ fn loop_final_value(
         _ => serde_json::Value::Null,
     };
 
-    Ok(Value::Json(serde_json::json!({
-        "final": final_payload,
-        "metadata": {
+    let mut output = serde_json::Map::new();
+    output.insert("final".to_string(), final_payload);
+    output.insert(
+        "metadata".to_string(),
+        serde_json::json!({
             "iterations_run": iterations_run,
             "stop_reason": loop_stop_reason_name(stop_reason),
             "final_stage": final_stage_id
-        }
-    })))
+        }),
+    );
+    if !retained_iterations.is_empty() {
+        output.insert(
+            "iterations".to_string(),
+            serde_json::Value::Array(retained_iterations.to_vec()),
+        );
+    }
+
+    Ok(Value::Json(serde_json::Value::Object(output)))
 }
 
 fn serialize_value_to_json(value: &Value) -> Result<serde_json::Value, LlmffError> {

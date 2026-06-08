@@ -211,7 +211,25 @@
         },
         "final": { "$ref": "#/$defs/loop_final" },
         "on_iteration_error": { "enum": ["fail", "continue", "break"] },
-        "retain_iterations": { "enum": ["none", "summaries", "all"] }
+        "retain_iterations": {
+          "oneOf": [
+            { "enum": ["none", "summaries", "all"] },
+            {
+              "type": "object",
+              "required": ["mode"],
+              "additionalProperties": false,
+              "properties": {
+                "mode": { "enum": ["none", "summaries", "all"] },
+                "stages": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 },
+                  "uniqueItems": true
+                },
+                "include_values": { "type": "boolean" }
+              }
+            }
+          ]
+        }
       },
       "allOf": [
         {
