@@ -14,7 +14,7 @@ use tokio::process::Command;
 use crate::backend::{Backend, InferRequest, InferResponse, UsageMetadata};
 use crate::error::LlmffError;
 use crate::graph::Graph;
-use crate::manifest::{Manifest, RetrySpec, StageSpec};
+use crate::manifest::{LoopBreakSpec, Manifest, RetrySpec, StageSpec};
 use crate::plugin::{
     discover_plugin_samplers, discover_plugin_stages, discover_plugin_tool_transports,
     PluginSampler, PluginStage, PluginToolTransport,
@@ -72,6 +72,21 @@ pub(super) struct StageOutcome {
     cache_path: Option<String>,
     attempts: Option<usize>,
     stream_written: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+struct LoopTraceContext<'a> {
+    loop_id: &'a str,
+    iteration: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+enum LoopStopReason {
+    BreakCondition,
+    MaxIterations,
+    Error,
 }
 
 struct InferAttemptResult {
@@ -721,6 +736,10 @@ impl Engine {
             "route" => self
                 .execute_route(stage, statuses)
                 .map(StageOutcome::without_usage),
+            "loop" => self
+                .execute_loop(context, stage, statuses, stream_writer)
+                .await
+                .map(StageOutcome::without_usage),
             "tool" => {
                 self.execute_tool(
                     stage,
@@ -750,6 +769,154 @@ impl Engine {
                 Err(LlmffError::UnknownStage(other.to_string()))
             }
         }
+    }
+
+    async fn execute_loop(
+        &self,
+        context: &ExecutionContext<'_>,
+        stage: &StageSpec,
+        statuses: &BTreeMap<String, StageStatus>,
+        mut stream_writer: Option<&mut StageStreamWriter>,
+    ) -> Result<StageStatus, LlmffError> {
+        let source = stage
+            .from
+            .as_ref()
+            .and_then(|parent| statuses.get(parent))
+            .and_then(success_value)
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "loop requires successful input".to_string(),
+            })?;
+        let max_iterations = stage.max_iterations.unwrap_or(0);
+        let ordered_body = crate::graph::order_loop_body_stages(stage)?;
+        let final_stage_id = stage
+            .final_output
+            .as_ref()
+            .map(|final_output| final_output.from.as_str())
+            .or_else(|| stage.body.last().map(|body_stage| body_stage.id.as_str()))
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "loop requires final stage".to_string(),
+            })?;
+        let iteration_error_policy = stage.on_iteration_error.as_deref().unwrap_or("fail");
+        let mut previous_body_statuses: BTreeMap<String, StageStatus> = BTreeMap::new();
+        let mut last_body_statuses: BTreeMap<String, StageStatus> = BTreeMap::new();
+        let mut latest_final_status = None;
+        let mut latest_iteration_error = None;
+        let mut stop_reason = LoopStopReason::MaxIterations;
+        let mut iterations_run = 0usize;
+
+        for iteration in 1..=max_iterations {
+            iterations_run = iteration;
+            let mut body_statuses = BTreeMap::new();
+            body_statuses.insert("input".to_string(), StageStatus::Success(source.clone()));
+            for (input_name, previous_stage_id) in &stage.carry {
+                if let Some(previous_status) = previous_body_statuses.get(previous_stage_id) {
+                    body_statuses.insert(input_name.clone(), previous_status.clone());
+                }
+            }
+
+            for body_stage in &ordered_body {
+                if iteration == 1 {
+                    reject_missing_first_iteration_carry_alias(stage, body_stage, &body_statuses)?;
+                }
+
+                let outcome = match Box::pin(self.execute_stage_with_timeout(
+                    context,
+                    body_stage,
+                    &body_statuses,
+                    stream_writer.as_deref_mut(),
+                ))
+                .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(error) => match iteration_error_policy {
+                        "fail" => return Err(error),
+                        "break" => {
+                            latest_iteration_error = Some((iteration, body_stage.id.clone()));
+                            stop_reason = LoopStopReason::Error;
+                            break;
+                        }
+                        "continue" => {
+                            latest_iteration_error = Some((iteration, body_stage.id.clone()));
+                            break;
+                        }
+                        _ => return Err(error),
+                    },
+                };
+                body_statuses.insert(body_stage.id.clone(), outcome.status);
+                if body_stage.id == final_stage_id {
+                    if let Some(final_status) = body_statuses
+                        .get(final_stage_id)
+                        .filter(|status| !matches!(status, StageStatus::Skipped))
+                    {
+                        latest_final_status = Some(final_status.clone());
+                    }
+                }
+            }
+
+            if matches!(stop_reason, LoopStopReason::Error) {
+                if body_statuses.contains_key(final_stage_id) {
+                    last_body_statuses = body_statuses;
+                }
+                break;
+            }
+
+            if latest_iteration_error
+                .as_ref()
+                .is_some_and(|(error_iteration, _)| *error_iteration == iteration)
+            {
+                previous_body_statuses = body_statuses;
+                continue;
+            }
+
+            let should_break =
+                evaluate_loop_break(stage.break_on.as_ref().unwrap(), &body_statuses)?;
+            previous_body_statuses = body_statuses.clone();
+            last_body_statuses = body_statuses;
+            if should_break {
+                stop_reason = LoopStopReason::BreakCondition;
+                break;
+            }
+        }
+
+        let final_status = last_body_statuses
+            .get(final_stage_id)
+            .filter(|status| !matches!(status, StageStatus::Skipped))
+            .or(latest_final_status.as_ref())
+            .ok_or_else(|| {
+                if let Some((iteration, body_stage_id)) = latest_iteration_error.as_ref() {
+                    let message = if matches!(stop_reason, LoopStopReason::Error) {
+                        format!(
+                            "loop `{}` stopped on iteration error at iteration {iteration} in body stage `{body_stage_id}` with no final output available",
+                            stage.id
+                        )
+                    } else {
+                        format!(
+                            "loop `{}` produced no final output after iteration errors",
+                            stage.id
+                        )
+                    };
+                    return LlmffError::StageExecution {
+                        stage_id: stage.id.clone(),
+                        message,
+                    };
+                }
+
+                LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: format!("loop final stage `{final_stage_id}` did not run"),
+                }
+            })?;
+        let final_value = loop_final_value(
+            stage,
+            final_stage_id,
+            final_status,
+            iterations_run,
+            &stop_reason,
+        )?;
+
+        Ok(StageStatus::Success(final_value))
     }
 
     fn execute_load(
@@ -2366,6 +2533,142 @@ fn status_name(status: &StageStatus) -> &'static str {
     }
 }
 
+fn loop_stop_reason_name(reason: &LoopStopReason) -> &'static str {
+    match reason {
+        LoopStopReason::BreakCondition => "break_condition",
+        LoopStopReason::MaxIterations => "max_iterations",
+        LoopStopReason::Error => "error",
+    }
+}
+
+fn evaluate_loop_break(
+    break_on: &LoopBreakSpec,
+    statuses: &BTreeMap<String, StageStatus>,
+) -> Result<bool, LlmffError> {
+    match break_on {
+        LoopBreakSpec::StageSuccess { stage } => {
+            Ok(matches!(statuses.get(stage), Some(StageStatus::Success(_))))
+        }
+        LoopBreakSpec::StageFailure { stage } => Ok(matches!(
+            statuses.get(stage),
+            Some(StageStatus::Invalid { .. }) | Some(StageStatus::Skipped)
+        )),
+        LoopBreakSpec::FieldTrue { stage, field } => {
+            let Some(value) = statuses.get(stage).and_then(success_value) else {
+                return Ok(false);
+            };
+            Ok(json_field(&value, field)
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false))
+        }
+        LoopBreakSpec::FieldEquals {
+            stage,
+            field,
+            value,
+        } => {
+            let Some(actual) = statuses
+                .get(stage)
+                .and_then(success_value)
+                .and_then(|value| json_field(&value, field).cloned())
+            else {
+                return Ok(false);
+            };
+            Ok(actual == *value)
+        }
+        LoopBreakSpec::Never => Ok(false),
+    }
+}
+
+fn json_field<'a>(value: &'a Value, field: &str) -> Option<&'a serde_json::Value> {
+    match value {
+        Value::Json(json) => json.get(field),
+        _ => None,
+    }
+}
+
+fn reject_missing_first_iteration_carry_alias(
+    loop_stage: &StageSpec,
+    body_stage: &StageSpec,
+    body_statuses: &BTreeMap<String, StageStatus>,
+) -> Result<(), LlmffError> {
+    let Some(parent) = body_stage.from.as_ref() else {
+        return Ok(());
+    };
+    if !loop_stage.carry.contains_key(parent) || body_statuses.contains_key(parent) {
+        return Ok(());
+    }
+
+    Err(LlmffError::StageExecution {
+        stage_id: loop_stage.id.clone(),
+        message: format!(
+            "loop `{}` cannot read carry alias `{parent}` on iteration 1 before it has a previous value",
+            loop_stage.id
+        ),
+    })
+}
+
+fn loop_final_value(
+    loop_stage: &StageSpec,
+    final_stage_id: &str,
+    final_status: &StageStatus,
+    iterations_run: usize,
+    stop_reason: &LoopStopReason,
+) -> Result<Value, LlmffError> {
+    let require_status = loop_stage
+        .final_output
+        .as_ref()
+        .and_then(|final_output| final_output.require_status.as_deref())
+        .unwrap_or("success");
+    let final_payload = match (require_status, final_status) {
+        ("success", StageStatus::Success(value)) => serialize_value_to_json(value)?,
+        ("invalid", StageStatus::Invalid { value, .. }) => serialize_value_to_json(value)?,
+        ("any", StageStatus::Success(value)) => serialize_value_to_json(value)?,
+        ("any", StageStatus::Invalid { value, .. }) => serialize_value_to_json(value)?,
+        ("any", StageStatus::Skipped) => serde_json::Value::Null,
+        ("success", StageStatus::Invalid { errors, .. }) => {
+            return Err(LlmffError::StageExecution {
+                stage_id: loop_stage.id.clone(),
+                message: format!(
+                    "loop final stage `{final_stage_id}` was invalid: {}",
+                    errors.join("; ")
+                ),
+            });
+        }
+        ("success", StageStatus::Skipped) => {
+            return Err(LlmffError::StageExecution {
+                stage_id: loop_stage.id.clone(),
+                message: format!("loop final stage `{final_stage_id}` was skipped"),
+            });
+        }
+        ("invalid", StageStatus::Success(_)) | ("invalid", StageStatus::Skipped) => {
+            return Err(LlmffError::StageExecution {
+                stage_id: loop_stage.id.clone(),
+                message: format!("loop final stage `{final_stage_id}` did not finish invalid"),
+            });
+        }
+        _ => serde_json::Value::Null,
+    };
+
+    Ok(Value::Json(serde_json::json!({
+        "final": final_payload,
+        "metadata": {
+            "iterations_run": iterations_run,
+            "stop_reason": loop_stop_reason_name(stop_reason),
+            "final_stage": final_stage_id
+        }
+    })))
+}
+
+fn serialize_value_to_json(value: &Value) -> Result<serde_json::Value, LlmffError> {
+    match value {
+        Value::Text(text) => Ok(serde_json::Value::String(text.clone())),
+        Value::Messages(messages) => {
+            Ok(serde_json::Value::String(render_messages_as_text(messages)))
+        }
+        Value::Json(json) => Ok(json.clone()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2805,6 +3108,196 @@ graph:
         engine
             .validate_manifest(manifest)
             .expect("valid loop body should pass validation");
+    }
+
+    #[tokio::test]
+    async fn loop_runs_until_stage_success_break_condition() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 3
+    break_on: { type: stage_success, stage: check }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+      - id: check
+        op: validate_json
+        from: draft
+        schema: '{"type":"object","required":["answer"]}'
+outputs:
+  final:
+    from: refine
+    path: answer.json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        let output = std::fs::read_to_string(dir.path().join("answer.json")).unwrap();
+        let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(output["metadata"]["iterations_run"], 1);
+        assert_eq!(output["metadata"]["stop_reason"], "break_condition");
+        assert_eq!(output["final"], r#"{"answer":"ok"}"#);
+    }
+
+    #[tokio::test]
+    async fn loop_never_breaks_until_max_iterations() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+outputs:
+  final:
+    from: sample
+    path: answer.json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        let output = std::fs::read_to_string(dir.path().join("answer.json")).unwrap();
+        let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(output["metadata"]["iterations_run"], 2);
+        assert_eq!(output["metadata"]["stop_reason"], "max_iterations");
+    }
+
+    #[tokio::test]
+    async fn loop_breaks_on_iteration_error_and_preserves_text_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    on_iteration_error: break
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:text
+      - id: explode
+        op: tool
+        from: draft
+        command: ["/bin/sh", "-c", "exit 9"]
+outputs:
+  final:
+    from: sample
+    path: answer.json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new()
+            .with_backend("mock:text", Arc::new(MockBackend::new("mock:text", "true")));
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        let output = std::fs::read_to_string(dir.path().join("answer.json")).unwrap();
+        let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(output["metadata"]["iterations_run"], 1);
+        assert_eq!(output["metadata"]["stop_reason"], "error");
+        assert_eq!(output["final"], "true");
+    }
+
+    #[tokio::test]
+    async fn loop_reports_iteration_one_carry_alias_without_previous_value() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    carry:
+      previous: draft
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: previous
+        model: mock:text
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:text",
+            Arc::new(MockBackend::new("mock:text", "answer")),
+        );
+
+        let error = engine
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect_err("iteration 1 carry alias should fail clearly");
+
+        let message = error.to_string();
+        assert!(message.contains("loop `refine`"));
+        assert!(message.contains("carry alias `previous`"));
+        assert!(message.contains("iteration 1"));
     }
 
     #[tokio::test]
