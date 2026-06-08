@@ -80,6 +80,15 @@ struct LoopTraceContext<'a> {
     iteration: usize,
 }
 
+struct FinishStageTrace<'a> {
+    trace_stage: &'a StageSpec,
+    status_stage_id: &'a str,
+    loop_stage_id: &'a str,
+    stage_started: Instant,
+    outcome: StageOutcome,
+    loop_context: Option<LoopTraceContext<'a>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 enum LoopStopReason {
@@ -498,13 +507,15 @@ impl Engine {
         self.finish_stage_trace_with_loop(
             trace,
             run_id,
-            stage,
-            &stage.id,
-            &stage.id,
-            stage_started,
-            outcome,
             statuses,
-            None,
+            FinishStageTrace {
+                trace_stage: stage,
+                status_stage_id: &stage.id,
+                loop_stage_id: &stage.id,
+                stage_started,
+                outcome,
+                loop_context: None,
+            },
         )
     }
 
@@ -512,23 +523,22 @@ impl Engine {
         &self,
         trace: &mut Vec<TraceWriter>,
         run_id: &str,
-        trace_stage: &StageSpec,
-        status_stage_id: &str,
-        loop_stage_id: &str,
-        stage_started: Instant,
-        outcome: StageOutcome,
         statuses: &mut BTreeMap<String, StageStatus>,
-        loop_context: Option<LoopTraceContext<'_>>,
+        finish: FinishStageTrace<'_>,
     ) -> Result<(), LlmffError> {
+        let trace_stage = finish.trace_stage;
+        let outcome = finish.outcome;
         let status = outcome.status;
         let status_name = status_name(&status).to_string();
         let metadata = self.trace_metadata(trace_stage, &status, outcome.usage.as_ref());
         let cache_hit = outcome.cache_hit;
         let cache_path = outcome.cache_path;
         let attempts = outcome.attempts;
-        let loop_id = loop_context.map(|context| context.loop_id.to_string());
-        let loop_iteration = loop_context.map(|context| context.iteration);
-        statuses.insert(status_stage_id.to_string(), status);
+        let loop_id = finish
+            .loop_context
+            .map(|context| context.loop_id.to_string());
+        let loop_iteration = finish.loop_context.map(|context| context.iteration);
+        statuses.insert(finish.status_stage_id.to_string(), status);
         write_trace(
             trace,
             TraceEvent {
@@ -537,11 +547,13 @@ impl Engine {
                 stage_id: Some(trace_stage.id.clone()),
                 loop_id,
                 loop_iteration,
-                loop_stage_id: loop_context.map(|_| loop_stage_id.to_string()),
+                loop_stage_id: finish
+                    .loop_context
+                    .map(|_| finish.loop_stage_id.to_string()),
                 op: Some(trace_stage.op.clone()),
                 status: Some(status_name),
                 timestamp_ms: timestamp_ms(),
-                duration_ms: Some(stage_started.elapsed().as_millis()),
+                duration_ms: Some(finish.stage_started.elapsed().as_millis()),
                 attempts,
                 model: metadata.model,
                 backend: metadata.backend,
@@ -991,13 +1003,15 @@ impl Engine {
                     self.finish_stage_trace_with_loop(
                         trace,
                         context.run_id,
-                        &trace_stage,
-                        &body_stage.id,
-                        &body_stage.id,
-                        stage_started,
-                        outcome,
                         &mut body_statuses,
-                        Some(loop_context),
+                        FinishStageTrace {
+                            trace_stage: &trace_stage,
+                            status_stage_id: &body_stage.id,
+                            loop_stage_id: &body_stage.id,
+                            stage_started,
+                            outcome,
+                            loop_context: Some(loop_context),
+                        },
                     )?;
                 } else {
                     body_statuses.insert(body_stage.id.clone(), outcome.status);
