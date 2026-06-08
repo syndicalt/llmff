@@ -95,7 +95,6 @@
           "model",
           "plugin",
           "capability_constraints",
-          "loop",
           "writes_stdout"
         ],
         "properties": {
