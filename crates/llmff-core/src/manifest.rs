@@ -74,12 +74,49 @@ pub struct StageSpec {
     pub timeout_ms: Option<u64>,
     pub retry: Option<RetrySpec>,
     pub cache_policy: Option<String>,
+    pub max_iterations: Option<usize>,
+    pub break_on: Option<LoopBreakSpec>,
+    #[serde(default)]
+    pub carry: BTreeMap<String, String>,
+    #[serde(default, rename = "body")]
+    pub body: Vec<StageSpec>,
+    #[serde(default, rename = "final")]
+    pub final_output: Option<LoopFinalSpec>,
+    pub on_iteration_error: Option<String>,
+    pub retain_iterations: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RetrySpec {
     pub attempts: usize,
     pub backoff_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LoopBreakSpec {
+    StageSuccess {
+        stage: String,
+    },
+    StageFailure {
+        stage: String,
+    },
+    FieldTrue {
+        stage: String,
+        field: String,
+    },
+    FieldEquals {
+        stage: String,
+        field: String,
+        value: serde_json::Value,
+    },
+    Never,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct LoopFinalSpec {
+    pub from: String,
+    pub require_status: Option<String>,
 }
 
 #[cfg(test)]
@@ -344,5 +381,78 @@ graph:
             Some(10)
         );
         assert_eq!(manifest.graph[1].cache_policy.as_deref(), Some("refresh"));
+    }
+
+    #[test]
+    fn parses_loop_stage_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: refine
+    op: loop
+    from: prompt
+    max_iterations: 3
+    break_on:
+      type: stage_success
+      stage: check
+    carry:
+      input: draft
+    final:
+      from: draft
+      require_status: success
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+      - id: check
+        op: validate_json
+        from: draft
+        schema: '{"type":"object","required":["answer"]}'
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let stage = &manifest.graph[0];
+
+        assert_eq!(stage.op, "loop");
+        assert_eq!(stage.max_iterations, Some(3));
+        assert_eq!(
+            stage.break_on.as_ref().unwrap(),
+            &LoopBreakSpec::StageSuccess {
+                stage: "check".to_string()
+            }
+        );
+        assert_eq!(stage.carry["input"], "draft");
+        assert_eq!(
+            stage.final_output.as_ref().unwrap(),
+            &LoopFinalSpec {
+                from: "draft".to_string(),
+                require_status: Some("success".to_string())
+            }
+        );
+        assert_eq!(stage.body.len(), 2);
+        assert_eq!(stage.body[0].id, "draft");
+    }
+
+    #[test]
+    fn parses_loop_never_break_condition() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: sample
+    op: loop
+    from: prompt
+    max_iterations: 2
+    break_on:
+      type: never
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        assert_eq!(manifest.graph[0].break_on, Some(LoopBreakSpec::Never));
     }
 }

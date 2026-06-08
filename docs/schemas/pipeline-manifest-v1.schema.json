@@ -46,6 +46,66 @@
         "path": { "type": "string", "minLength": 1 }
       }
     },
+    "loop_break_on": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "stage"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "stage_success" },
+            "stage": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "stage"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "stage_failure" },
+            "stage": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "stage", "field"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "field_true" },
+            "stage": { "type": "string", "minLength": 1 },
+            "field": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type", "stage", "field", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "field_equals" },
+            "stage": { "type": "string", "minLength": 1 },
+            "field": { "type": "string", "minLength": 1 },
+            "value": true
+          }
+        },
+        {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "const": "never" }
+          }
+        }
+      ]
+    },
+    "loop_final": {
+      "type": "object",
+      "required": ["from"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "require_status": { "enum": ["success", "invalid", "any"] }
+      }
+    },
     "stage": {
       "type": "object",
       "required": ["id", "op"],
@@ -106,7 +166,21 @@
             "backoff_ms": { "type": "integer", "minimum": 0 }
           }
         },
-        "cache_policy": { "enum": ["read", "refresh", "bypass"] }
+        "cache_policy": { "enum": ["read", "refresh", "bypass"] },
+        "max_iterations": { "type": "integer", "minimum": 1 },
+        "break_on": { "$ref": "#/$defs/loop_break_on" },
+        "carry": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "body": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/stage" }
+        },
+        "final": { "$ref": "#/$defs/loop_final" },
+        "on_iteration_error": { "enum": ["fail", "continue", "break"] },
+        "retain_iterations": { "enum": ["none", "summaries", "all"] }
       }
     }
   }
