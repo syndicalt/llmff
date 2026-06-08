@@ -306,6 +306,13 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         timeout_ms: None,
         retry: None,
         cache_policy: None,
+        max_iterations: None,
+        break_on: None,
+        carry: BTreeMap::new(),
+        body: Vec::new(),
+        final_output: None,
+        on_iteration_error: None,
+        retain_iterations: None,
     }
 }
 

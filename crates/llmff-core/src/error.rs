@@ -14,6 +14,15 @@ pub enum LlmffError {
     UnknownStage(String),
     #[error("stage `{stage_id}` failed: {message}")]
     StageExecution { stage_id: String, message: String },
+    #[error("loop body stage `{stage_id}` failed: {source}")]
+    LoopStageExecution {
+        stage_id: String,
+        loop_id: String,
+        loop_iteration: usize,
+        loop_stage_id: String,
+        #[source]
+        source: Box<LlmffError>,
+    },
     #[error("backend error: {0}")]
     Backend(String),
     #[error("configuration error: {0}")]

@@ -14,7 +14,7 @@ use tokio::process::Command;
 use crate::backend::{Backend, InferRequest, InferResponse, UsageMetadata};
 use crate::error::LlmffError;
 use crate::graph::Graph;
-use crate::manifest::{Manifest, RetrySpec, StageSpec};
+use crate::manifest::{LoopBreakSpec, Manifest, RetrySpec, StageSpec};
 use crate::plugin::{
     discover_plugin_samplers, discover_plugin_stages, discover_plugin_tool_transports,
     PluginSampler, PluginStage, PluginToolTransport,
@@ -72,6 +72,29 @@ pub(super) struct StageOutcome {
     cache_path: Option<String>,
     attempts: Option<usize>,
     stream_written: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LoopTraceContext<'a> {
+    loop_id: &'a str,
+    iteration: usize,
+}
+
+struct FinishStageTrace<'a> {
+    trace_stage: &'a StageSpec,
+    status_stage_id: &'a str,
+    loop_stage_id: &'a str,
+    stage_started: Instant,
+    outcome: StageOutcome,
+    loop_context: Option<LoopTraceContext<'a>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+enum LoopStopReason {
+    BreakCondition,
+    MaxIterations,
+    Error,
 }
 
 struct InferAttemptResult {
@@ -316,6 +339,9 @@ impl Engine {
                 run_id: options.run_id.clone(),
                 event: "run_started".to_string(),
                 stage_id: None,
+                loop_id: None,
+                loop_iteration: None,
+                loop_stage_id: None,
                 op: None,
                 status: None,
                 timestamp_ms: timestamp_ms(),
@@ -388,6 +414,9 @@ impl Engine {
                 run_id: options.run_id,
                 event: "run_finished".to_string(),
                 stage_id: None,
+                loop_id: None,
+                loop_iteration: None,
+                loop_stage_id: None,
                 op: None,
                 status: Some("succeeded".to_string()),
                 timestamp_ms: timestamp_ms(),
@@ -419,13 +448,29 @@ impl Engine {
         run_id: &str,
         stage: &StageSpec,
     ) -> Result<Instant, LlmffError> {
+        self.start_stage_trace_with_loop(trace, run_id, stage, &stage.id, None)
+    }
+
+    fn start_stage_trace_with_loop(
+        &self,
+        trace: &mut Vec<TraceWriter>,
+        run_id: &str,
+        stage: &StageSpec,
+        loop_stage_id: &str,
+        loop_context: Option<LoopTraceContext<'_>>,
+    ) -> Result<Instant, LlmffError> {
         let started = Instant::now();
+        let loop_id = loop_context.map(|context| context.loop_id.to_string());
+        let loop_iteration = loop_context.map(|context| context.iteration);
         write_trace(
             trace,
             TraceEvent {
                 run_id: run_id.to_string(),
                 event: "stage_started".to_string(),
                 stage_id: Some(stage.id.clone()),
+                loop_id,
+                loop_iteration,
+                loop_stage_id: loop_context.map(|_| loop_stage_id.to_string()),
                 op: Some(stage.op.clone()),
                 status: None,
                 timestamp_ms: timestamp_ms(),
@@ -459,23 +504,56 @@ impl Engine {
         outcome: StageOutcome,
         statuses: &mut BTreeMap<String, StageStatus>,
     ) -> Result<(), LlmffError> {
+        self.finish_stage_trace_with_loop(
+            trace,
+            run_id,
+            statuses,
+            FinishStageTrace {
+                trace_stage: stage,
+                status_stage_id: &stage.id,
+                loop_stage_id: &stage.id,
+                stage_started,
+                outcome,
+                loop_context: None,
+            },
+        )
+    }
+
+    fn finish_stage_trace_with_loop(
+        &self,
+        trace: &mut Vec<TraceWriter>,
+        run_id: &str,
+        statuses: &mut BTreeMap<String, StageStatus>,
+        finish: FinishStageTrace<'_>,
+    ) -> Result<(), LlmffError> {
+        let trace_stage = finish.trace_stage;
+        let outcome = finish.outcome;
         let status = outcome.status;
         let status_name = status_name(&status).to_string();
-        let metadata = self.trace_metadata(stage, &status, outcome.usage.as_ref());
+        let metadata = self.trace_metadata(trace_stage, &status, outcome.usage.as_ref());
         let cache_hit = outcome.cache_hit;
         let cache_path = outcome.cache_path;
         let attempts = outcome.attempts;
-        statuses.insert(stage.id.clone(), status);
+        let loop_id = finish
+            .loop_context
+            .map(|context| context.loop_id.to_string());
+        let loop_iteration = finish.loop_context.map(|context| context.iteration);
+        statuses.insert(finish.status_stage_id.to_string(), status);
         write_trace(
             trace,
             TraceEvent {
                 run_id: run_id.to_string(),
                 event: "stage_finished".to_string(),
-                stage_id: Some(stage.id.clone()),
-                op: Some(stage.op.clone()),
+                stage_id: Some(trace_stage.id.clone()),
+                loop_id,
+                loop_iteration,
+                loop_stage_id: finish
+                    .loop_context
+                    .map(|_| finish.loop_stage_id.to_string()),
+                op: Some(trace_stage.op.clone()),
                 status: Some(status_name),
                 timestamp_ms: timestamp_ms(),
-                duration_ms: Some(stage_started.elapsed().as_millis()),
+                duration_ms: Some(finish.stage_started.elapsed().as_millis()),
                 attempts,
                 model: metadata.model,
                 backend: metadata.backend,
@@ -489,6 +567,47 @@ impl Engine {
                 total_tokens: metadata.total_tokens,
                 cache_hit,
                 cache_path,
+                failure_kind: None,
+                failure_message: None,
+            },
+        )
+    }
+
+    fn finish_stage_trace_error_with_loop(
+        &self,
+        trace: &mut Vec<TraceWriter>,
+        run_id: &str,
+        trace_stage: &StageSpec,
+        loop_stage_id: &str,
+        stage_started: Instant,
+        loop_context: LoopTraceContext<'_>,
+    ) -> Result<(), LlmffError> {
+        write_trace(
+            trace,
+            TraceEvent {
+                run_id: run_id.to_string(),
+                event: "stage_finished".to_string(),
+                stage_id: Some(trace_stage.id.clone()),
+                loop_id: Some(loop_context.loop_id.to_string()),
+                loop_iteration: Some(loop_context.iteration),
+                loop_stage_id: Some(loop_stage_id.to_string()),
+                op: Some(trace_stage.op.clone()),
+                status: Some("error".to_string()),
+                timestamp_ms: timestamp_ms(),
+                duration_ms: Some(stage_started.elapsed().as_millis()),
+                attempts: None,
+                model: None,
+                backend: None,
+                provider_model: None,
+                validation_errors: None,
+                tool_kind: None,
+                tool_target: None,
+                output_path: None,
+                prompt_tokens: None,
+                completion_tokens: None,
+                total_tokens: None,
+                cache_hit: None,
+                cache_path: None,
                 failure_kind: None,
                 failure_message: None,
             },
@@ -621,6 +740,26 @@ impl Engine {
                 }
                 Ok(())
             }
+            "loop" => {
+                require_stage_field(stage, stage.from.as_deref(), "loop requires from")?;
+                if stage.max_iterations.unwrap_or(0) == 0 {
+                    return Err(stage_validation_error(
+                        stage,
+                        "loop requires max_iterations greater than 0",
+                    ));
+                }
+                if stage.break_on.is_none() {
+                    return Err(stage_validation_error(stage, "loop requires break_on"));
+                }
+                if stage.body.is_empty() {
+                    return Err(stage_validation_error(stage, "loop requires body"));
+                }
+                validate_loop_policy_fields(stage)?;
+                for body_stage in &stage.body {
+                    self.validate_stage(body_stage, plugin_stages, plugin_samplers)?;
+                }
+                Ok(())
+            }
             "tool" => {
                 require_stage_field(stage, stage.from.as_deref(), "tool requires from")?;
                 Ok(())
@@ -639,9 +778,10 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         stream_writer: Option<&mut StageStreamWriter>,
+        trace: Option<&mut Vec<TraceWriter>>,
     ) -> Result<StageOutcome, LlmffError> {
         let timeout_ms = stage.timeout_ms.or(context.options.default_timeout_ms);
-        let run = self.execute_stage(context, stage, statuses, stream_writer);
+        let run = self.execute_stage(context, stage, statuses, stream_writer, trace);
         if let Some(timeout_ms) = timeout_ms {
             return tokio::time::timeout(Duration::from_millis(timeout_ms), run)
                 .await
@@ -660,6 +800,7 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         stream_writer: Option<&mut StageStreamWriter>,
+        trace: Option<&mut Vec<TraceWriter>>,
     ) -> Result<StageOutcome, LlmffError> {
         if !should_execute_stage(stage, statuses)? {
             return Ok(StageOutcome::without_usage(StageStatus::Skipped));
@@ -701,6 +842,10 @@ impl Engine {
             "route" => self
                 .execute_route(stage, statuses)
                 .map(StageOutcome::without_usage),
+            "loop" => self
+                .execute_loop(context, stage, statuses, stream_writer, trace)
+                .await
+                .map(StageOutcome::without_usage),
             "tool" => {
                 self.execute_tool(
                     stage,
@@ -730,6 +875,219 @@ impl Engine {
                 Err(LlmffError::UnknownStage(other.to_string()))
             }
         }
+    }
+
+    async fn execute_loop(
+        &self,
+        context: &ExecutionContext<'_>,
+        stage: &StageSpec,
+        statuses: &BTreeMap<String, StageStatus>,
+        mut stream_writer: Option<&mut StageStreamWriter>,
+        mut trace: Option<&mut Vec<TraceWriter>>,
+    ) -> Result<StageStatus, LlmffError> {
+        let source = stage
+            .from
+            .as_ref()
+            .and_then(|parent| statuses.get(parent))
+            .and_then(success_value)
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "loop requires successful input".to_string(),
+            })?;
+        let max_iterations = stage.max_iterations.unwrap_or(0);
+        let ordered_body = crate::graph::order_loop_body_stages(stage)?;
+        let final_stage_id = stage
+            .final_output
+            .as_ref()
+            .map(|final_output| final_output.from.as_str())
+            .or_else(|| stage.body.last().map(|body_stage| body_stage.id.as_str()))
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "loop requires final stage".to_string(),
+            })?;
+        let iteration_error_policy = stage.on_iteration_error.as_deref().unwrap_or("fail");
+        let mut previous_body_statuses: BTreeMap<String, StageStatus> = BTreeMap::new();
+        let mut last_body_statuses: BTreeMap<String, StageStatus> = BTreeMap::new();
+        let mut latest_final_status = None;
+        let mut latest_iteration_error = None;
+        let mut stop_reason = LoopStopReason::MaxIterations;
+        let mut iterations_run = 0usize;
+
+        for iteration in 1..=max_iterations {
+            iterations_run = iteration;
+            let mut body_statuses = BTreeMap::new();
+            body_statuses.insert("input".to_string(), StageStatus::Success(source.clone()));
+            for (input_name, previous_stage_id) in &stage.carry {
+                if let Some(previous_status) = previous_body_statuses.get(previous_stage_id) {
+                    body_statuses.insert(input_name.clone(), previous_status.clone());
+                }
+            }
+
+            for body_stage in &ordered_body {
+                if iteration == 1 {
+                    reject_missing_first_iteration_carry_alias(stage, body_stage, &body_statuses)?;
+                }
+
+                let trace_stage = loop_trace_stage(stage, body_stage);
+                let loop_context = LoopTraceContext {
+                    loop_id: &stage.id,
+                    iteration,
+                };
+                let stage_started = if let Some(trace) = trace.as_deref_mut() {
+                    Some(self.start_stage_trace_with_loop(
+                        trace,
+                        context.run_id,
+                        &trace_stage,
+                        &body_stage.id,
+                        Some(loop_context),
+                    )?)
+                } else {
+                    None
+                };
+                let outcome = match Box::pin(self.execute_stage_with_timeout(
+                    context,
+                    body_stage,
+                    &body_statuses,
+                    stream_writer.as_deref_mut(),
+                    None,
+                ))
+                .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(error) => match iteration_error_policy {
+                        "fail" => {
+                            return Err(loop_trace_error(
+                                error,
+                                &trace_stage,
+                                &body_stage.id,
+                                loop_context,
+                            ));
+                        }
+                        "break" => {
+                            if let (Some(trace), Some(stage_started)) =
+                                (trace.as_deref_mut(), stage_started)
+                            {
+                                self.finish_stage_trace_error_with_loop(
+                                    trace,
+                                    context.run_id,
+                                    &trace_stage,
+                                    &body_stage.id,
+                                    stage_started,
+                                    loop_context,
+                                )?;
+                            }
+                            latest_iteration_error = Some((iteration, body_stage.id.clone()));
+                            stop_reason = LoopStopReason::Error;
+                            break;
+                        }
+                        "continue" => {
+                            if let (Some(trace), Some(stage_started)) =
+                                (trace.as_deref_mut(), stage_started)
+                            {
+                                self.finish_stage_trace_error_with_loop(
+                                    trace,
+                                    context.run_id,
+                                    &trace_stage,
+                                    &body_stage.id,
+                                    stage_started,
+                                    loop_context,
+                                )?;
+                            }
+                            latest_iteration_error = Some((iteration, body_stage.id.clone()));
+                            break;
+                        }
+                        _ => return Err(error),
+                    },
+                };
+                if let (Some(trace), Some(stage_started)) = (trace.as_deref_mut(), stage_started) {
+                    self.finish_stage_trace_with_loop(
+                        trace,
+                        context.run_id,
+                        &mut body_statuses,
+                        FinishStageTrace {
+                            trace_stage: &trace_stage,
+                            status_stage_id: &body_stage.id,
+                            loop_stage_id: &body_stage.id,
+                            stage_started,
+                            outcome,
+                            loop_context: Some(loop_context),
+                        },
+                    )?;
+                } else {
+                    body_statuses.insert(body_stage.id.clone(), outcome.status);
+                }
+                if body_stage.id == final_stage_id {
+                    if let Some(final_status) = body_statuses
+                        .get(final_stage_id)
+                        .filter(|status| !matches!(status, StageStatus::Skipped))
+                    {
+                        latest_final_status = Some(final_status.clone());
+                    }
+                }
+            }
+
+            if matches!(stop_reason, LoopStopReason::Error) {
+                if body_statuses.contains_key(final_stage_id) {
+                    last_body_statuses = body_statuses;
+                }
+                break;
+            }
+
+            if latest_iteration_error
+                .as_ref()
+                .is_some_and(|(error_iteration, _)| *error_iteration == iteration)
+            {
+                previous_body_statuses = body_statuses;
+                continue;
+            }
+
+            let should_break =
+                evaluate_loop_break(stage.break_on.as_ref().unwrap(), &body_statuses)?;
+            previous_body_statuses = body_statuses.clone();
+            last_body_statuses = body_statuses;
+            if should_break {
+                stop_reason = LoopStopReason::BreakCondition;
+                break;
+            }
+        }
+
+        let final_status = last_body_statuses
+            .get(final_stage_id)
+            .filter(|status| !matches!(status, StageStatus::Skipped))
+            .or(latest_final_status.as_ref())
+            .ok_or_else(|| {
+                if let Some((iteration, body_stage_id)) = latest_iteration_error.as_ref() {
+                    let message = if matches!(stop_reason, LoopStopReason::Error) {
+                        format!(
+                            "loop `{}` stopped on iteration error at iteration {iteration} in body stage `{body_stage_id}` with no final output available",
+                            stage.id
+                        )
+                    } else {
+                        format!(
+                            "loop `{}` produced no final output after iteration errors",
+                            stage.id
+                        )
+                    };
+                    return LlmffError::StageExecution {
+                        stage_id: stage.id.clone(),
+                        message,
+                    };
+                }
+
+                LlmffError::StageExecution {
+                    stage_id: stage.id.clone(),
+                    message: format!("loop final stage `{final_stage_id}` did not run"),
+                }
+            })?;
+        let final_value = loop_final_value(
+            stage,
+            final_stage_id,
+            final_status,
+            iterations_run,
+            &stop_reason,
+        )?;
+
+        Ok(StageStatus::Success(final_value))
     }
 
     fn execute_load(
@@ -1199,6 +1557,27 @@ impl Engine {
     }
 }
 
+fn loop_trace_stage(loop_stage: &StageSpec, body_stage: &StageSpec) -> StageSpec {
+    let mut trace_stage = body_stage.clone();
+    trace_stage.id = format!("{}.{}", loop_stage.id, body_stage.id);
+    trace_stage
+}
+
+fn loop_trace_error(
+    error: LlmffError,
+    trace_stage: &StageSpec,
+    loop_stage_id: &str,
+    loop_context: LoopTraceContext<'_>,
+) -> LlmffError {
+    LlmffError::LoopStageExecution {
+        stage_id: trace_stage.id.clone(),
+        loop_id: loop_context.loop_id.to_string(),
+        loop_iteration: loop_context.iteration,
+        loop_stage_id: loop_stage_id.to_string(),
+        source: Box::new(error),
+    }
+}
+
 fn require_stage_field<'a>(
     stage: &StageSpec,
     value: Option<&'a str>,
@@ -1346,6 +1725,36 @@ fn validate_execution_options(stage: &StageSpec) -> Result<(), LlmffError> {
         }
     }
 
+    Ok(())
+}
+
+fn validate_loop_policy_fields(stage: &StageSpec) -> Result<(), LlmffError> {
+    if let Some(policy) = stage.on_iteration_error.as_deref() {
+        if !matches!(policy, "fail" | "continue" | "break") {
+            return Err(stage_validation_error(
+                stage,
+                "on_iteration_error must be fail, continue, or break",
+            ));
+        }
+    }
+    if let Some(retain) = stage.retain_iterations.as_deref() {
+        if !matches!(retain, "none" | "summaries" | "all") {
+            return Err(stage_validation_error(
+                stage,
+                "retain_iterations must be none, summaries, or all",
+            ));
+        }
+    }
+    if let Some(final_output) = &stage.final_output {
+        if let Some(require_status) = final_output.require_status.as_deref() {
+            if !matches!(require_status, "success" | "invalid" | "any") {
+                return Err(stage_validation_error(
+                    stage,
+                    "final.require_status must be success, invalid, or any",
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -2316,6 +2725,142 @@ fn status_name(status: &StageStatus) -> &'static str {
     }
 }
 
+fn loop_stop_reason_name(reason: &LoopStopReason) -> &'static str {
+    match reason {
+        LoopStopReason::BreakCondition => "break_condition",
+        LoopStopReason::MaxIterations => "max_iterations",
+        LoopStopReason::Error => "error",
+    }
+}
+
+fn evaluate_loop_break(
+    break_on: &LoopBreakSpec,
+    statuses: &BTreeMap<String, StageStatus>,
+) -> Result<bool, LlmffError> {
+    match break_on {
+        LoopBreakSpec::StageSuccess { stage } => {
+            Ok(matches!(statuses.get(stage), Some(StageStatus::Success(_))))
+        }
+        LoopBreakSpec::StageFailure { stage } => Ok(matches!(
+            statuses.get(stage),
+            Some(StageStatus::Invalid { .. }) | Some(StageStatus::Skipped)
+        )),
+        LoopBreakSpec::FieldTrue { stage, field } => {
+            let Some(value) = statuses.get(stage).and_then(success_value) else {
+                return Ok(false);
+            };
+            Ok(json_field(&value, field)
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false))
+        }
+        LoopBreakSpec::FieldEquals {
+            stage,
+            field,
+            value,
+        } => {
+            let Some(actual) = statuses
+                .get(stage)
+                .and_then(success_value)
+                .and_then(|value| json_field(&value, field).cloned())
+            else {
+                return Ok(false);
+            };
+            Ok(actual == *value)
+        }
+        LoopBreakSpec::Never => Ok(false),
+    }
+}
+
+fn json_field<'a>(value: &'a Value, field: &str) -> Option<&'a serde_json::Value> {
+    match value {
+        Value::Json(json) => json.get(field),
+        _ => None,
+    }
+}
+
+fn reject_missing_first_iteration_carry_alias(
+    loop_stage: &StageSpec,
+    body_stage: &StageSpec,
+    body_statuses: &BTreeMap<String, StageStatus>,
+) -> Result<(), LlmffError> {
+    let Some(parent) = body_stage.from.as_ref() else {
+        return Ok(());
+    };
+    if !loop_stage.carry.contains_key(parent) || body_statuses.contains_key(parent) {
+        return Ok(());
+    }
+
+    Err(LlmffError::StageExecution {
+        stage_id: loop_stage.id.clone(),
+        message: format!(
+            "loop `{}` cannot read carry alias `{parent}` on iteration 1 before it has a previous value",
+            loop_stage.id
+        ),
+    })
+}
+
+fn loop_final_value(
+    loop_stage: &StageSpec,
+    final_stage_id: &str,
+    final_status: &StageStatus,
+    iterations_run: usize,
+    stop_reason: &LoopStopReason,
+) -> Result<Value, LlmffError> {
+    let require_status = loop_stage
+        .final_output
+        .as_ref()
+        .and_then(|final_output| final_output.require_status.as_deref())
+        .unwrap_or("success");
+    let final_payload = match (require_status, final_status) {
+        ("success", StageStatus::Success(value)) => serialize_value_to_json(value)?,
+        ("invalid", StageStatus::Invalid { value, .. }) => serialize_value_to_json(value)?,
+        ("any", StageStatus::Success(value)) => serialize_value_to_json(value)?,
+        ("any", StageStatus::Invalid { value, .. }) => serialize_value_to_json(value)?,
+        ("any", StageStatus::Skipped) => serde_json::Value::Null,
+        ("success", StageStatus::Invalid { errors, .. }) => {
+            return Err(LlmffError::StageExecution {
+                stage_id: loop_stage.id.clone(),
+                message: format!(
+                    "loop final stage `{final_stage_id}` was invalid: {}",
+                    errors.join("; ")
+                ),
+            });
+        }
+        ("success", StageStatus::Skipped) => {
+            return Err(LlmffError::StageExecution {
+                stage_id: loop_stage.id.clone(),
+                message: format!("loop final stage `{final_stage_id}` was skipped"),
+            });
+        }
+        ("invalid", StageStatus::Success(_)) | ("invalid", StageStatus::Skipped) => {
+            return Err(LlmffError::StageExecution {
+                stage_id: loop_stage.id.clone(),
+                message: format!("loop final stage `{final_stage_id}` did not finish invalid"),
+            });
+        }
+        _ => serde_json::Value::Null,
+    };
+
+    Ok(Value::Json(serde_json::json!({
+        "final": final_payload,
+        "metadata": {
+            "iterations_run": iterations_run,
+            "stop_reason": loop_stop_reason_name(stop_reason),
+            "final_stage": final_stage_id
+        }
+    })))
+}
+
+fn serialize_value_to_json(value: &Value) -> Result<serde_json::Value, LlmffError> {
+    match value {
+        Value::Text(text) => Ok(serde_json::Value::String(text.clone())),
+        Value::Messages(messages) => {
+            Ok(serde_json::Value::String(render_messages_as_text(messages)))
+        }
+        Value::Json(json) => Ok(json.clone()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2656,6 +3201,297 @@ graph:
             .contains("rerank strategy must be lexical, embedding, or command"));
     }
 
+    #[test]
+    fn validate_manifest_rejects_loop_without_from() {
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: refine
+    op: loop
+    max_iterations: 2
+    break_on: { type: never }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#,
+        )
+        .unwrap();
+
+        let error = engine.validate_manifest(manifest).unwrap_err().to_string();
+        assert!(error.contains("loop requires from"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_invalid_loop_error_policy() {
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    on_iteration_error: retry_forever
+    break_on: { type: never }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#,
+        )
+        .unwrap();
+
+        let error = engine.validate_manifest(manifest).unwrap_err().to_string();
+        assert!(error.contains("on_iteration_error must be fail, continue, or break"));
+    }
+
+    #[test]
+    fn validate_manifest_accepts_valid_loop_body() {
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+      - id: check
+        op: validate_json
+        from: draft
+        schema: '{"type":"object","required":["answer"]}'
+"#,
+        )
+        .unwrap();
+
+        engine
+            .validate_manifest(manifest)
+            .expect("valid loop body should pass validation");
+    }
+
+    #[tokio::test]
+    async fn loop_runs_until_stage_success_break_condition() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 3
+    break_on: { type: stage_success, stage: check }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+      - id: check
+        op: validate_json
+        from: draft
+        schema: '{"type":"object","required":["answer"]}'
+outputs:
+  final:
+    from: refine
+    path: answer.json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        let output = std::fs::read_to_string(dir.path().join("answer.json")).unwrap();
+        let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(output["metadata"]["iterations_run"], 1);
+        assert_eq!(output["metadata"]["stop_reason"], "break_condition");
+        assert_eq!(output["final"], r#"{"answer":"ok"}"#);
+    }
+
+    #[tokio::test]
+    async fn loop_never_breaks_until_max_iterations() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+outputs:
+  final:
+    from: sample
+    path: answer.json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        let output = std::fs::read_to_string(dir.path().join("answer.json")).unwrap();
+        let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(output["metadata"]["iterations_run"], 2);
+        assert_eq!(output["metadata"]["stop_reason"], "max_iterations");
+    }
+
+    #[tokio::test]
+    async fn loop_breaks_on_iteration_error_and_preserves_text_payload() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    on_iteration_error: break
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:text
+      - id: explode
+        op: tool
+        from: draft
+        command: ["/bin/sh", "-c", "exit 9"]
+outputs:
+  final:
+    from: sample
+    path: answer.json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new()
+            .with_backend("mock:text", Arc::new(MockBackend::new("mock:text", "true")));
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        let output = std::fs::read_to_string(dir.path().join("answer.json")).unwrap();
+        let output: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(output["metadata"]["iterations_run"], 1);
+        assert_eq!(output["metadata"]["stop_reason"], "error");
+        assert_eq!(output["final"], "true");
+    }
+
+    #[tokio::test]
+    async fn loop_reports_iteration_one_carry_alias_without_previous_value() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    carry:
+      previous: draft
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: previous
+        model: mock:text
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:text",
+            Arc::new(MockBackend::new("mock:text", "answer")),
+        );
+
+        let error = engine
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect_err("iteration 1 carry alias should fail clearly");
+
+        let message = error.to_string();
+        assert!(message.contains("loop `refine`"));
+        assert!(message.contains("carry alias `previous`"));
+        assert!(message.contains("iteration 1"));
+    }
+
     #[tokio::test]
     async fn cache_stage_writes_and_reuses_success_value() {
         let dir = tempdir().unwrap();
@@ -2830,6 +3666,266 @@ outputs:
         let events = parse_trace_events(&trace);
         let draft_finished = trace_stage_finished(&events, "draft");
         assert_eq!(draft_finished["attempts"], 3);
+    }
+
+    #[tokio::test]
+    async fn loop_body_trace_records_include_iteration_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "loop-trace".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let draft_events = events
+            .iter()
+            .filter(|event| event["stage_id"] == "sample.draft")
+            .collect::<Vec<_>>();
+        assert!(draft_events
+            .iter()
+            .any(|event| event["loop_id"] == "sample" && event["loop_iteration"] == 1));
+        assert!(draft_events
+            .iter()
+            .any(|event| event["loop_id"] == "sample" && event["loop_iteration"] == 2));
+        assert!(draft_events
+            .iter()
+            .all(|event| event["loop_stage_id"] == "draft"));
+    }
+
+    #[tokio::test]
+    async fn parallel_loop_body_trace_records_include_iteration_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "parallel-loop-trace".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                    scheduler: SchedulerMode::Parallel,
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let draft_events = events
+            .iter()
+            .filter(|event| event["stage_id"] == "sample.draft")
+            .collect::<Vec<_>>();
+        assert!(draft_events
+            .iter()
+            .any(|event| event["loop_id"] == "sample" && event["loop_iteration"] == 1));
+        assert!(draft_events
+            .iter()
+            .any(|event| event["loop_id"] == "sample" && event["loop_iteration"] == 2));
+        assert!(draft_events
+            .iter()
+            .all(|event| event["loop_stage_id"] == "draft"));
+    }
+
+    #[tokio::test]
+    async fn loop_body_failure_trace_includes_iteration_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: load
+        input: missing_prompt
+"#,
+        )
+        .unwrap();
+
+        Engine::new()
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "loop-failure-trace".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect_err("loop body stage should fail");
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let failed = events
+            .iter()
+            .find(|event| event["event"] == "run_failed")
+            .expect("run_failed event should exist");
+
+        assert_eq!(failed["stage_id"], "sample.draft");
+        assert_eq!(failed["loop_id"], "sample");
+        assert_eq!(failed["loop_iteration"], 1);
+        assert_eq!(failed["loop_stage_id"], "draft");
+    }
+
+    #[tokio::test]
+    async fn loop_body_nonfatal_error_trace_records_terminal_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    on_iteration_error: break
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:text
+      - id: explode
+        op: tool
+        from: draft
+        command: ["/bin/sh", "-c", "exit 9"]
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new()
+            .with_backend("mock:text", Arc::new(MockBackend::new("mock:text", "true")));
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "loop-nonfatal-trace".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        assert!(events.iter().all(|event| event["event"] != "run_failed"));
+        let explode_events = events
+            .iter()
+            .filter(|event| event["stage_id"] == "sample.explode")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            explode_events
+                .iter()
+                .filter(|event| event["event"] == "stage_started")
+                .count(),
+            1
+        );
+        let terminal_events = explode_events
+            .iter()
+            .filter(|event| event["event"] == "stage_finished")
+            .collect::<Vec<_>>();
+        assert_eq!(terminal_events.len(), 1);
+        let terminal = terminal_events[0];
+        assert_eq!(terminal["status"], "error");
+        assert_eq!(terminal["loop_id"], "sample");
+        assert_eq!(terminal["loop_iteration"], 1);
+        assert_eq!(terminal["loop_stage_id"], "explode");
     }
 
     #[tokio::test]

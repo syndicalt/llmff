@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use std::path::PathBuf;
+use std::{fs, path::Path};
 
 const PIPELINE_TEMPLATES: &[(&str, &str)] = &[
     ("Summarization", "examples/templates/summarization.yaml"),
@@ -9,6 +10,10 @@ const PIPELINE_TEMPLATES: &[(&str, &str)] = &[
     ),
     ("Classification", "examples/templates/classification.yaml"),
     ("JSON Repair", "examples/templates/json-repair.yaml"),
+    (
+        "Self-Refine Loop",
+        "examples/templates/self-refine-loop.yaml",
+    ),
     ("RAG Answer", "examples/templates/rag-answer.yaml"),
     (
         "Batch Processing",
@@ -42,6 +47,33 @@ fn workspace_root() -> PathBuf {
         .and_then(|path| path.parent())
         .expect("CLI crate should live under crates/llmff-cli")
         .to_path_buf()
+}
+
+fn write_fake_eventloom_bin(dir: &Path) -> PathBuf {
+    let bin = dir.join("fake-eventloom");
+    fs::write(
+        &bin,
+        r#"#!/usr/bin/env python3
+import json
+import os
+import sys
+
+capture = os.environ["EVENTLOOM_CAPTURE"]
+record = {"argv": sys.argv[1:]}
+with open(capture, "a", encoding="utf-8") as file:
+    file.write(json.dumps(record, separators=(",", ":")) + "\n")
+print(json.dumps({"id": "evt_fake", "hash": "sha256:" + "0" * 64, "previousHash": None}))
+"#,
+    )
+    .expect("fake Eventloom script should be writable");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&bin).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&bin, permissions).unwrap();
+    }
+    bin
 }
 
 #[test]
@@ -243,6 +275,134 @@ fn real_world_examples_are_documented_and_inspectable_offline() {
             .args(["inspect", root.join(manifest).to_str().unwrap()])
             .assert()
             .success();
+    }
+}
+
+#[test]
+fn wisepick_eventloom_flow_example_runs_offline_dry_run() {
+    let root = workspace_root();
+    let example_dir = root.join("examples/wisepick-eventloom-flow");
+    let readme = example_dir.join("README.md");
+    let harness = example_dir.join("run.py");
+    let out_dir = tempfile::tempdir().expect("temp dir should be created");
+
+    assert!(readme.exists(), "missing WisePick/Eventloom flow README");
+    assert!(harness.exists(), "missing WisePick/Eventloom flow harness");
+
+    let readme_source = std::fs::read_to_string(&readme).expect("README should be readable");
+    for required in [
+        "external composition harness",
+        "POST /v1/decide",
+        "llmff run",
+        "Eventloom-compatible JSONL",
+        "POST /v1/feedback",
+    ] {
+        assert!(
+            readme_source.contains(required),
+            "README should document boundary phrase: {required}"
+        );
+    }
+
+    Command::new("python3")
+        .args(["-m", "py_compile", harness.to_str().unwrap()])
+        .assert()
+        .success();
+
+    Command::new("python3")
+        .arg(&harness)
+        .args([
+            "--dry-run",
+            "--intent",
+            "Clean and return this record as JSON",
+            "--out-dir",
+            out_dir.path().to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let journal_path = out_dir.path().join("eventloom-compatible.jsonl");
+    assert!(journal_path.exists(), "dry-run should write journal");
+
+    let journal = std::fs::read_to_string(journal_path).expect("journal should be readable");
+    for event_type in [
+        "\"type\":\"routing.decide.requested\"",
+        "\"type\":\"routing.decided\"",
+        "\"type\":\"llmff.execution.planned\"",
+        "\"type\":\"routing.feedback.planned\"",
+    ] {
+        assert!(
+            journal.contains(event_type),
+            "journal should contain event type {event_type}"
+        );
+    }
+
+    let run_dir = tempfile::tempdir().expect("run temp dir should be created");
+    let llmff_bin = Command::cargo_bin("llmff")
+        .unwrap()
+        .get_program()
+        .to_owned();
+    Command::new("python3")
+        .arg(&harness)
+        .args([
+            "--mock-wisepick",
+            "--intent",
+            "Clean and return this record as JSON",
+            "--out-dir",
+            run_dir.path().to_str().unwrap(),
+            "--llmff-bin",
+            llmff_bin.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_journal_path = run_dir.path().join("eventloom-compatible.jsonl");
+    let run_journal = std::fs::read_to_string(run_journal_path).expect("journal readable");
+    for event_type in [
+        "\"type\":\"llmff.execution.started\"",
+        "\"type\":\"llmff.execution.finished\"",
+        "\"type\":\"routing.feedback.planned\"",
+    ] {
+        assert!(
+            run_journal.contains(event_type),
+            "mock-WisePick journal should contain event type {event_type}"
+        );
+    }
+
+    let import_dir = tempfile::tempdir().expect("import temp dir should be created");
+    let fake_eventloom = write_fake_eventloom_bin(import_dir.path());
+    let capture_path = import_dir.path().join("eventloom-append-calls.jsonl");
+    let eventloom_log = import_dir.path().join("sealed-eventloom.jsonl");
+    Command::new("python3")
+        .arg(&harness)
+        .env("EVENTLOOM_CAPTURE", &capture_path)
+        .args([
+            "--dry-run",
+            "--intent",
+            "Clean and return this record as JSON",
+            "--out-dir",
+            import_dir.path().to_str().unwrap(),
+            "--eventloom-log",
+            eventloom_log.to_str().unwrap(),
+            "--eventloom-bin",
+            fake_eventloom.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let append_calls =
+        std::fs::read_to_string(&capture_path).expect("fake Eventloom should capture append calls");
+    for expected in [
+        "\"append\"",
+        "\"routing.decide.requested\"",
+        "\"routing.decided\"",
+        "\"llmff.execution.planned\"",
+        "\"routing.feedback.planned\"",
+        eventloom_log.to_str().unwrap(),
+    ] {
+        assert!(
+            append_calls.contains(expected),
+            "Eventloom append calls should contain {expected}"
+        );
     }
 }
 

@@ -53,6 +53,20 @@ LLMFF_MOCK_GOOD_RESPONSE='{"answer":"ok"}' \
 llmff run examples/templates/json-repair.yaml
 ```
 
+## Self-Refine Loop
+
+Manifest: `examples/templates/self-refine-loop.yaml`
+
+```bash
+llmff inspect examples/templates/self-refine-loop.yaml
+llmff run examples/templates/self-refine-loop.yaml --trace /tmp/llmff-self-refine-trace.jsonl
+```
+
+Use this when a bounded refinement pass should retry a body subgraph until a
+validator succeeds or `max_iterations` is reached. The loop remains a single
+stage in the outer graph and produces a JSON object with `final` and
+`metadata`.
+
 ## RAG Answer
 
 Use this for local file-backed retrieval, lexical reranking, and answer

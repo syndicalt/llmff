@@ -622,10 +622,29 @@ fn inspect_stage_view(stage: &llmff_core::manifest::StageSpec) -> serde_json::Va
         "sampler": stage.sampler,
         "plugin": plugin_stage_view(&stage.op),
         "capability_constraints": stage_capability_constraints(&stage.op),
+        "loop": inspect_loop_metadata(stage),
         "cache_policy": stage.cache_policy,
         "timeout_ms": stage.timeout_ms,
         "retry": stage.retry,
         "writes_stdout": stage.op == "write" && stage.path.as_deref() == Some("-"),
+    })
+}
+
+fn inspect_loop_metadata(stage: &llmff_core::manifest::StageSpec) -> serde_json::Value {
+    if stage.op != "loop" {
+        return serde_json::Value::Null;
+    }
+
+    let max_iterations = stage.max_iterations.unwrap_or(0);
+    let body_stage_count = stage.body.len();
+    serde_json::json!({
+        "max_iterations": max_iterations,
+        "body_stage_count": body_stage_count,
+        "max_expanded_stage_count": max_iterations * body_stage_count,
+        "break_on": stage.break_on,
+        "final": stage.final_output,
+        "retain_iterations": stage.retain_iterations.as_deref().unwrap_or("none"),
+        "on_iteration_error": stage.on_iteration_error.as_deref().unwrap_or("fail")
     })
 }
 

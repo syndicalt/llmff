@@ -47,7 +47,10 @@ FIXTURES = {
         ROOT / "fixtures/golden/plugin-validation/valid-report.json",
         ROOT / "fixtures/golden/plugin-validation/missing-entrypoint-report.json",
     ],
-    "inspect_report": [ROOT / "fixtures/golden/inspect/report.json"],
+    "inspect_report": [
+        ROOT / "fixtures/golden/inspect/report.json",
+        ROOT / "fixtures/golden/inspect/loop-report.json",
+    ],
     "run_result": [
         ROOT / "fixtures/golden/run-results/success.json",
         ROOT / "fixtures/golden/run-results/stage-failure.json",
@@ -286,10 +289,15 @@ def main():
     for path in FIXTURES["plugin_validation_report"]:
         validate_instance(schemas["plugin_validation_report"], load_json(path))
 
+    inspect_reports_include_loop_metadata = False
     for path in FIXTURES["inspect_report"]:
         report = load_json(path)
         validate_instance(schemas["inspect_report"], report)
         assert report["format_version"] == 1
+        inspect_reports_include_loop_metadata = inspect_reports_include_loop_metadata or any(
+            isinstance(stage.get("loop"), dict) for stage in report["stages"]
+        )
+    assert inspect_reports_include_loop_metadata
 
     for path in FIXTURES["run_result"]:
         result = load_json(path)

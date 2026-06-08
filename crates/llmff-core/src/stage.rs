@@ -149,6 +149,18 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             capabilities: &["status-routing", "json-field-routing"],
         },
         StageMetadata {
+            name: "loop",
+            kind: "control-flow",
+            required_fields: &["from", "max_iterations", "break_on", "body"],
+            optional_fields: &["carry", "final", "on_iteration_error", "retain_iterations"],
+            capabilities: &[
+                "bounded-iteration",
+                "body-subgraph",
+                "explicit-break-condition",
+                "loop-tracing",
+            ],
+        },
+        StageMetadata {
             name: "tool",
             kind: "integration",
             required_fields: &["from", "command|url|transport"],
@@ -231,6 +243,14 @@ mod tests {
         assert!(infer.required_fields.contains(&"model"));
         assert!(infer.capabilities.contains(&"sampling"));
 
+        let loop_stage = stages
+            .iter()
+            .find(|stage| stage.name == "loop")
+            .expect("loop stage should be described");
+        assert_eq!(loop_stage.kind, "control-flow");
+        assert!(loop_stage.capabilities.contains(&"bounded-iteration"));
+        assert!(loop_stage.capabilities.contains(&"loop-tracing"));
+
         let tool = stages
             .iter()
             .find(|stage| stage.name == "tool")
@@ -278,6 +298,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let output = execute_deterministic_stage(
@@ -331,6 +358,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let output = execute_deterministic_stage(
@@ -388,6 +422,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let output = execute_deterministic_stage(
@@ -442,6 +483,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let error = execute_deterministic_stage(
@@ -505,6 +553,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let output = execute_deterministic_stage(
@@ -577,6 +632,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let output =
@@ -643,6 +705,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let first =
@@ -722,6 +791,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
         let input = Value::Json(serde_json::json!({
             "query": "rust",
@@ -794,6 +870,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let output = execute_deterministic_stage(
@@ -858,6 +941,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let output = execute_deterministic_stage(
@@ -922,6 +1012,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let output = execute_deterministic_stage(
@@ -981,6 +1078,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let output = execute_deterministic_stage(
@@ -1042,6 +1146,13 @@ mod tests {
             timeout_ms: None,
             retry: None,
             cache_policy: None,
+            max_iterations: None,
+            break_on: None,
+            carry: Default::default(),
+            body: Vec::new(),
+            final_output: None,
+            on_iteration_error: None,
+            retain_iterations: None,
         };
 
         let error = execute_deterministic_stage(

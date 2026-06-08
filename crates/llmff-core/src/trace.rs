@@ -11,6 +11,12 @@ pub struct TraceEvent {
     pub run_id: String,
     pub event: String,
     pub stage_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_iteration: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_stage_id: Option<String>,
     pub op: Option<String>,
     pub status: Option<String>,
     pub timestamp_ms: u128,

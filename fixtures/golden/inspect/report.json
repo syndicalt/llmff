@@ -63,6 +63,7 @@
         "optional_fields": [],
         "capabilities": ["text-input", "json-input", "stdin"]
       },
+      "loop": null,
       "cache_policy": null,
       "timeout_ms": null,
       "retry": null,
@@ -82,6 +83,7 @@
         "optional_fields": [],
         "capabilities": ["file-template"]
       },
+      "loop": null,
       "cache_policy": null,
       "timeout_ms": null,
       "retry": null,
@@ -101,6 +103,7 @@
         "optional_fields": [],
         "capabilities": ["system-prompt"]
       },
+      "loop": null,
       "cache_policy": null,
       "timeout_ms": null,
       "retry": null,
@@ -142,6 +145,7 @@
           "usage-metadata"
         ]
       },
+      "loop": null,
       "cache_policy": null,
       "timeout_ms": 30000,
       "retry": {
@@ -164,6 +168,7 @@
         "optional_fields": [],
         "capabilities": ["json-schema"]
       },
+      "loop": null,
       "cache_policy": null,
       "timeout_ms": null,
       "retry": null,
@@ -187,6 +192,7 @@
         "optional_fields": ["temperature", "max_tokens", "timeout_ms", "retry"],
         "capabilities": ["json-repair", "usage-metadata"]
       },
+      "loop": null,
       "cache_policy": "read-refresh",
       "timeout_ms": null,
       "retry": null,
@@ -215,6 +221,7 @@
           "protocol_version": 1
         }
       },
+      "loop": null,
       "cache_policy": null,
       "timeout_ms": null,
       "retry": null,

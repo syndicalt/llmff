@@ -146,6 +146,26 @@ export OLLAMA_BASE_URL='http://localhost:11434'
 scripts/smoke-ollama-provider.sh
 ```
 
+## External Composition Examples
+
+`examples/wisepick-eventloom-flow/` shows how a caller can compose adjacent
+runtime tools around `llmff` without changing `llmff` core:
+
+```text
+POST /v1/decide -> llmff run -> Eventloom-compatible JSONL -> POST /v1/feedback
+```
+
+The harness calls WisePick over HTTP, runs `llmff` as a subprocess, writes an
+Eventloom-compatible JSONL journal, and sends WisePick feedback after execution.
+It has a dry-run mode for offline validation:
+
+```bash
+python3 examples/wisepick-eventloom-flow/run.py \
+  --dry-run \
+  --intent "Clean and return this record as JSON" \
+  --out-dir /tmp/llmff-wisepick-flow
+```
+
 ## Manifest Templates
 
 Production-ready workflow templates live in `examples/templates/`:
@@ -154,6 +174,7 @@ Production-ready workflow templates live in `examples/templates/`:
 - `examples/templates/structured-extraction.yaml`
 - `examples/templates/classification.yaml`
 - `examples/templates/json-repair.yaml`
+- `examples/templates/self-refine-loop.yaml`
 - `examples/templates/rag-answer.yaml`
 - `examples/templates/batch-processing.yaml`
 - `examples/templates/tool-calling.yaml`

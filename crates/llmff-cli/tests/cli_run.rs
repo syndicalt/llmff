@@ -4431,6 +4431,66 @@ fn inspect_json_reports_reproducible_execution_contract() {
 }
 
 #[test]
+fn inspect_json_reports_loop_expansion_bound() {
+    let dir = tempfile::tempdir().unwrap();
+    let manifest = dir.path().join("loop.yaml");
+    std::fs::write(
+        &manifest,
+        r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 3
+    break_on: { type: never }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#,
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+
+    let output = Command::cargo_bin("llmff")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["inspect", manifest.to_str().unwrap(), "--format", "json"])
+        .output()
+        .expect("inspect should run");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let refine = report["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stage| stage["id"] == "refine")
+        .expect("refine stage should be reported");
+    assert_eq!(refine["loop"]["max_iterations"], 3);
+    assert_eq!(refine["loop"]["body_stage_count"], 1);
+    assert_eq!(refine["loop"]["max_expanded_stage_count"], 3);
+    assert_eq!(refine["loop"]["break_on"]["type"], "never");
+    assert_eq!(refine["loop"]["final"]["from"], "draft");
+    assert_eq!(refine["loop"]["final"]["require_status"], "success");
+    assert_eq!(refine["loop"]["retain_iterations"], "none");
+    assert_eq!(refine["loop"]["on_iteration_error"], "fail");
+}
+
+#[test]
 fn inspect_json_reports_requested_execution_options() {
     let root = workspace_root();
     let checkpoint = root.join("target/inspect-checkpoint.json");
