@@ -680,6 +680,14 @@ impl Engine {
                 require_stage_field(stage, stage.from.as_deref(), "accumulate requires from")?;
                 validate_accumulate_stage(stage)
             }
+            "score" => {
+                require_stage_field(stage, stage.from.as_deref(), "score requires from")?;
+                validate_score_stage(stage)
+            }
+            "select" => {
+                require_stage_field(stage, stage.from.as_deref(), "select requires from")?;
+                validate_select_stage(stage)
+            }
             "system" => {
                 require_stage_field(stage, stage.from.as_deref(), "system requires from")?;
                 Ok(())
@@ -839,7 +847,7 @@ impl Engine {
                 .await
             }
             "validate_json" | "system" | "template" | "retrieve" | "rerank" | "extract"
-            | "predicate" => {
+            | "predicate" | "score" | "select" => {
                 let input = stage
                     .from
                     .as_ref()
@@ -1883,6 +1891,49 @@ fn validate_accumulate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
     Ok(())
 }
 
+fn validate_score_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.score_field.is_none() && stage.field.is_none() && stage.json_path.is_none() {
+        return Err(stage_validation_error(
+            stage,
+            "score requires score_field, field, or json_path",
+        ));
+    }
+    if let (Some(min_score), Some(max_score)) = (stage.min_score, stage.max_score) {
+        if min_score > max_score {
+            return Err(stage_validation_error(
+                stage,
+                "min_score cannot be greater than max_score",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_select_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    let mode = stage.mode.as_deref().unwrap_or("highest_score");
+    if !matches!(
+        mode,
+        "first_success" | "last_success" | "highest_score" | "field_max" | "field_min"
+    ) {
+        return Err(stage_validation_error(
+            stage,
+            "select mode must be first_success, last_success, highest_score, field_max, or field_min",
+        ));
+    }
+    if matches!(mode, "field_max" | "field_min")
+        && stage.field.is_none()
+        && stage.score_field.is_none()
+    {
+        return Err(stage_validation_error(
+            stage,
+            "select field_max and field_min require field or score_field",
+        ));
+    }
+
+    Ok(())
+}
+
 fn validate_retrieval_strategy(stage: &StageSpec, operation: &str) -> Result<(), LlmffError> {
     match stage.strategy.as_deref().unwrap_or("lexical") {
         "lexical" | "embedding" | "command" => Ok(()),
@@ -2122,9 +2173,8 @@ fn infer_stage_value_kind(
                 InputFormat::Json => StageValueKind::Json,
             })
             .unwrap_or(StageValueKind::Text),
-        "validate_json" | "retrieve" | "rerank" | "extract" | "predicate" | "accumulate" => {
-            StageValueKind::Json
-        }
+        "validate_json" | "retrieve" | "rerank" | "extract" | "predicate" | "accumulate"
+        | "score" | "select" => StageValueKind::Json,
         "write" | "cache" => stage
             .from
             .as_ref()

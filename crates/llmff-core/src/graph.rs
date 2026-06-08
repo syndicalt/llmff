@@ -49,6 +49,8 @@ impl Graph {
             validate_extract_stage(stage)?;
             validate_predicate_stage(stage)?;
             validate_accumulate_stage(stage)?;
+            validate_score_stage(stage)?;
+            validate_select_stage(stage)?;
             validate_tool_stage(stage)?;
             validate_write_stage(stage)?;
             validate_loop_stage(stage)?;
@@ -258,6 +260,8 @@ fn validate_loop_stage(stage: &StageSpec) -> Result<(), LlmffError> {
         validate_extract_stage(body_stage)?;
         validate_predicate_stage(body_stage)?;
         validate_accumulate_stage(body_stage)?;
+        validate_score_stage(body_stage)?;
+        validate_select_stage(body_stage)?;
         validate_tool_stage(body_stage)?;
         validate_write_stage(body_stage)?;
     }
@@ -398,6 +402,64 @@ fn validate_accumulate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
     if mode == "merge_object" && stage.limit.is_some() {
         return Err(LlmffError::GraphValidation(
             "limit is only supported for array accumulation".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_score_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.op != "score" {
+        return Ok(());
+    }
+
+    if stage.from.is_none() {
+        return Err(LlmffError::GraphValidation(
+            "score requires from".to_string(),
+        ));
+    }
+    if stage.score_field.is_none() && stage.field.is_none() && stage.json_path.is_none() {
+        return Err(LlmffError::GraphValidation(
+            "score requires score_field, field, or json_path".to_string(),
+        ));
+    }
+    if let (Some(min_score), Some(max_score)) = (stage.min_score, stage.max_score) {
+        if min_score > max_score {
+            return Err(LlmffError::GraphValidation(
+                "min_score cannot be greater than max_score".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_select_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.op != "select" {
+        return Ok(());
+    }
+
+    if stage.from.is_none() {
+        return Err(LlmffError::GraphValidation(
+            "select requires from".to_string(),
+        ));
+    }
+    let mode = stage.mode.as_deref().unwrap_or("highest_score");
+    if !matches!(
+        mode,
+        "first_success" | "last_success" | "highest_score" | "field_max" | "field_min"
+    ) {
+        return Err(LlmffError::GraphValidation(
+            "select mode must be first_success, last_success, highest_score, field_max, or field_min"
+                .to_string(),
+        ));
+    }
+    if matches!(mode, "field_max" | "field_min")
+        && stage.field.is_none()
+        && stage.score_field.is_none()
+    {
+        return Err(LlmffError::GraphValidation(
+            "select field_max and field_min require field or score_field".to_string(),
         ));
     }
 

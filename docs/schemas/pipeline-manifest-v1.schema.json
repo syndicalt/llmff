@@ -142,7 +142,15 @@
             "gte",
             "lt",
             "lte",
-            "contains"
+            "contains",
+            "append",
+            "extend",
+            "merge_object",
+            "first_success",
+            "last_success",
+            "highest_score",
+            "field_max",
+            "field_min"
           ]
         },
         "criteria": { "type": "string", "minLength": 1 },
@@ -261,6 +269,45 @@
                   "required": ["mode"]
                 },
                 "then": { "required": ["value"] }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": { "op": { "const": "score" } },
+            "required": ["op"]
+          },
+          "then": {
+            "required": ["from"],
+            "anyOf": [
+              { "required": ["score_field"] },
+              { "required": ["field"] },
+              { "required": ["json_path"] }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": { "op": { "const": "select" } },
+            "required": ["op"]
+          },
+          "then": {
+            "required": ["from"],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "mode": { "enum": ["field_max", "field_min"] }
+                  },
+                  "required": ["mode"]
+                },
+                "then": {
+                  "anyOf": [
+                    { "required": ["field"] },
+                    { "required": ["score_field"] }
+                  ]
+                }
               }
             ]
           }

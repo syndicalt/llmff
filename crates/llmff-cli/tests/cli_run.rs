@@ -3296,6 +3296,112 @@ outputs:
 }
 
 #[test]
+fn run_scores_json_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("judge.json");
+    let output = dir.path().join("score.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(
+        &input,
+        r#"{"result":{"score":8,"reason":"cited","label":"usable"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  judge:
+    path: {}
+    format: json
+graph:
+  - id: load_judge
+    op: load
+    input: judge
+  - id: normalized
+    op: score
+    from: load_judge
+    score_field: result.score
+    reason_field: result.reason
+    label_field: result.label
+    min_score: 0
+    max_score: 10
+outputs:
+  final:
+    from: normalized
+    path: {}
+"#,
+            input.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(written["score"], 8.0);
+    assert_eq!(written["reason"], "cited");
+    assert_eq!(written["label"], "usable");
+}
+
+#[test]
+fn run_selects_highest_scored_candidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("candidates.json");
+    let output = dir.path().join("winner.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(
+        &input,
+        r#"[{"answer":"a","score":7},{"answer":"b","score":9},{"answer":"c","score":9}]"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  candidates:
+    path: {}
+    format: json
+graph:
+  - id: load_candidates
+    op: load
+    input: candidates
+  - id: winner
+    op: select
+    from: load_candidates
+    mode: highest_score
+    score_field: score
+outputs:
+  final:
+    from: winner
+    path: {}
+"#,
+            input.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(written["selected"]["answer"], "b");
+    assert_eq!(written["metadata"]["selected_index"], 1);
+}
+
+#[test]
 fn inline_graph_run_uses_input_graph_and_write_stage() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");

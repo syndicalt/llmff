@@ -11,6 +11,8 @@ mod extract;
 mod json_path;
 mod predicate;
 mod retrieval;
+mod score;
+mod select;
 mod template;
 mod validate;
 
@@ -18,6 +20,8 @@ pub(crate) use accumulate::accumulate;
 use extract::extract;
 use predicate::predicate;
 use retrieval::{rerank, retrieve};
+use score::score;
+use select::select;
 use template::{system, template};
 use validate::validate_json;
 
@@ -146,6 +150,20 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             capabilities: &["json-accumulation", "loop-carry-state"],
         },
         StageMetadata {
+            name: "score",
+            kind: "transform",
+            required_fields: &["from", "score_field|field|json_path"],
+            optional_fields: &["reason_field", "label_field", "min_score", "max_score"],
+            capabilities: &["score-normalization", "json-transform"],
+        },
+        StageMetadata {
+            name: "select",
+            kind: "transform",
+            required_fields: &["from"],
+            optional_fields: &["json_path", "mode", "field", "score_field"],
+            capabilities: &["candidate-selection", "best-of-n"],
+        },
+        StageMetadata {
             name: "repair",
             kind: "model",
             required_fields: &["from", "model"],
@@ -225,6 +243,8 @@ pub fn execute_deterministic_stage(
         "validate_json" => validate_json(spec, input, cwd),
         "extract" => extract(spec, input, cwd),
         "predicate" => predicate(spec, input, cwd),
+        "score" => score(spec, input, cwd),
+        "select" => select(spec, input, cwd),
         other => Err(LlmffError::UnknownStage(other.to_string())),
     }
 }
