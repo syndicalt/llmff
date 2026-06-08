@@ -157,6 +157,7 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
                 "bounded-iteration",
                 "body-subgraph",
                 "explicit-break-condition",
+                "loop-tracing",
             ],
         },
         StageMetadata {
@@ -248,6 +249,7 @@ mod tests {
             .expect("loop stage should be described");
         assert_eq!(loop_stage.kind, "control-flow");
         assert!(loop_stage.capabilities.contains(&"bounded-iteration"));
+        assert!(loop_stage.capabilities.contains(&"loop-tracing"));
 
         let tool = stages
             .iter()

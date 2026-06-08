@@ -22,7 +22,13 @@ pub(super) async fn run_stages_sequentially(
         }
         let stage_started = engine.start_stage_trace(trace, context.run_id, stage)?;
         let outcome = engine
-            .execute_stage_with_timeout(context, stage, statuses, stream_writer.as_deref_mut())
+            .execute_stage_with_timeout(
+                context,
+                stage,
+                statuses,
+                stream_writer.as_deref_mut(),
+                Some(&mut *trace),
+            )
             .await?;
         stream_stage_payload_if_selected(stream_writer.as_deref_mut(), stage, &outcome)?;
         engine.finish_stage_trace(
@@ -89,10 +95,49 @@ pub(super) async fn run_stages_in_parallel(
                 .map(|stage| engine.start_stage_trace(trace, context.run_id, stage))
                 .collect::<Result<Vec<_>, _>>()?;
             let status_snapshot = statuses.clone();
-            let outcomes = futures::future::join_all(chunk.iter().map(|stage| {
-                engine.execute_stage_with_timeout(context, stage, &status_snapshot, None)
-            }))
+            let status_snapshot_ref = &status_snapshot;
+            let mut outcomes = (0..chunk.len()).map(|_| None).collect::<Vec<_>>();
+            let non_loop_outcomes = futures::future::join_all(
+                chunk
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, stage)| stage.op != "loop")
+                    .map(|(index, stage)| async move {
+                        (
+                            index,
+                            engine
+                                .execute_stage_with_timeout(
+                                    context,
+                                    stage,
+                                    status_snapshot_ref,
+                                    None,
+                                    None,
+                                )
+                                .await,
+                        )
+                    }),
+            )
             .await;
+            for (index, outcome) in non_loop_outcomes {
+                outcomes[index] = Some(outcome);
+            }
+            for (index, stage) in chunk
+                .iter()
+                .enumerate()
+                .filter(|(_, stage)| stage.op == "loop")
+            {
+                outcomes[index] = Some(
+                    engine
+                        .execute_stage_with_timeout(
+                            context,
+                            stage,
+                            &status_snapshot,
+                            None,
+                            Some(&mut *trace),
+                        )
+                        .await,
+                );
+            }
 
             for ((stage, started), outcome) in chunk.iter().zip(starts).zip(outcomes) {
                 engine.finish_stage_trace(
@@ -100,7 +145,7 @@ pub(super) async fn run_stages_in_parallel(
                     context.run_id,
                     stage,
                     started,
-                    outcome?,
+                    outcome.expect("parallel stage outcome should be recorded")?,
                     statuses,
                 )?;
                 write_checkpoint_if_configured(

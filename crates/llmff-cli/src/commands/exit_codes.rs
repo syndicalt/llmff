@@ -46,6 +46,7 @@ pub(super) fn llmff_exit_code(error: &LlmffError) -> i32 {
             21
         }
         LlmffError::StageExecution { .. } => 20,
+        LlmffError::LoopStageExecution { source, .. } => llmff_exit_code(source),
         LlmffError::Backend(_) => 21,
         LlmffError::Io(_) | LlmffError::Json(_) => 22,
         LlmffError::NotImplemented(_) => 30,

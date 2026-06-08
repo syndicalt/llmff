@@ -327,6 +327,7 @@ pub(super) fn failure_kind(error: &LlmffError) -> &'static str {
         LlmffError::StageExecution { message, .. } if message == "stage timed out" => "timeout",
         LlmffError::StageExecution { message, .. } if message.starts_with("http tool ") => "http",
         LlmffError::StageExecution { .. } => "stage_execution",
+        LlmffError::LoopStageExecution { source, .. } => failure_kind(source),
         LlmffError::Backend(_) => "backend",
         LlmffError::Io(_) => "io",
         LlmffError::Json(_) => "json",
@@ -338,6 +339,7 @@ pub(super) fn retry_recommendation(error: &LlmffError) -> &'static str {
     match error {
         LlmffError::Backend(_) => "retry_with_backoff",
         LlmffError::StageExecution { .. } => "check_stage_or_input",
+        LlmffError::LoopStageExecution { source, .. } => retry_recommendation(source),
         LlmffError::Io(_) => "check_filesystem",
         _ => "do_not_retry_without_changes",
     }

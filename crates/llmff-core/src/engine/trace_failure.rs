@@ -44,6 +44,9 @@ pub(super) fn write_run_failed(
             run_id: run_id.to_string(),
             event: "run_failed".to_string(),
             stage_id: failure_stage_id(error),
+            loop_id: failure_loop_id(error),
+            loop_iteration: failure_loop_iteration(error),
+            loop_stage_id: failure_loop_stage_id(error),
             op: None,
             status: Some("failed".to_string()),
             timestamp_ms: super::timestamp_ms(),
@@ -70,6 +73,28 @@ pub(super) fn write_run_failed(
 fn failure_stage_id(error: &LlmffError) -> Option<String> {
     match error {
         LlmffError::StageExecution { stage_id, .. } => Some(stage_id.clone()),
+        LlmffError::LoopStageExecution { stage_id, .. } => Some(stage_id.clone()),
+        _ => None,
+    }
+}
+
+fn failure_loop_id(error: &LlmffError) -> Option<String> {
+    match error {
+        LlmffError::LoopStageExecution { loop_id, .. } => Some(loop_id.clone()),
+        _ => None,
+    }
+}
+
+fn failure_loop_iteration(error: &LlmffError) -> Option<usize> {
+    match error {
+        LlmffError::LoopStageExecution { loop_iteration, .. } => Some(*loop_iteration),
+        _ => None,
+    }
+}
+
+fn failure_loop_stage_id(error: &LlmffError) -> Option<String> {
+    match error {
+        LlmffError::LoopStageExecution { loop_stage_id, .. } => Some(loop_stage_id.clone()),
         _ => None,
     }
 }
@@ -84,6 +109,7 @@ fn failure_kind(error: &LlmffError) -> &'static str {
         LlmffError::StageExecution { message, .. } if message == "stage timed out" => "timeout",
         LlmffError::StageExecution { message, .. } if message.starts_with("http tool ") => "http",
         LlmffError::StageExecution { .. } => "stage_execution",
+        LlmffError::LoopStageExecution { source, .. } => failure_kind(source),
         LlmffError::Backend(_) => "backend",
         LlmffError::Config(_) => "config",
         LlmffError::NotImplemented(_) => "not_implemented",
@@ -104,6 +130,7 @@ fn failure_message(error: &LlmffError) -> &'static str {
             "HTTP stage failed"
         }
         LlmffError::StageExecution { .. } => "stage execution failed",
+        LlmffError::LoopStageExecution { source, .. } => failure_message(source),
         LlmffError::Backend(_) => "backend request failed",
         LlmffError::Config(_) => "configuration failed",
         LlmffError::NotImplemented(_) => "feature is not implemented",

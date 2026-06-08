@@ -75,7 +75,6 @@ pub(super) struct StageOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 struct LoopTraceContext<'a> {
     loop_id: &'a str,
     iteration: usize,
@@ -331,6 +330,9 @@ impl Engine {
                 run_id: options.run_id.clone(),
                 event: "run_started".to_string(),
                 stage_id: None,
+                loop_id: None,
+                loop_iteration: None,
+                loop_stage_id: None,
                 op: None,
                 status: None,
                 timestamp_ms: timestamp_ms(),
@@ -403,6 +405,9 @@ impl Engine {
                 run_id: options.run_id,
                 event: "run_finished".to_string(),
                 stage_id: None,
+                loop_id: None,
+                loop_iteration: None,
+                loop_stage_id: None,
                 op: None,
                 status: Some("succeeded".to_string()),
                 timestamp_ms: timestamp_ms(),
@@ -434,13 +439,29 @@ impl Engine {
         run_id: &str,
         stage: &StageSpec,
     ) -> Result<Instant, LlmffError> {
+        self.start_stage_trace_with_loop(trace, run_id, stage, &stage.id, None)
+    }
+
+    fn start_stage_trace_with_loop(
+        &self,
+        trace: &mut Vec<TraceWriter>,
+        run_id: &str,
+        stage: &StageSpec,
+        loop_stage_id: &str,
+        loop_context: Option<LoopTraceContext<'_>>,
+    ) -> Result<Instant, LlmffError> {
         let started = Instant::now();
+        let loop_id = loop_context.map(|context| context.loop_id.to_string());
+        let loop_iteration = loop_context.map(|context| context.iteration);
         write_trace(
             trace,
             TraceEvent {
                 run_id: run_id.to_string(),
                 event: "stage_started".to_string(),
                 stage_id: Some(stage.id.clone()),
+                loop_id,
+                loop_iteration,
+                loop_stage_id: loop_context.map(|_| loop_stage_id.to_string()),
                 op: Some(stage.op.clone()),
                 status: None,
                 timestamp_ms: timestamp_ms(),
@@ -474,20 +495,50 @@ impl Engine {
         outcome: StageOutcome,
         statuses: &mut BTreeMap<String, StageStatus>,
     ) -> Result<(), LlmffError> {
+        self.finish_stage_trace_with_loop(
+            trace,
+            run_id,
+            stage,
+            &stage.id,
+            &stage.id,
+            stage_started,
+            outcome,
+            statuses,
+            None,
+        )
+    }
+
+    fn finish_stage_trace_with_loop(
+        &self,
+        trace: &mut Vec<TraceWriter>,
+        run_id: &str,
+        trace_stage: &StageSpec,
+        status_stage_id: &str,
+        loop_stage_id: &str,
+        stage_started: Instant,
+        outcome: StageOutcome,
+        statuses: &mut BTreeMap<String, StageStatus>,
+        loop_context: Option<LoopTraceContext<'_>>,
+    ) -> Result<(), LlmffError> {
         let status = outcome.status;
         let status_name = status_name(&status).to_string();
-        let metadata = self.trace_metadata(stage, &status, outcome.usage.as_ref());
+        let metadata = self.trace_metadata(trace_stage, &status, outcome.usage.as_ref());
         let cache_hit = outcome.cache_hit;
         let cache_path = outcome.cache_path;
         let attempts = outcome.attempts;
-        statuses.insert(stage.id.clone(), status);
+        let loop_id = loop_context.map(|context| context.loop_id.to_string());
+        let loop_iteration = loop_context.map(|context| context.iteration);
+        statuses.insert(status_stage_id.to_string(), status);
         write_trace(
             trace,
             TraceEvent {
                 run_id: run_id.to_string(),
                 event: "stage_finished".to_string(),
-                stage_id: Some(stage.id.clone()),
-                op: Some(stage.op.clone()),
+                stage_id: Some(trace_stage.id.clone()),
+                loop_id,
+                loop_iteration,
+                loop_stage_id: loop_context.map(|_| loop_stage_id.to_string()),
+                op: Some(trace_stage.op.clone()),
                 status: Some(status_name),
                 timestamp_ms: timestamp_ms(),
                 duration_ms: Some(stage_started.elapsed().as_millis()),
@@ -504,6 +555,47 @@ impl Engine {
                 total_tokens: metadata.total_tokens,
                 cache_hit,
                 cache_path,
+                failure_kind: None,
+                failure_message: None,
+            },
+        )
+    }
+
+    fn finish_stage_trace_error_with_loop(
+        &self,
+        trace: &mut Vec<TraceWriter>,
+        run_id: &str,
+        trace_stage: &StageSpec,
+        loop_stage_id: &str,
+        stage_started: Instant,
+        loop_context: LoopTraceContext<'_>,
+    ) -> Result<(), LlmffError> {
+        write_trace(
+            trace,
+            TraceEvent {
+                run_id: run_id.to_string(),
+                event: "stage_finished".to_string(),
+                stage_id: Some(trace_stage.id.clone()),
+                loop_id: Some(loop_context.loop_id.to_string()),
+                loop_iteration: Some(loop_context.iteration),
+                loop_stage_id: Some(loop_stage_id.to_string()),
+                op: Some(trace_stage.op.clone()),
+                status: Some("error".to_string()),
+                timestamp_ms: timestamp_ms(),
+                duration_ms: Some(stage_started.elapsed().as_millis()),
+                attempts: None,
+                model: None,
+                backend: None,
+                provider_model: None,
+                validation_errors: None,
+                tool_kind: None,
+                tool_target: None,
+                output_path: None,
+                prompt_tokens: None,
+                completion_tokens: None,
+                total_tokens: None,
+                cache_hit: None,
+                cache_path: None,
                 failure_kind: None,
                 failure_message: None,
             },
@@ -674,9 +766,10 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         stream_writer: Option<&mut StageStreamWriter>,
+        trace: Option<&mut Vec<TraceWriter>>,
     ) -> Result<StageOutcome, LlmffError> {
         let timeout_ms = stage.timeout_ms.or(context.options.default_timeout_ms);
-        let run = self.execute_stage(context, stage, statuses, stream_writer);
+        let run = self.execute_stage(context, stage, statuses, stream_writer, trace);
         if let Some(timeout_ms) = timeout_ms {
             return tokio::time::timeout(Duration::from_millis(timeout_ms), run)
                 .await
@@ -695,6 +788,7 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         stream_writer: Option<&mut StageStreamWriter>,
+        trace: Option<&mut Vec<TraceWriter>>,
     ) -> Result<StageOutcome, LlmffError> {
         if !should_execute_stage(stage, statuses)? {
             return Ok(StageOutcome::without_usage(StageStatus::Skipped));
@@ -737,7 +831,7 @@ impl Engine {
                 .execute_route(stage, statuses)
                 .map(StageOutcome::without_usage),
             "loop" => self
-                .execute_loop(context, stage, statuses, stream_writer)
+                .execute_loop(context, stage, statuses, stream_writer, trace)
                 .await
                 .map(StageOutcome::without_usage),
             "tool" => {
@@ -777,6 +871,7 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         mut stream_writer: Option<&mut StageStreamWriter>,
+        mut trace: Option<&mut Vec<TraceWriter>>,
     ) -> Result<StageStatus, LlmffError> {
         let source = stage
             .from
@@ -821,30 +916,92 @@ impl Engine {
                     reject_missing_first_iteration_carry_alias(stage, body_stage, &body_statuses)?;
                 }
 
+                let trace_stage = loop_trace_stage(stage, body_stage);
+                let loop_context = LoopTraceContext {
+                    loop_id: &stage.id,
+                    iteration,
+                };
+                let stage_started = if let Some(trace) = trace.as_deref_mut() {
+                    Some(self.start_stage_trace_with_loop(
+                        trace,
+                        context.run_id,
+                        &trace_stage,
+                        &body_stage.id,
+                        Some(loop_context),
+                    )?)
+                } else {
+                    None
+                };
                 let outcome = match Box::pin(self.execute_stage_with_timeout(
                     context,
                     body_stage,
                     &body_statuses,
                     stream_writer.as_deref_mut(),
+                    None,
                 ))
                 .await
                 {
                     Ok(outcome) => outcome,
                     Err(error) => match iteration_error_policy {
-                        "fail" => return Err(error),
+                        "fail" => {
+                            return Err(loop_trace_error(
+                                error,
+                                &trace_stage,
+                                &body_stage.id,
+                                loop_context,
+                            ));
+                        }
                         "break" => {
+                            if let (Some(trace), Some(stage_started)) =
+                                (trace.as_deref_mut(), stage_started)
+                            {
+                                self.finish_stage_trace_error_with_loop(
+                                    trace,
+                                    context.run_id,
+                                    &trace_stage,
+                                    &body_stage.id,
+                                    stage_started,
+                                    loop_context,
+                                )?;
+                            }
                             latest_iteration_error = Some((iteration, body_stage.id.clone()));
                             stop_reason = LoopStopReason::Error;
                             break;
                         }
                         "continue" => {
+                            if let (Some(trace), Some(stage_started)) =
+                                (trace.as_deref_mut(), stage_started)
+                            {
+                                self.finish_stage_trace_error_with_loop(
+                                    trace,
+                                    context.run_id,
+                                    &trace_stage,
+                                    &body_stage.id,
+                                    stage_started,
+                                    loop_context,
+                                )?;
+                            }
                             latest_iteration_error = Some((iteration, body_stage.id.clone()));
                             break;
                         }
                         _ => return Err(error),
                     },
                 };
-                body_statuses.insert(body_stage.id.clone(), outcome.status);
+                if let (Some(trace), Some(stage_started)) = (trace.as_deref_mut(), stage_started) {
+                    self.finish_stage_trace_with_loop(
+                        trace,
+                        context.run_id,
+                        &trace_stage,
+                        &body_stage.id,
+                        &body_stage.id,
+                        stage_started,
+                        outcome,
+                        &mut body_statuses,
+                        Some(loop_context),
+                    )?;
+                } else {
+                    body_statuses.insert(body_stage.id.clone(), outcome.status);
+                }
                 if body_stage.id == final_stage_id {
                     if let Some(final_status) = body_statuses
                         .get(final_stage_id)
@@ -1383,6 +1540,27 @@ impl Engine {
                 backend_alias: alias.to_string(),
                 provider_model: provider_model.to_string(),
             })
+    }
+}
+
+fn loop_trace_stage(loop_stage: &StageSpec, body_stage: &StageSpec) -> StageSpec {
+    let mut trace_stage = body_stage.clone();
+    trace_stage.id = format!("{}.{}", loop_stage.id, body_stage.id);
+    trace_stage
+}
+
+fn loop_trace_error(
+    error: LlmffError,
+    trace_stage: &StageSpec,
+    loop_stage_id: &str,
+    loop_context: LoopTraceContext<'_>,
+) -> LlmffError {
+    LlmffError::LoopStageExecution {
+        stage_id: trace_stage.id.clone(),
+        loop_id: loop_context.loop_id.to_string(),
+        loop_iteration: loop_context.iteration,
+        loop_stage_id: loop_stage_id.to_string(),
+        source: Box::new(error),
     }
 }
 
@@ -3474,6 +3652,266 @@ outputs:
         let events = parse_trace_events(&trace);
         let draft_finished = trace_stage_finished(&events, "draft");
         assert_eq!(draft_finished["attempts"], 3);
+    }
+
+    #[tokio::test]
+    async fn loop_body_trace_records_include_iteration_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "loop-trace".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let draft_events = events
+            .iter()
+            .filter(|event| event["stage_id"] == "sample.draft")
+            .collect::<Vec<_>>();
+        assert!(draft_events
+            .iter()
+            .any(|event| event["loop_id"] == "sample" && event["loop_iteration"] == 1));
+        assert!(draft_events
+            .iter()
+            .any(|event| event["loop_id"] == "sample" && event["loop_iteration"] == 2));
+        assert!(draft_events
+            .iter()
+            .all(|event| event["loop_stage_id"] == "draft"));
+    }
+
+    #[tokio::test]
+    async fn parallel_loop_body_trace_records_include_iteration_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "parallel-loop-trace".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                    scheduler: SchedulerMode::Parallel,
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let draft_events = events
+            .iter()
+            .filter(|event| event["stage_id"] == "sample.draft")
+            .collect::<Vec<_>>();
+        assert!(draft_events
+            .iter()
+            .any(|event| event["loop_id"] == "sample" && event["loop_iteration"] == 1));
+        assert!(draft_events
+            .iter()
+            .any(|event| event["loop_id"] == "sample" && event["loop_iteration"] == 2));
+        assert!(draft_events
+            .iter()
+            .all(|event| event["loop_stage_id"] == "draft"));
+    }
+
+    #[tokio::test]
+    async fn loop_body_failure_trace_includes_iteration_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: load
+        input: missing_prompt
+"#,
+        )
+        .unwrap();
+
+        Engine::new()
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "loop-failure-trace".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .expect_err("loop body stage should fail");
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let failed = events
+            .iter()
+            .find(|event| event["event"] == "run_failed")
+            .expect("run_failed event should exist");
+
+        assert_eq!(failed["stage_id"], "sample.draft");
+        assert_eq!(failed["loop_id"], "sample");
+        assert_eq!(failed["loop_iteration"], 1);
+        assert_eq!(failed["loop_stage_id"], "draft");
+    }
+
+    #[tokio::test]
+    async fn loop_body_nonfatal_error_trace_records_terminal_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        std::fs::write(dir.path().join("prompt.txt"), "question").unwrap();
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: sample
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    on_iteration_error: break
+    final: { from: draft, require_status: success }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:text
+      - id: explode
+        op: tool
+        from: draft
+        command: ["/bin/sh", "-c", "exit 9"]
+"#,
+        )
+        .unwrap();
+        let engine = Engine::new()
+            .with_backend("mock:text", Arc::new(MockBackend::new("mock:text", "true")));
+
+        engine
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "loop-nonfatal-trace".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        assert!(events.iter().all(|event| event["event"] != "run_failed"));
+        let explode_events = events
+            .iter()
+            .filter(|event| event["stage_id"] == "sample.explode")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            explode_events
+                .iter()
+                .filter(|event| event["event"] == "stage_started")
+                .count(),
+            1
+        );
+        let terminal_events = explode_events
+            .iter()
+            .filter(|event| event["event"] == "stage_finished")
+            .collect::<Vec<_>>();
+        assert_eq!(terminal_events.len(), 1);
+        let terminal = terminal_events[0];
+        assert_eq!(terminal["status"], "error");
+        assert_eq!(terminal["loop_id"], "sample");
+        assert_eq!(terminal["loop_iteration"], 1);
+        assert_eq!(terminal["loop_stage_id"], "explode");
     }
 
     #[tokio::test]
