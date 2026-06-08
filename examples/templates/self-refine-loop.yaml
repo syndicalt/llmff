@@ -1,0 +1,35 @@
+version: 1
+inputs:
+  prompt:
+    path: ../question.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 3
+    break_on:
+      type: stage_success
+      stage: check
+    final:
+      from: draft
+      require_status: success
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+        response_format: json
+        temperature: 0
+
+      - id: check
+        op: validate_json
+        from: draft
+        schema: '{"type":"object","required":["answer"],"properties":{"answer":{"type":"string"}}}'
+outputs:
+  final:
+    from: refine
+    path: ./self-refine-loop.answer.json

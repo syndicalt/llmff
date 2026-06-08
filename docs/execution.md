@@ -31,6 +31,32 @@ retry:
 HTTP tool retries are limited to transport errors and server-side 5xx
 responses. Client-side 4xx responses are treated as permanent failures.
 
+## Loop Stages
+
+`op: loop` executes an embedded body graph sequentially. Every loop must declare
+`max_iterations`, `break_on`, and `body`. The executor stops when the break
+condition is satisfied or when `max_iterations` is reached.
+
+The body is a DAG. Body stages may reference `input`, earlier body stages, or
+named values supplied through `carry`. Body stages must not route back to
+earlier stages; repetition belongs to the loop controller.
+
+The loop stage output is a JSON value:
+
+```json
+{
+  "final": {},
+  "metadata": {
+    "iterations_run": 1,
+    "stop_reason": "break_condition",
+    "final_stage": "draft"
+  }
+}
+```
+
+Trace and event records for body stages include `loop_id`, `loop_iteration`,
+and `loop_stage_id`.
+
 ## Cache Policy
 
 Cache stages default to `cache_policy: read`, which reuses an existing matching

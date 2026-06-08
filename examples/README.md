@@ -174,6 +174,7 @@ Production-ready workflow templates live in `examples/templates/`:
 - `examples/templates/structured-extraction.yaml`
 - `examples/templates/classification.yaml`
 - `examples/templates/json-repair.yaml`
+- `examples/templates/self-refine-loop.yaml`
 - `examples/templates/rag-answer.yaml`
 - `examples/templates/batch-processing.yaml`
 - `examples/templates/tool-calling.yaml`

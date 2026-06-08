@@ -10,6 +10,10 @@ const PIPELINE_TEMPLATES: &[(&str, &str)] = &[
     ),
     ("Classification", "examples/templates/classification.yaml"),
     ("JSON Repair", "examples/templates/json-repair.yaml"),
+    (
+        "Self-Refine Loop",
+        "examples/templates/self-refine-loop.yaml",
+    ),
     ("RAG Answer", "examples/templates/rag-answer.yaml"),
     (
         "Batch Processing",
