@@ -3059,6 +3059,55 @@ outputs:
 }
 
 #[test]
+fn run_extracts_nested_json_field() {
+    let dir = tempfile::tempdir().unwrap();
+    let payload = dir.path().join("payload.json");
+    let output = dir.path().join("selected.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(
+        &payload,
+        r#"{"result":{"final_answer":{"answer":"ok","score":9}}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: selected
+    op: extract
+    from: load_payload
+    json_path: result.final_answer
+outputs:
+  final:
+    from: selected
+    path: {}
+"#,
+            payload.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(written, serde_json::json!({"answer": "ok", "score": 9}));
+}
+
+#[test]
 fn inline_graph_run_uses_input_graph_and_write_stage() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");

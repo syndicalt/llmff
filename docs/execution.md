@@ -57,6 +57,22 @@ The loop stage output is a JSON value:
 Trace and event records for body stages include `loop_id`, `loop_iteration`,
 and `loop_stage_id`.
 
+Predicate stages can produce an explicit JSON break signal for loop bodies:
+
+```yaml
+- id: ready
+  op: predicate
+  from: scored
+  field: score
+  mode: gte
+  value: 7
+
+break_on:
+  type: field_true
+  stage: ready
+  field: passed
+```
+
 ## Cache Policy
 
 Cache stages default to `cache_policy: read`, which reuses an existing matching

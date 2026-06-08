@@ -56,6 +56,23 @@ pub struct StageSpec {
     pub on_invalid: Option<String>,
     pub on_skipped: Option<String>,
     pub field: Option<String>,
+    pub json_path: Option<String>,
+    pub mode: Option<String>,
+    pub criteria: Option<String>,
+    pub score_field: Option<String>,
+    pub reason_field: Option<String>,
+    pub label_field: Option<String>,
+    pub min_score: Option<f64>,
+    pub max_score: Option<f64>,
+    pub value: Option<serde_json::Value>,
+    pub limit: Option<usize>,
+    pub dedupe_field: Option<String>,
+    #[serde(default)]
+    pub initial_carry: BTreeMap<String, serde_json::Value>,
+    pub items_from: Option<String>,
+    pub max_items: Option<usize>,
+    pub parallel: Option<bool>,
+    pub max_concurrency: Option<usize>,
     #[serde(default)]
     pub cases: BTreeMap<String, String>,
     pub default: Option<String>,
@@ -454,5 +471,43 @@ graph:
 
         let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
         assert_eq!(manifest.graph[0].break_on, Some(LoopBreakSpec::Never));
+    }
+
+    #[test]
+    fn parses_extract_json_path_field() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: answer
+    op: extract
+    from: payload
+    json_path: result.final_answer
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+
+        assert_eq!(
+            manifest.graph[0].json_path.as_deref(),
+            Some("result.final_answer")
+        );
+    }
+
+    #[test]
+    fn parses_predicate_mode_and_value_fields() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: good_enough
+    op: predicate
+    from: score
+    field: value
+    mode: gte
+    value: 7
+"#;
+
+        let manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+
+        assert_eq!(manifest.graph[0].mode.as_deref(), Some("gte"));
+        assert_eq!(manifest.graph[0].value, Some(serde_json::json!(7)));
     }
 }

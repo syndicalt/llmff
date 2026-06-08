@@ -40,6 +40,8 @@ impl Graph {
             }
 
             validate_route_targets(stage, &stage_ids)?;
+            validate_extract_stage(stage)?;
+            validate_predicate_stage(stage)?;
             validate_tool_stage(stage)?;
             validate_write_stage(stage)?;
             validate_loop_stage(stage)?;
@@ -218,6 +220,8 @@ fn validate_loop_stage(stage: &StageSpec) -> Result<(), LlmffError> {
             }
         }
         validate_route_targets(body_stage, &body_ids)?;
+        validate_extract_stage(body_stage)?;
+        validate_predicate_stage(body_stage)?;
         validate_tool_stage(body_stage)?;
         validate_write_stage(body_stage)?;
     }
@@ -263,6 +267,54 @@ fn validate_loop_break_reference(
             )));
         }
     }
+    Ok(())
+}
+
+fn validate_extract_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.op != "extract" {
+        return Ok(());
+    }
+
+    if stage.from.is_none() {
+        return Err(LlmffError::GraphValidation(
+            "extract requires from".to_string(),
+        ));
+    }
+    if stage.field.is_some() || stage.json_path.is_some() {
+        Ok(())
+    } else {
+        Err(LlmffError::GraphValidation(
+            "extract requires field or json_path".to_string(),
+        ))
+    }
+}
+
+fn validate_predicate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.op != "predicate" {
+        return Ok(());
+    }
+
+    if stage.from.is_none() {
+        return Err(LlmffError::GraphValidation(
+            "predicate requires from".to_string(),
+        ));
+    }
+    let mode = stage.mode.as_deref().unwrap_or("truthy");
+    match mode {
+        "truthy" | "exists" | "equals" | "gt" | "gte" | "lt" | "lte" | "contains" => {}
+        other => {
+            return Err(LlmffError::GraphValidation(format!(
+                "predicate mode `{other}` is not supported"
+            )));
+        }
+    }
+    if matches!(mode, "equals" | "gt" | "gte" | "lt" | "lte" | "contains") && stage.value.is_none()
+    {
+        return Err(LlmffError::GraphValidation(format!(
+            "predicate mode `{mode}` requires value"
+        )));
+    }
+
     Ok(())
 }
 
@@ -709,6 +761,73 @@ outputs:
         let error = Graph::from_manifest(manifest).unwrap_err().to_string();
 
         assert!(error.contains("tool requires command, url, or plugin transport"));
+    }
+
+    #[test]
+    fn validates_extract_stage_contract() {
+        let missing_path = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: selected
+    op: extract
+    from: source
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_path).unwrap_err().to_string();
+        assert!(error.contains("extract requires field or json_path"));
+
+        let missing_from = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: selected
+    op: extract
+    field: answer
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_from).unwrap_err().to_string();
+        assert!(error.contains("extract requires from"));
+    }
+
+    #[test]
+    fn validates_predicate_stage_contract() {
+        let missing_value = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: ready
+    op: predicate
+    from: source
+    field: score
+    mode: gte
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_value).unwrap_err().to_string();
+        assert!(error.contains("predicate mode `gte` requires value"));
+
+        let invalid_mode = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: ready
+    op: predicate
+    from: source
+    mode: unknown
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(invalid_mode).unwrap_err().to_string();
+        assert!(error.contains("predicate mode `unknown` is not supported"));
     }
 
     #[test]

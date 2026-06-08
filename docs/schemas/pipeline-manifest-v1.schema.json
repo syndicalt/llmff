@@ -131,6 +131,36 @@
         "on_invalid": { "type": "string", "minLength": 1 },
         "on_skipped": { "type": "string", "minLength": 1 },
         "field": { "type": "string", "minLength": 1 },
+        "json_path": { "type": "string" },
+        "mode": {
+          "enum": [
+            "truthy",
+            "exists",
+            "equals",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "contains"
+          ]
+        },
+        "criteria": { "type": "string", "minLength": 1 },
+        "score_field": { "type": "string", "minLength": 1 },
+        "reason_field": { "type": "string", "minLength": 1 },
+        "label_field": { "type": "string", "minLength": 1 },
+        "min_score": { "type": "number" },
+        "max_score": { "type": "number" },
+        "value": true,
+        "limit": { "type": "integer", "minimum": 1 },
+        "dedupe_field": { "type": "string", "minLength": 1 },
+        "initial_carry": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "items_from": { "type": "string", "minLength": 1 },
+        "max_items": { "type": "integer", "minimum": 1 },
+        "parallel": { "type": "boolean" },
+        "max_concurrency": { "type": "integer", "minimum": 1 },
         "cases": {
           "type": "object",
           "additionalProperties": { "type": "string", "minLength": 1 }
@@ -181,7 +211,42 @@
         "final": { "$ref": "#/$defs/loop_final" },
         "on_iteration_error": { "enum": ["fail", "continue", "break"] },
         "retain_iterations": { "enum": ["none", "summaries", "all"] }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "op": { "const": "extract" } },
+            "required": ["op"]
+          },
+          "then": {
+            "required": ["from"],
+            "anyOf": [
+              { "required": ["field"] },
+              { "required": ["json_path"] }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": { "op": { "const": "predicate" } },
+            "required": ["op"]
+          },
+          "then": {
+            "required": ["from"],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "mode": { "enum": ["equals", "gt", "gte", "lt", "lte"] }
+                  },
+                  "required": ["mode"]
+                },
+                "then": { "required": ["value"] }
+              }
+            ]
+          }
+        }
+      ]
     }
   }
 }

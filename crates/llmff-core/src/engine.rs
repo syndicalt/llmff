@@ -662,6 +662,20 @@ impl Engine {
                 }
                 Ok(())
             }
+            "extract" => {
+                require_stage_field(stage, stage.from.as_deref(), "extract requires from")?;
+                if stage.field.is_none() && stage.json_path.is_none() {
+                    return Err(stage_validation_error(
+                        stage,
+                        "extract requires field or json_path",
+                    ));
+                }
+                Ok(())
+            }
+            "predicate" => {
+                require_stage_field(stage, stage.from.as_deref(), "predicate requires from")?;
+                validate_predicate_stage(stage)
+            }
             "system" => {
                 require_stage_field(stage, stage.from.as_deref(), "system requires from")?;
                 Ok(())
@@ -820,7 +834,8 @@ impl Engine {
                 )
                 .await
             }
-            "validate_json" | "system" | "template" | "retrieve" | "rerank" => {
+            "validate_json" | "system" | "template" | "retrieve" | "rerank" | "extract"
+            | "predicate" => {
                 let input = stage
                     .from
                     .as_ref()
@@ -1793,6 +1808,27 @@ fn validate_rerank_strategy(stage: &StageSpec) -> Result<(), LlmffError> {
     validate_retrieval_strategy(stage, "rerank")
 }
 
+fn validate_predicate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    let mode = stage.mode.as_deref().unwrap_or("truthy");
+    match mode {
+        "truthy" | "exists" | "equals" | "gt" | "gte" | "lt" | "lte" | "contains" => {}
+        other => {
+            return Err(stage_validation_error(
+                stage,
+                format!("predicate mode `{other}` is not supported"),
+            ));
+        }
+    }
+    if matches!(mode, "equals" | "gt" | "gte" | "lt" | "lte") && stage.value.is_none() {
+        return Err(stage_validation_error(
+            stage,
+            format!("predicate mode `{mode}` requires value"),
+        ));
+    }
+
+    Ok(())
+}
+
 fn validate_retrieval_strategy(stage: &StageSpec, operation: &str) -> Result<(), LlmffError> {
     match stage.strategy.as_deref().unwrap_or("lexical") {
         "lexical" | "embedding" | "command" => Ok(()),
@@ -2032,7 +2068,7 @@ fn infer_stage_value_kind(
                 InputFormat::Json => StageValueKind::Json,
             })
             .unwrap_or(StageValueKind::Text),
-        "validate_json" | "retrieve" | "rerank" => StageValueKind::Json,
+        "validate_json" | "retrieve" | "rerank" | "extract" | "predicate" => StageValueKind::Json,
         "write" | "cache" => stage
             .from
             .as_ref()
