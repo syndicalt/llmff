@@ -323,12 +323,12 @@ fn validate_map_stage(stage: &StageSpec) -> Result<(), LlmffError> {
             "map requires a non-empty body".to_string(),
         ));
     }
-    if stage.parallel == Some(true) {
+    if stage.parallel == Some(true) && stage.max_concurrency.unwrap_or(0) == 0 {
         return Err(LlmffError::GraphValidation(
-            "parallel map execution is not supported yet".to_string(),
+            "parallel map execution requires max_concurrency greater than 0".to_string(),
         ));
     }
-    if stage.max_concurrency.is_some() {
+    if stage.parallel != Some(true) && stage.max_concurrency.is_some() {
         return Err(LlmffError::GraphValidation(
             "max_concurrency requires parallel map execution".to_string(),
         ));
@@ -1074,6 +1074,55 @@ graph:
         .unwrap();
         let error = Graph::from_manifest(invalid_mode).unwrap_err().to_string();
         assert!(error.contains("predicate mode `unknown` is not supported"));
+    }
+
+    #[test]
+    fn validates_parallel_map_concurrency_contract() {
+        let missing_cap = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: load_payload
+    op: load
+  - id: names
+    op: map
+    from: load_payload
+    items_from: items
+    max_items: 3
+    parallel: true
+    body:
+      - id: name
+        op: extract
+        from: item
+        field: name
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_cap).unwrap_err().to_string();
+        assert!(error.contains("parallel map execution requires max_concurrency"));
+
+        let valid = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: load_payload
+    op: load
+  - id: names
+    op: map
+    from: load_payload
+    items_from: items
+    max_items: 3
+    parallel: true
+    max_concurrency: 2
+    body:
+      - id: name
+        op: extract
+        from: item
+        field: name
+"#,
+        )
+        .unwrap();
+        Graph::from_manifest(valid).expect("bounded parallel map should validate");
     }
 
     #[test]

@@ -318,7 +318,16 @@
             "required": ["op"]
           },
           "then": {
-            "required": ["from", "items_from", "max_items", "body"]
+            "required": ["from", "items_from", "max_items", "body"],
+            "allOf": [
+              {
+                "if": {
+                  "properties": { "parallel": { "const": true } },
+                  "required": ["parallel"]
+                },
+                "then": { "required": ["max_concurrency"] }
+              }
+            ]
           }
         }
       ]

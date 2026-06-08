@@ -38,7 +38,7 @@ pub(super) fn score(
         });
     }
     if let Some(min_score) = spec.min_score {
-        if score < min_score as f64 {
+        if score < min_score {
             return Err(LlmffError::StageExecution {
                 stage_id: spec.id.clone(),
                 message: format!("score {score} is below min_score {min_score}"),
@@ -46,7 +46,7 @@ pub(super) fn score(
         }
     }
     if let Some(max_score) = spec.max_score {
-        if score > max_score as f64 {
+        if score > max_score {
             return Err(LlmffError::StageExecution {
                 stage_id: spec.id.clone(),
                 message: format!("score {score} is above max_score {max_score}"),

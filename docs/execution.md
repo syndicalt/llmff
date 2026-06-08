@@ -80,17 +80,23 @@ pipeline run. It is bounded by `max_items`; if the input array is longer, only
 the first `max_items` values are processed. This is separate from CLI batch
 mode, which runs the whole manifest once per input line.
 
+Map execution is sequential by default. Set `parallel: true` with required
+`max_concurrency` to process items concurrently while preserving deterministic
+output order by item index.
+
 ```yaml
 - id: map_names
   op: map
   from: load_payload
   items_from: items
   max_items: 3
+  parallel: true
+  max_concurrency: 2
   body:
     - id: name
       op: extract
       from: item
-      path: name
+      field: name
 ```
 
 Each map body receives the reserved `item` value for the current array entry.
@@ -101,15 +107,17 @@ The map stage output is a JSON value:
   "items": [],
   "metadata": {
     "items_run": 3,
-    "max_items": 3,
-    "body_stage_count": 1,
-    "final_stage": "name"
+    "items_total": 5,
+    "stop_reason": "max_items",
+    "parallel": true
   }
 }
 ```
 
 Use `llmff inspect --format json` to read `items_from`, `max_items`,
-`body_stage_count`, and `max_expanded_stage_count` before dispatch.
+`parallel`, `max_concurrency`, `body_stage_count`, and
+`max_expanded_stage_count` before dispatch. Trace and event records for map
+body stages include `map_id`, `map_index`, and `map_stage_id`.
 
 ## Cache Policy
 

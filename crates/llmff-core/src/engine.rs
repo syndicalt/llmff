@@ -107,6 +107,34 @@ struct ToolAttemptResult {
     attempts: usize,
 }
 
+struct MapItemResult {
+    index: usize,
+    status: &'static str,
+    value: serde_json::Value,
+    trace_events: Vec<TraceEvent>,
+}
+
+struct MapItemExecution<'a, 'ctx> {
+    context: &'a ExecutionContext<'ctx>,
+    map_stage: &'a StageSpec,
+    source: &'a Value,
+    ordered_body: &'a [StageSpec],
+    final_stage_id: &'a str,
+    index: usize,
+    item: serde_json::Value,
+    stream_writer: Option<&'a mut StageStreamWriter>,
+    trace_enabled: bool,
+}
+
+#[derive(Clone, Copy)]
+struct MapTraceContext<'a> {
+    run_id: &'a str,
+    map_stage: &'a StageSpec,
+    index: usize,
+    body_stage: &'a StageSpec,
+    trace_stage: &'a StageSpec,
+}
+
 pub(super) struct PluginExecutionContext<'a> {
     tool_transports: &'a BTreeMap<String, PluginToolTransport>,
     stages: &'a BTreeMap<String, PluginStage>,
@@ -342,6 +370,9 @@ impl Engine {
                 loop_id: None,
                 loop_iteration: None,
                 loop_stage_id: None,
+                map_id: None,
+                map_index: None,
+                map_stage_id: None,
                 op: None,
                 status: None,
                 timestamp_ms: timestamp_ms(),
@@ -417,6 +448,9 @@ impl Engine {
                 loop_id: None,
                 loop_iteration: None,
                 loop_stage_id: None,
+                map_id: None,
+                map_index: None,
+                map_stage_id: None,
                 op: None,
                 status: Some("succeeded".to_string()),
                 timestamp_ms: timestamp_ms(),
@@ -471,6 +505,9 @@ impl Engine {
                 loop_id,
                 loop_iteration,
                 loop_stage_id: loop_context.map(|_| loop_stage_id.to_string()),
+                map_id: None,
+                map_index: None,
+                map_stage_id: None,
                 op: Some(stage.op.clone()),
                 status: None,
                 timestamp_ms: timestamp_ms(),
@@ -550,6 +587,9 @@ impl Engine {
                 loop_stage_id: finish
                     .loop_context
                     .map(|_| finish.loop_stage_id.to_string()),
+                map_id: None,
+                map_index: None,
+                map_stage_id: None,
                 op: Some(trace_stage.op.clone()),
                 status: Some(status_name),
                 timestamp_ms: timestamp_ms(),
@@ -591,6 +631,9 @@ impl Engine {
                 loop_id: Some(loop_context.loop_id.to_string()),
                 loop_iteration: Some(loop_context.iteration),
                 loop_stage_id: Some(loop_stage_id.to_string()),
+                map_id: None,
+                map_index: None,
+                map_stage_id: None,
                 op: Some(trace_stage.op.clone()),
                 status: Some("error".to_string()),
                 timestamp_ms: timestamp_ms(),
@@ -802,13 +845,13 @@ impl Engine {
                 if stage.body.is_empty() {
                     return Err(stage_validation_error(stage, "map requires body"));
                 }
-                if stage.parallel == Some(true) {
+                if stage.parallel == Some(true) && stage.max_concurrency.unwrap_or(0) == 0 {
                     return Err(stage_validation_error(
                         stage,
-                        "parallel map execution is not supported yet",
+                        "parallel map execution requires max_concurrency greater than 0",
                     ));
                 }
-                if stage.max_concurrency.is_some() {
+                if stage.parallel != Some(true) && stage.max_concurrency.is_some() {
                     return Err(stage_validation_error(
                         stage,
                         "max_concurrency requires parallel map execution",
@@ -1193,7 +1236,7 @@ impl Engine {
         stage: &StageSpec,
         statuses: &BTreeMap<String, StageStatus>,
         mut stream_writer: Option<&mut StageStreamWriter>,
-        _trace: Option<&mut Vec<TraceWriter>>,
+        trace: Option<&mut Vec<TraceWriter>>,
     ) -> Result<StageStatus, LlmffError> {
         let source = stage
             .from
@@ -1240,42 +1283,74 @@ impl Engine {
                 stage_id: stage.id.clone(),
                 message: "map requires final stage".to_string(),
             })?;
-        let mut mapped_items = Vec::with_capacity(item_count);
-
-        for (index, item) in items.iter().take(item_count).enumerate() {
-            let mut body_statuses = BTreeMap::new();
-            body_statuses.insert("input".to_string(), StageStatus::Success(source.clone()));
-            body_statuses.insert(
-                "item".to_string(),
-                StageStatus::Success(Value::Json(item.clone())),
-            );
-
-            for body_stage in &ordered_body {
-                let outcome = Box::pin(self.execute_stage_with_timeout(
-                    context,
-                    body_stage,
-                    &body_statuses,
-                    stream_writer.as_deref_mut(),
-                    None,
-                ))
-                .await?;
-                body_statuses.insert(body_stage.id.clone(), outcome.status);
+        let trace_enabled = trace.is_some();
+        let parallel = stage.parallel.unwrap_or(false);
+        let item_inputs = items
+            .iter()
+            .take(item_count)
+            .cloned()
+            .enumerate()
+            .collect::<Vec<_>>();
+        let mut item_results = if parallel {
+            let max_concurrency = stage.max_concurrency.unwrap_or(1).max(1);
+            futures::stream::iter(item_inputs)
+                .map(|(index, item)| {
+                    self.execute_map_item(MapItemExecution {
+                        context,
+                        map_stage: stage,
+                        source: &source,
+                        ordered_body: &ordered_body,
+                        final_stage_id,
+                        index,
+                        item,
+                        stream_writer: None,
+                        trace_enabled,
+                    })
+                })
+                .buffer_unordered(max_concurrency)
+                .collect::<Vec<_>>()
+                .await
+        } else {
+            let mut results = Vec::with_capacity(item_count);
+            for (index, item) in item_inputs {
+                results.push(
+                    self.execute_map_item(MapItemExecution {
+                        context,
+                        map_stage: stage,
+                        source: &source,
+                        ordered_body: &ordered_body,
+                        final_stage_id,
+                        index,
+                        item,
+                        stream_writer: stream_writer.as_deref_mut(),
+                        trace_enabled,
+                    })
+                    .await,
+                );
             }
-
-            let final_status =
-                body_statuses
-                    .get(final_stage_id)
-                    .ok_or_else(|| LlmffError::StageExecution {
-                        stage_id: stage.id.clone(),
-                        message: format!("map final stage `{final_stage_id}` did not run"),
-                    })?;
-            let (status, value) = map_item_output(stage, final_stage_id, final_status)?;
-            mapped_items.push(serde_json::json!({
-                "index": index,
-                "status": status,
-                "value": value
-            }));
+            results
         }
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
+
+        item_results.sort_by_key(|item| item.index);
+        if let Some(trace) = trace {
+            for item in &item_results {
+                for event in &item.trace_events {
+                    write_trace(trace, event.clone())?;
+                }
+            }
+        }
+        let mapped_items = item_results
+            .into_iter()
+            .map(|item| {
+                serde_json::json!({
+                    "index": item.index,
+                    "status": item.status,
+                    "value": item.value
+                })
+            })
+            .collect::<Vec<_>>();
 
         let stop_reason = if items.len() > item_count {
             "max_items"
@@ -1289,9 +1364,83 @@ impl Engine {
                 "items_run": item_count,
                 "items_total": items.len(),
                 "stop_reason": stop_reason,
-                "parallel": false
+                "parallel": parallel
             }
         }))))
+    }
+
+    async fn execute_map_item(
+        &self,
+        mut item_context: MapItemExecution<'_, '_>,
+    ) -> Result<MapItemResult, LlmffError> {
+        let mut trace_events = Vec::new();
+        let mut body_statuses = BTreeMap::new();
+        body_statuses.insert(
+            "input".to_string(),
+            StageStatus::Success(item_context.source.clone()),
+        );
+        body_statuses.insert(
+            "item".to_string(),
+            StageStatus::Success(Value::Json(item_context.item)),
+        );
+
+        for body_stage in item_context.ordered_body {
+            let trace_stage =
+                map_trace_stage(item_context.map_stage, item_context.index, body_stage);
+            let trace_context = MapTraceContext {
+                run_id: item_context.context.run_id,
+                map_stage: item_context.map_stage,
+                index: item_context.index,
+                body_stage,
+                trace_stage: &trace_stage,
+            };
+            let stage_started = Instant::now();
+            if item_context.trace_enabled {
+                trace_events.push(self.map_trace_started(trace_context));
+            }
+            let outcome = match Box::pin(self.execute_stage_with_timeout(
+                item_context.context,
+                body_stage,
+                &body_statuses,
+                item_context.stream_writer.as_deref_mut(),
+                None,
+            ))
+            .await
+            {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    if item_context.trace_enabled {
+                        trace_events.push(self.map_trace_error(trace_context, stage_started));
+                    }
+                    return Err(error);
+                }
+            };
+            if item_context.trace_enabled {
+                trace_events.push(self.map_trace_finished(trace_context, stage_started, &outcome));
+            }
+            body_statuses.insert(body_stage.id.clone(), outcome.status);
+        }
+
+        let final_status = body_statuses
+            .get(item_context.final_stage_id)
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: item_context.map_stage.id.clone(),
+                message: format!(
+                    "map final stage `{}` did not run",
+                    item_context.final_stage_id
+                ),
+            })?;
+        let (status, value) = map_item_output(
+            item_context.map_stage,
+            item_context.final_stage_id,
+            final_status,
+        )?;
+        Ok(MapItemResult {
+            index: item_context.index,
+            status,
+            value,
+            trace_events,
+        })
     }
 
     fn execute_load(
@@ -1743,6 +1892,113 @@ impl Engine {
         metadata
     }
 
+    fn map_trace_started(&self, context: MapTraceContext<'_>) -> TraceEvent {
+        TraceEvent {
+            run_id: context.run_id.to_string(),
+            event: "stage_started".to_string(),
+            stage_id: Some(context.trace_stage.id.clone()),
+            loop_id: None,
+            loop_iteration: None,
+            loop_stage_id: None,
+            map_id: Some(context.map_stage.id.clone()),
+            map_index: Some(context.index),
+            map_stage_id: Some(context.body_stage.id.clone()),
+            op: Some(context.body_stage.op.clone()),
+            status: None,
+            timestamp_ms: timestamp_ms(),
+            duration_ms: None,
+            attempts: None,
+            model: None,
+            backend: None,
+            provider_model: None,
+            validation_errors: None,
+            tool_kind: None,
+            tool_target: None,
+            output_path: None,
+            prompt_tokens: None,
+            completion_tokens: None,
+            total_tokens: None,
+            cache_hit: None,
+            cache_path: None,
+            failure_kind: None,
+            failure_message: None,
+        }
+    }
+
+    fn map_trace_finished(
+        &self,
+        context: MapTraceContext<'_>,
+        stage_started: Instant,
+        outcome: &StageOutcome,
+    ) -> TraceEvent {
+        let status_name = status_name(&outcome.status).to_string();
+        let metadata =
+            self.trace_metadata(context.body_stage, &outcome.status, outcome.usage.as_ref());
+        TraceEvent {
+            run_id: context.run_id.to_string(),
+            event: "stage_finished".to_string(),
+            stage_id: Some(context.trace_stage.id.clone()),
+            loop_id: None,
+            loop_iteration: None,
+            loop_stage_id: None,
+            map_id: Some(context.map_stage.id.clone()),
+            map_index: Some(context.index),
+            map_stage_id: Some(context.body_stage.id.clone()),
+            op: Some(context.body_stage.op.clone()),
+            status: Some(status_name),
+            timestamp_ms: timestamp_ms(),
+            duration_ms: Some(stage_started.elapsed().as_millis()),
+            attempts: outcome.attempts,
+            model: metadata.model,
+            backend: metadata.backend,
+            provider_model: metadata.provider_model,
+            validation_errors: metadata.validation_errors,
+            tool_kind: metadata.tool_kind,
+            tool_target: metadata.tool_target,
+            output_path: metadata.output_path,
+            prompt_tokens: metadata.prompt_tokens,
+            completion_tokens: metadata.completion_tokens,
+            total_tokens: metadata.total_tokens,
+            cache_hit: outcome.cache_hit,
+            cache_path: outcome.cache_path.clone(),
+            failure_kind: None,
+            failure_message: None,
+        }
+    }
+
+    fn map_trace_error(&self, context: MapTraceContext<'_>, stage_started: Instant) -> TraceEvent {
+        TraceEvent {
+            run_id: context.run_id.to_string(),
+            event: "stage_finished".to_string(),
+            stage_id: Some(context.trace_stage.id.clone()),
+            loop_id: None,
+            loop_iteration: None,
+            loop_stage_id: None,
+            map_id: Some(context.map_stage.id.clone()),
+            map_index: Some(context.index),
+            map_stage_id: Some(context.body_stage.id.clone()),
+            op: Some(context.body_stage.op.clone()),
+            status: Some("error".to_string()),
+            timestamp_ms: timestamp_ms(),
+            duration_ms: Some(stage_started.elapsed().as_millis()),
+            attempts: None,
+            model: None,
+            backend: None,
+            provider_model: None,
+            validation_errors: None,
+            tool_kind: None,
+            tool_target: None,
+            output_path: None,
+            prompt_tokens: None,
+            completion_tokens: None,
+            total_tokens: None,
+            cache_hit: None,
+            cache_path: None,
+            failure_kind: None,
+            failure_message: None,
+        }
+    }
+
     fn resolve_backend_metadata(&self, model: &str) -> Option<ResolvedBackendMetadata> {
         if self.backends.contains_key(model) {
             return Some(ResolvedBackendMetadata {
@@ -1764,6 +2020,12 @@ impl Engine {
 fn loop_trace_stage(loop_stage: &StageSpec, body_stage: &StageSpec) -> StageSpec {
     let mut trace_stage = body_stage.clone();
     trace_stage.id = format!("{}.{}", loop_stage.id, body_stage.id);
+    trace_stage
+}
+
+fn map_trace_stage(map_stage: &StageSpec, index: usize, body_stage: &StageSpec) -> StageSpec {
+    let mut trace_stage = body_stage.clone();
+    trace_stage.id = format!("{}[{index}].{}", map_stage.id, body_stage.id);
     trace_stage
 }
 
@@ -4173,6 +4435,137 @@ graph:
         assert!(draft_events
             .iter()
             .all(|event| event["loop_stage_id"] == "draft"));
+    }
+
+    #[tokio::test]
+    async fn map_body_trace_records_include_item_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace_path = dir.path().join("trace.jsonl");
+        let output_path = dir.path().join("mapped.json");
+        std::fs::write(
+            dir.path().join("items.json"),
+            r#"{"items":[{"name":"alpha"},{"name":"beta"}]}"#,
+        )
+        .unwrap();
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: items.json
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: names
+    op: map
+    from: load_payload
+    items_from: items
+    max_items: 2
+    final: {{ from: name, require_status: success }}
+    body:
+      - id: name
+        op: extract
+        from: item
+        field: name
+outputs:
+  final:
+    from: names
+    path: {}
+"#,
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest_with_options(
+                manifest,
+                dir.path(),
+                RunOptions {
+                    run_id: "map-trace".to_string(),
+                    trace_path: Some(trace_path.clone()),
+                    ..RunOptions::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let trace = std::fs::read_to_string(trace_path).unwrap();
+        let events = parse_trace_events(&trace);
+        let name_events = events
+            .iter()
+            .filter(|event| {
+                event["stage_id"] == "names[0].name" || event["stage_id"] == "names[1].name"
+            })
+            .collect::<Vec<_>>();
+        assert!(name_events
+            .iter()
+            .any(|event| event["map_id"] == "names" && event["map_index"] == 0));
+        assert!(name_events
+            .iter()
+            .any(|event| event["map_id"] == "names" && event["map_index"] == 1));
+        assert!(name_events
+            .iter()
+            .all(|event| event["map_stage_id"] == "name"));
+    }
+
+    #[tokio::test]
+    async fn parallel_map_preserves_output_order_by_item_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let output_path = dir.path().join("mapped.json");
+        std::fs::write(
+            dir.path().join("items.json"),
+            r#"{"items":[{"name":"alpha"},{"name":"beta"},{"name":"gamma"}]}"#,
+        )
+        .unwrap();
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: items.json
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: names
+    op: map
+    from: load_payload
+    items_from: items
+    max_items: 3
+    parallel: true
+    max_concurrency: 2
+    final: {{ from: name, require_status: success }}
+    body:
+      - id: name
+        op: extract
+        from: item
+        field: name
+outputs:
+  final:
+    from: names
+    path: {}
+"#,
+            output_path.display()
+        ))
+        .unwrap();
+
+        Engine::new()
+            .run_manifest(manifest, dir.path())
+            .await
+            .expect("parallel map should run successfully");
+
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(output_path).unwrap()).unwrap();
+        assert_eq!(written["metadata"]["parallel"], true);
+        assert_eq!(written["items"][0]["index"], 0);
+        assert_eq!(written["items"][0]["value"], "alpha");
+        assert_eq!(written["items"][1]["index"], 1);
+        assert_eq!(written["items"][1]["value"], "beta");
+        assert_eq!(written["items"][2]["index"], 2);
+        assert_eq!(written["items"][2]["value"], "gamma");
     }
 
     #[tokio::test]

@@ -65,9 +65,11 @@ per-iteration progress without owning the loop body itself.
 
 When the manifest contains `op: map`, treat it as bounded in-pipeline
 collection processing, not as job scheduling. Use inspect metadata to read the
-item source, `max_items`, body stage count, and maximum expanded stage count.
-Use CLI batch mode when the supervisor needs independent per-item exit codes or
-artifact directories.
+item source, `max_items`, optional `parallel` and `max_concurrency`, body stage
+count, and maximum expanded stage count. Trace and event records from map
+bodies include `map_id`, `map_index`, and `map_stage_id`. Use CLI batch mode
+when the supervisor needs independent per-item exit codes or artifact
+directories.
 
 For tool loops, keep the planning boundary explicit. The supervisor owns the
 available tool catalog and task-level policy; `llmff` executes the declared
