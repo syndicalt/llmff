@@ -149,6 +149,17 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             capabilities: &["status-routing", "json-field-routing"],
         },
         StageMetadata {
+            name: "loop",
+            kind: "control-flow",
+            required_fields: &["from", "max_iterations", "break_on", "body"],
+            optional_fields: &["carry", "final", "on_iteration_error", "retain_iterations"],
+            capabilities: &[
+                "bounded-iteration",
+                "body-subgraph",
+                "explicit-break-condition",
+            ],
+        },
+        StageMetadata {
             name: "tool",
             kind: "integration",
             required_fields: &["from", "command|url|transport"],
@@ -230,6 +241,13 @@ mod tests {
         assert_eq!(infer.kind, "model");
         assert!(infer.required_fields.contains(&"model"));
         assert!(infer.capabilities.contains(&"sampling"));
+
+        let loop_stage = stages
+            .iter()
+            .find(|stage| stage.name == "loop")
+            .expect("loop stage should be described");
+        assert_eq!(loop_stage.kind, "control-flow");
+        assert!(loop_stage.capabilities.contains(&"bounded-iteration"));
 
         let tool = stages
             .iter()

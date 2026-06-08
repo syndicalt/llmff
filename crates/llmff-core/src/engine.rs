@@ -621,6 +621,26 @@ impl Engine {
                 }
                 Ok(())
             }
+            "loop" => {
+                require_stage_field(stage, stage.from.as_deref(), "loop requires from")?;
+                if stage.max_iterations.unwrap_or(0) == 0 {
+                    return Err(stage_validation_error(
+                        stage,
+                        "loop requires max_iterations greater than 0",
+                    ));
+                }
+                if stage.break_on.is_none() {
+                    return Err(stage_validation_error(stage, "loop requires break_on"));
+                }
+                if stage.body.is_empty() {
+                    return Err(stage_validation_error(stage, "loop requires body"));
+                }
+                validate_loop_policy_fields(stage)?;
+                for body_stage in &stage.body {
+                    self.validate_stage(body_stage, plugin_stages, plugin_samplers)?;
+                }
+                Ok(())
+            }
             "tool" => {
                 require_stage_field(stage, stage.from.as_deref(), "tool requires from")?;
                 Ok(())
@@ -1346,6 +1366,36 @@ fn validate_execution_options(stage: &StageSpec) -> Result<(), LlmffError> {
         }
     }
 
+    Ok(())
+}
+
+fn validate_loop_policy_fields(stage: &StageSpec) -> Result<(), LlmffError> {
+    if let Some(policy) = stage.on_iteration_error.as_deref() {
+        if !matches!(policy, "fail" | "continue" | "break") {
+            return Err(stage_validation_error(
+                stage,
+                "on_iteration_error must be fail, continue, or break",
+            ));
+        }
+    }
+    if let Some(retain) = stage.retain_iterations.as_deref() {
+        if !matches!(retain, "none" | "summaries" | "all") {
+            return Err(stage_validation_error(
+                stage,
+                "retain_iterations must be none, summaries, or all",
+            ));
+        }
+    }
+    if let Some(final_output) = &stage.final_output {
+        if let Some(require_status) = final_output.require_status.as_deref() {
+            if !matches!(require_status, "success" | "invalid" | "any") {
+                return Err(stage_validation_error(
+                    stage,
+                    "final.require_status must be success, invalid, or any",
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -2654,6 +2704,107 @@ graph:
         assert!(error
             .to_string()
             .contains("rerank strategy must be lexical, embedding, or command"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_loop_without_from() {
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: refine
+    op: loop
+    max_iterations: 2
+    break_on: { type: never }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#,
+        )
+        .unwrap();
+
+        let error = engine.validate_manifest(manifest).unwrap_err().to_string();
+        assert!(error.contains("loop requires from"));
+    }
+
+    #[test]
+    fn validate_manifest_rejects_invalid_loop_error_policy() {
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    on_iteration_error: retry_forever
+    break_on: { type: never }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+"#,
+        )
+        .unwrap();
+
+        let error = engine.validate_manifest(manifest).unwrap_err().to_string();
+        assert!(error.contains("on_iteration_error must be fail, continue, or break"));
+    }
+
+    #[test]
+    fn validate_manifest_accepts_valid_loop_body() {
+        let engine = Engine::new().with_backend(
+            "mock:json",
+            Arc::new(MockBackend::new("mock:json", r#"{"answer":"ok"}"#)),
+        );
+        let manifest = Manifest::from_yaml_str(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: prompt.txt
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: refine
+    op: loop
+    from: load_prompt
+    max_iterations: 2
+    break_on: { type: never }
+    body:
+      - id: draft
+        op: infer
+        from: input
+        model: mock:json
+      - id: check
+        op: validate_json
+        from: draft
+        schema: '{"type":"object","required":["answer"]}'
+"#,
+        )
+        .unwrap();
+
+        engine
+            .validate_manifest(manifest)
+            .expect("valid loop body should pass validation");
     }
 
     #[tokio::test]
