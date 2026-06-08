@@ -24,10 +24,10 @@ Install from GitHub:
 cargo install --git https://github.com/syndicalt/llmff llmff
 ```
 
-Install the stable `v1.0.0` release with:
+Install the stable `v1.1.0` release with:
 
 ```bash
-cargo install --git https://github.com/syndicalt/llmff --tag v1.0.0 llmff
+cargo install --git https://github.com/syndicalt/llmff --tag v1.1.0 llmff
 ```
 
 For a local checkout:
@@ -66,33 +66,33 @@ scripts/smoke-install.sh --path .
 Smoke test a generated release archive without installing:
 
 ```bash
-scripts/smoke-archive.sh --archive dist/llmff-1.0.0-x86_64-unknown-linux-gnu.tar.gz
+scripts/smoke-archive.sh --archive dist/llmff-1.1.0-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 Run the release metadata preflight before creating or pushing a release tag:
 
 ```bash
-scripts/release-preflight.sh v1.0.0
+scripts/release-preflight.sh v1.1.0
 ```
 
 After release-tag CI completes, verify a published release's assets, checksums,
 and host-compatible packages:
 
 ```bash
-scripts/check-release-assets.sh v1.0.0
+scripts/check-release-assets.sh v1.1.0
 ```
 
 Generate and validate Windows MSI packaging metadata:
 
 ```bash
-scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 1.0.0 --target x86_64-pc-windows-msvc --out-dir dist --emit-wxs-only
+scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 1.1.0 --target x86_64-pc-windows-msvc --out-dir dist --emit-wxs-only
 ```
 
 Build a Windows MSI on a Windows host:
 
 ```bash
 dotnet tool restore
-scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 1.0.0 --target x86_64-pc-windows-msvc --out-dir dist
+scripts/package-windows-msi.sh --binary target/release/llmff.exe --version 1.1.0 --target x86_64-pc-windows-msvc --out-dir dist
 ```
 
 Smoke test a staged Windows MSI payload without installing:
@@ -104,19 +104,19 @@ scripts/smoke-windows-msi.sh --payload-root dist/windows-msi-smoke-root
 Generate and validate macOS installer payload metadata:
 
 ```bash
-scripts/package-macos-pkg.sh --binary target/release/llmff --version 1.0.0 --target aarch64-apple-darwin --out-dir dist --emit-payload-only
+scripts/package-macos-pkg.sh --binary target/release/llmff --version 1.1.0 --target aarch64-apple-darwin --out-dir dist --emit-payload-only
 ```
 
 Smoke test a generated macOS installer payload without installing:
 
 ```bash
-scripts/smoke-macos-pkg.sh --payload-root dist/llmff-1.0.0-aarch64-apple-darwin.pkgroot
+scripts/smoke-macos-pkg.sh --payload-root dist/llmff-1.1.0-aarch64-apple-darwin.pkgroot
 ```
 
 Smoke test a generated Debian package without root:
 
 ```bash
-scripts/smoke-deb.sh --deb dist/llmff_1.0.0_amd64.deb
+scripts/smoke-deb.sh --deb dist/llmff_1.1.0_amd64.deb
 ```
 
 Release tags build compressed binary archives, Ubuntu/Debian `.deb` packages, Arch `PKGBUILD` metadata, unsigned Windows MSI packages, and unsigned macOS `.pkg` packages in CI. Trusted Windows Authenticode signing and Apple Developer ID signing/notarization are deferred until paid credentials are available. See [`docs/platform-support.md`](docs/platform-support.md) for the current target matrix.
