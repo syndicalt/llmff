@@ -3108,6 +3108,66 @@ outputs:
 }
 
 #[test]
+fn run_accumulates_with_state_from() {
+    let dir = tempfile::tempdir().unwrap();
+    let previous = dir.path().join("previous.json");
+    let current = dir.path().join("current.json");
+    let output = dir.path().join("history.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(&previous, r#"[{"id":"a","value":1},{"id":"b","value":2}]"#).unwrap();
+    std::fs::write(&current, r#"{"id":"a","value":3}"#).unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  previous:
+    path: {}
+    format: json
+  current:
+    path: {}
+    format: json
+graph:
+  - id: load_previous
+    op: load
+    input: previous
+  - id: load_current
+    op: load
+    input: current
+  - id: history
+    op: accumulate
+    from: load_current
+    state_from: load_previous
+    mode: append
+    limit: 2
+    dedupe_field: id
+outputs:
+  final:
+    from: history
+    path: {}
+"#,
+            previous.display(),
+            current.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(
+        written,
+        serde_json::json!([{"id": "b", "value": 2}, {"id": "a", "value": 3}])
+    );
+}
+
+#[test]
 fn inline_graph_run_uses_input_graph_and_write_stage() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");

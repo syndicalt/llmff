@@ -39,6 +39,7 @@ pub struct StageSpec {
     pub op: String,
     pub input: Option<String>,
     pub from: Option<String>,
+    pub state_from: Option<String>,
     pub path: Option<String>,
     pub model: Option<String>,
     pub temperature: Option<f32>,

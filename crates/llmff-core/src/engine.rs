@@ -19,7 +19,7 @@ use crate::plugin::{
     discover_plugin_samplers, discover_plugin_stages, discover_plugin_tool_transports,
     PluginSampler, PluginStage, PluginToolTransport,
 };
-use crate::stage::execute_deterministic_stage;
+use crate::stage::{accumulate, execute_deterministic_stage};
 use crate::trace::{TraceEvent, TraceWriter};
 use crate::value::{Message, StageStatus, Value};
 
@@ -676,6 +676,10 @@ impl Engine {
                 require_stage_field(stage, stage.from.as_deref(), "predicate requires from")?;
                 validate_predicate_stage(stage)
             }
+            "accumulate" => {
+                require_stage_field(stage, stage.from.as_deref(), "accumulate requires from")?;
+                validate_accumulate_stage(stage)
+            }
             "system" => {
                 require_stage_field(stage, stage.from.as_deref(), "system requires from")?;
                 Ok(())
@@ -843,6 +847,19 @@ impl Engine {
                     .and_then(success_value);
                 execute_deterministic_stage(stage, input, context.cwd)
                     .map(StageOutcome::without_usage)
+            }
+            "accumulate" => {
+                let input = stage
+                    .from
+                    .as_ref()
+                    .and_then(|parent| statuses.get(parent))
+                    .and_then(success_value);
+                let state = stage
+                    .state_from
+                    .as_ref()
+                    .and_then(|parent| statuses.get(parent))
+                    .and_then(success_value);
+                accumulate(stage, input, state, context.cwd).map(StageOutcome::without_usage)
             }
             "cache" => self.execute_cache(stage, statuses, context.cwd),
             "repair" => {
@@ -1829,6 +1846,30 @@ fn validate_predicate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
     Ok(())
 }
 
+fn validate_accumulate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    let mode = stage.mode.as_deref().unwrap_or("append");
+    if !matches!(mode, "append" | "extend" | "merge_object") {
+        return Err(stage_validation_error(
+            stage,
+            format!("accumulate mode `{mode}` is not supported"),
+        ));
+    }
+    if mode == "merge_object" && stage.dedupe_field.is_some() {
+        return Err(stage_validation_error(
+            stage,
+            "dedupe_field is only supported for array accumulation",
+        ));
+    }
+    if mode == "merge_object" && stage.limit.is_some() {
+        return Err(stage_validation_error(
+            stage,
+            "limit is only supported for array accumulation",
+        ));
+    }
+
+    Ok(())
+}
+
 fn validate_retrieval_strategy(stage: &StageSpec, operation: &str) -> Result<(), LlmffError> {
     match stage.strategy.as_deref().unwrap_or("lexical") {
         "lexical" | "embedding" | "command" => Ok(()),
@@ -2068,7 +2109,9 @@ fn infer_stage_value_kind(
                 InputFormat::Json => StageValueKind::Json,
             })
             .unwrap_or(StageValueKind::Text),
-        "validate_json" | "retrieve" | "rerank" | "extract" | "predicate" => StageValueKind::Json,
+        "validate_json" | "retrieve" | "rerank" | "extract" | "predicate" | "accumulate" => {
+            StageValueKind::Json
+        }
         "write" | "cache" => stage
             .from
             .as_ref()

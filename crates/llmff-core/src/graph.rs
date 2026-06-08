@@ -38,10 +38,17 @@ impl Graph {
                     )));
                 }
             }
-
+            if let Some(parent) = &stage.state_from {
+                if !stage_ids.contains(parent) {
+                    return Err(LlmffError::GraphValidation(format!(
+                        "unknown stage reference `{parent}`"
+                    )));
+                }
+            }
             validate_route_targets(stage, &stage_ids)?;
             validate_extract_stage(stage)?;
             validate_predicate_stage(stage)?;
+            validate_accumulate_stage(stage)?;
             validate_tool_stage(stage)?;
             validate_write_stage(stage)?;
             validate_loop_stage(stage)?;
@@ -107,6 +114,9 @@ pub(crate) fn stage_dependencies(stage: &StageSpec) -> BTreeSet<String> {
     let mut dependencies = BTreeSet::new();
 
     if let Some(parent) = &stage.from {
+        dependencies.insert(parent.clone());
+    }
+    if let Some(parent) = &stage.state_from {
         dependencies.insert(parent.clone());
     }
 
@@ -219,9 +229,18 @@ fn validate_loop_stage(stage: &StageSpec) -> Result<(), LlmffError> {
                 )));
             }
         }
+        if let Some(parent) = &body_stage.state_from {
+            if parent != "input" && !body_ids.contains(parent) && !stage.carry.contains_key(parent)
+            {
+                return Err(LlmffError::GraphValidation(format!(
+                    "unknown loop body reference `{parent}`"
+                )));
+            }
+        }
         validate_route_targets(body_stage, &body_ids)?;
         validate_extract_stage(body_stage)?;
         validate_predicate_stage(body_stage)?;
+        validate_accumulate_stage(body_stage)?;
         validate_tool_stage(body_stage)?;
         validate_write_stage(body_stage)?;
     }
@@ -308,11 +327,43 @@ fn validate_predicate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
             )));
         }
     }
-    if matches!(mode, "equals" | "gt" | "gte" | "lt" | "lte" | "contains") && stage.value.is_none()
-    {
+    if matches!(mode, "equals" | "gt" | "gte" | "lt" | "lte") && stage.value.is_none() {
         return Err(LlmffError::GraphValidation(format!(
             "predicate mode `{mode}` requires value"
         )));
+    }
+
+    Ok(())
+}
+
+fn validate_accumulate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.op != "accumulate" {
+        return Ok(());
+    }
+
+    if stage.from.is_none() {
+        return Err(LlmffError::GraphValidation(
+            "accumulate requires from".to_string(),
+        ));
+    }
+    let mode = stage.mode.as_deref().unwrap_or("append");
+    match mode {
+        "append" | "extend" | "merge_object" => {}
+        other => {
+            return Err(LlmffError::GraphValidation(format!(
+                "accumulate mode `{other}` is not supported"
+            )));
+        }
+    }
+    if mode == "merge_object" && stage.dedupe_field.is_some() {
+        return Err(LlmffError::GraphValidation(
+            "dedupe_field is only supported for array accumulation".to_string(),
+        ));
+    }
+    if mode == "merge_object" && stage.limit.is_some() {
+        return Err(LlmffError::GraphValidation(
+            "limit is only supported for array accumulation".to_string(),
+        ));
     }
 
     Ok(())

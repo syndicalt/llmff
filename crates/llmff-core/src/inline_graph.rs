@@ -275,6 +275,7 @@ fn empty_stage(id: String, op: String) -> StageSpec {
         op,
         input: None,
         from: None,
+        state_from: None,
         path: None,
         model: None,
         temperature: None,

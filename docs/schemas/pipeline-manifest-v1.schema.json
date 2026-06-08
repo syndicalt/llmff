@@ -115,6 +115,7 @@
         "op": { "type": "string", "minLength": 1 },
         "input": { "type": "string", "minLength": 1 },
         "from": { "type": "string", "minLength": 1 },
+        "state_from": { "type": "string", "minLength": 1 },
         "path": { "type": "string", "minLength": 1 },
         "model": { "type": "string", "minLength": 1 },
         "temperature": { "type": "number", "minimum": 0 },

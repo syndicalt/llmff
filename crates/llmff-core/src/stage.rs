@@ -6,6 +6,7 @@ use crate::error::LlmffError;
 use crate::manifest::StageSpec;
 use crate::value::{Message, StageStatus, Value};
 
+mod accumulate;
 mod extract;
 mod json_path;
 mod predicate;
@@ -13,6 +14,7 @@ mod retrieval;
 mod template;
 mod validate;
 
+pub(crate) use accumulate::accumulate;
 use extract::extract;
 use predicate::predicate;
 use retrieval::{rerank, retrieve};
@@ -128,6 +130,20 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
             required_fields: &["from"],
             optional_fields: &["field", "json_path", "mode", "value"],
             capabilities: &["json-predicate", "loop-break-condition"],
+        },
+        StageMetadata {
+            name: "accumulate",
+            kind: "transform",
+            required_fields: &["from"],
+            optional_fields: &[
+                "state_from",
+                "field",
+                "json_path",
+                "mode",
+                "limit",
+                "dedupe_field",
+            ],
+            capabilities: &["json-accumulation", "loop-carry-state"],
         },
         StageMetadata {
             name: "repair",
@@ -288,6 +304,7 @@ mod tests {
             op: "system".to_string(),
             input: None,
             from: Some("load_prompt".to_string()),
+            state_from: None,
             path: None,
             model: None,
             temperature: None,
@@ -364,6 +381,7 @@ mod tests {
             op: "validate_json".to_string(),
             input: None,
             from: Some("draft".to_string()),
+            state_from: None,
             path: None,
             model: None,
             temperature: None,
@@ -444,6 +462,7 @@ mod tests {
             op: "validate_json".to_string(),
             input: None,
             from: Some("draft".to_string()),
+            state_from: None,
             path: None,
             model: None,
             temperature: None,
@@ -521,6 +540,7 @@ mod tests {
             op: "validate_json".to_string(),
             input: None,
             from: Some("draft".to_string()),
+            state_from: None,
             path: None,
             model: None,
             temperature: None,
@@ -607,6 +627,7 @@ mod tests {
             op: "retrieve".to_string(),
             input: None,
             from: Some("load_prompt".to_string()),
+            state_from: None,
             path: None,
             model: None,
             temperature: None,
@@ -702,6 +723,7 @@ mod tests {
             op: "retrieve".to_string(),
             input: None,
             from: Some("load_prompt".to_string()),
+            state_from: None,
             path: None,
             model: None,
             temperature: None,
@@ -791,6 +813,7 @@ mod tests {
             op: "retrieve".to_string(),
             input: None,
             from: Some("load_prompt".to_string()),
+            state_from: None,
             path: None,
             model: None,
             temperature: None,
@@ -893,6 +916,7 @@ mod tests {
             op: "rerank".to_string(),
             input: None,
             from: Some("retrieve_context".to_string()),
+            state_from: None,
             path: None,
             model: None,
             temperature: None,
@@ -988,6 +1012,7 @@ mod tests {
             op: "system".to_string(),
             input: None,
             from: Some("load_prompt".to_string()),
+            state_from: None,
             path: Some("policy.md".to_string()),
             model: None,
             temperature: None,
@@ -1075,6 +1100,7 @@ mod tests {
             op: "system".to_string(),
             input: None,
             from: Some("load_prompt".to_string()),
+            state_from: None,
             path: Some("policy.md".to_string()),
             model: None,
             temperature: None,
@@ -1162,6 +1188,7 @@ mod tests {
             op: "template".to_string(),
             input: None,
             from: Some("load_prompt".to_string()),
+            state_from: None,
             path: Some("prompt.tmpl".to_string()),
             model: None,
             temperature: None,
@@ -1244,6 +1271,7 @@ mod tests {
             op: "template".to_string(),
             input: None,
             from: Some("load_prompt".to_string()),
+            state_from: None,
             path: Some("prompt.tmpl".to_string()),
             model: None,
             temperature: None,
@@ -1328,6 +1356,7 @@ mod tests {
             op: "template".to_string(),
             input: None,
             from: Some("load_prompt".to_string()),
+            state_from: None,
             path: Some("prompt.tmpl".to_string()),
             model: None,
             temperature: None,
