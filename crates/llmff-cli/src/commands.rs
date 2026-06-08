@@ -623,6 +623,7 @@ fn inspect_stage_view(stage: &llmff_core::manifest::StageSpec) -> serde_json::Va
         "plugin": plugin_stage_view(&stage.op),
         "capability_constraints": stage_capability_constraints(&stage.op),
         "loop": inspect_loop_metadata(stage),
+        "map": inspect_map_metadata(stage),
         "cache_policy": stage.cache_policy,
         "timeout_ms": stage.timeout_ms,
         "retry": stage.retry,
@@ -645,6 +646,24 @@ fn inspect_loop_metadata(stage: &llmff_core::manifest::StageSpec) -> serde_json:
         "final": stage.final_output,
         "retain_iterations": inspect_loop_retention(stage),
         "on_iteration_error": stage.on_iteration_error.as_deref().unwrap_or("fail")
+    })
+}
+
+fn inspect_map_metadata(stage: &llmff_core::manifest::StageSpec) -> serde_json::Value {
+    if stage.op != "map" {
+        return serde_json::Value::Null;
+    }
+
+    let max_items = stage.max_items.unwrap_or(0);
+    let body_stage_count = stage.body.len();
+    serde_json::json!({
+        "items_from": stage.items_from,
+        "max_items": max_items,
+        "body_stage_count": body_stage_count,
+        "max_expanded_stage_count": max_items * body_stage_count,
+        "final": stage.final_output,
+        "parallel": stage.parallel.unwrap_or(false),
+        "max_concurrency": stage.max_concurrency
     })
 }
 

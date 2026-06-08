@@ -54,6 +54,7 @@ impl Graph {
             validate_tool_stage(stage)?;
             validate_write_stage(stage)?;
             validate_loop_stage(stage)?;
+            validate_map_stage(stage)?;
         }
 
         for output in manifest.outputs.values() {
@@ -106,6 +107,16 @@ pub(crate) fn order_loop_body_stages(stage: &StageSpec) -> Result<Vec<StageSpec>
     if stage.op != "loop" {
         return Err(LlmffError::GraphValidation(format!(
             "stage `{}` is not a loop",
+            stage.id
+        )));
+    }
+    order_stages(stage.body.clone())
+}
+
+pub(crate) fn order_map_body_stages(stage: &StageSpec) -> Result<Vec<StageSpec>, LlmffError> {
+    if stage.op != "map" {
+        return Err(LlmffError::GraphValidation(format!(
+            "stage `{}` is not a map",
             stage.id
         )));
     }
@@ -286,6 +297,93 @@ fn validate_loop_stage(stage: &StageSpec) -> Result<(), LlmffError> {
     validate_loop_retention(stage, &body_ids)?;
 
     let _ordered_body = order_loop_body_stages(stage)?;
+    Ok(())
+}
+
+fn validate_map_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    if stage.op != "map" {
+        return Ok(());
+    }
+
+    if stage.from.is_none() {
+        return Err(LlmffError::GraphValidation("map requires from".to_string()));
+    }
+    if stage.items_from.is_none() {
+        return Err(LlmffError::GraphValidation(
+            "map requires items_from".to_string(),
+        ));
+    }
+    if stage.max_items.unwrap_or(0) == 0 {
+        return Err(LlmffError::GraphValidation(
+            "map requires max_items greater than 0".to_string(),
+        ));
+    }
+    if stage.body.is_empty() {
+        return Err(LlmffError::GraphValidation(
+            "map requires a non-empty body".to_string(),
+        ));
+    }
+    if stage.parallel == Some(true) {
+        return Err(LlmffError::GraphValidation(
+            "parallel map execution is not supported yet".to_string(),
+        ));
+    }
+    if stage.max_concurrency.is_some() {
+        return Err(LlmffError::GraphValidation(
+            "max_concurrency requires parallel map execution".to_string(),
+        ));
+    }
+    if stage
+        .body
+        .iter()
+        .any(|body_stage| matches!(body_stage.op.as_str(), "loop" | "map"))
+    {
+        return Err(LlmffError::GraphValidation(
+            "nested loop and map stages are not supported in map bodies".to_string(),
+        ));
+    }
+
+    let mut body_ids = BTreeSet::new();
+    for body_stage in &stage.body {
+        if !body_ids.insert(body_stage.id.clone()) {
+            return Err(LlmffError::GraphValidation(format!(
+                "duplicate map body stage id `{}`",
+                body_stage.id
+            )));
+        }
+    }
+
+    for body_stage in &stage.body {
+        for parent in [body_stage.from.as_ref(), body_stage.state_from.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            if parent != "item" && parent != "input" && !body_ids.contains(parent) {
+                return Err(LlmffError::GraphValidation(format!(
+                    "unknown map body reference `{parent}`"
+                )));
+            }
+        }
+        validate_route_targets(body_stage, &body_ids)?;
+        validate_extract_stage(body_stage)?;
+        validate_predicate_stage(body_stage)?;
+        validate_accumulate_stage(body_stage)?;
+        validate_score_stage(body_stage)?;
+        validate_select_stage(body_stage)?;
+        validate_tool_stage(body_stage)?;
+        validate_write_stage(body_stage)?;
+    }
+
+    if let Some(final_output) = &stage.final_output {
+        if !body_ids.contains(&final_output.from) {
+            return Err(LlmffError::GraphValidation(format!(
+                "unknown map final stage `{}`",
+                final_output.from
+            )));
+        }
+    }
+
+    let _ordered_body = order_map_body_stages(stage)?;
     Ok(())
 }
 

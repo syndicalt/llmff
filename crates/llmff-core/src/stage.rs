@@ -18,6 +18,7 @@ mod validate;
 
 pub(crate) use accumulate::accumulate;
 use extract::extract;
+pub(crate) use json_path::get_json_path;
 use predicate::predicate;
 use retrieval::{rerank, retrieve};
 use score::score;
@@ -212,6 +213,13 @@ pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
                 "explicit-break-condition",
                 "loop-tracing",
             ],
+        },
+        StageMetadata {
+            name: "map",
+            kind: "control-flow",
+            required_fields: &["from", "items_from", "max_items", "body"],
+            optional_fields: &["final", "parallel", "max_concurrency"],
+            capabilities: &["bounded-map", "body-subgraph", "json-array-items"],
         },
         StageMetadata {
             name: "tool",

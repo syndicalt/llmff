@@ -3402,6 +3402,68 @@ outputs:
 }
 
 #[test]
+fn run_maps_items_sequentially_with_max_items_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("items.json");
+    let output = dir.path().join("mapped.json");
+    let manifest = dir.path().join("pipeline.yaml");
+    std::fs::write(
+        &input,
+        r#"{"items":[{"name":"a"},{"name":"b"},{"name":"c"}]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &manifest,
+        format!(
+            r#"
+version: 1
+inputs:
+  payload:
+    path: {}
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+  - id: names
+    op: map
+    from: load_payload
+    items_from: items
+    max_items: 2
+    final: {{ from: name, require_status: success }}
+    body:
+      - id: name
+        op: extract
+        from: item
+        field: name
+outputs:
+  final:
+    from: names
+    path: {}
+"#,
+            input.display(),
+            output.display()
+        ),
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("llmff").unwrap();
+    cmd.args(["run", manifest.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(written["metadata"]["items_total"], 3);
+    assert_eq!(written["metadata"]["items_run"], 2);
+    assert_eq!(written["metadata"]["stop_reason"], "max_items");
+    assert_eq!(written["items"][0]["index"], 0);
+    assert_eq!(written["items"][0]["status"], "success");
+    assert_eq!(written["items"][0]["value"], "a");
+    assert_eq!(written["items"][1]["value"], "b");
+}
+
+#[test]
 fn inline_graph_run_uses_input_graph_and_write_stage() {
     let dir = tempfile::tempdir().unwrap();
     let prompt = dir.path().join("question.txt");

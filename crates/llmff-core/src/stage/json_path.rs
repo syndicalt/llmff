@@ -1,6 +1,6 @@
 use serde_json::Value as JsonValue;
 
-pub(super) fn get_json_path<'a>(value: &'a JsonValue, path: &str) -> Option<&'a JsonValue> {
+pub(crate) fn get_json_path<'a>(value: &'a JsonValue, path: &str) -> Option<&'a JsonValue> {
     if path.is_empty() {
         return Some(value);
     }

@@ -19,7 +19,7 @@ use crate::plugin::{
     discover_plugin_samplers, discover_plugin_stages, discover_plugin_tool_transports,
     PluginSampler, PluginStage, PluginToolTransport,
 };
-use crate::stage::{accumulate, execute_deterministic_stage};
+use crate::stage::{accumulate, execute_deterministic_stage, get_json_path};
 use crate::trace::{TraceEvent, TraceWriter};
 use crate::value::{Message, StageStatus, Value};
 
@@ -786,6 +786,39 @@ impl Engine {
                 }
                 Ok(())
             }
+            "map" => {
+                require_stage_field(stage, stage.from.as_deref(), "map requires from")?;
+                require_stage_field(
+                    stage,
+                    stage.items_from.as_deref(),
+                    "map requires items_from",
+                )?;
+                if stage.max_items.unwrap_or(0) == 0 {
+                    return Err(stage_validation_error(
+                        stage,
+                        "map requires max_items greater than 0",
+                    ));
+                }
+                if stage.body.is_empty() {
+                    return Err(stage_validation_error(stage, "map requires body"));
+                }
+                if stage.parallel == Some(true) {
+                    return Err(stage_validation_error(
+                        stage,
+                        "parallel map execution is not supported yet",
+                    ));
+                }
+                if stage.max_concurrency.is_some() {
+                    return Err(stage_validation_error(
+                        stage,
+                        "max_concurrency requires parallel map execution",
+                    ));
+                }
+                for body_stage in &stage.body {
+                    self.validate_stage(body_stage, plugin_stages, plugin_samplers)?;
+                }
+                Ok(())
+            }
             "tool" => {
                 require_stage_field(stage, stage.from.as_deref(), "tool requires from")?;
                 Ok(())
@@ -884,6 +917,10 @@ impl Engine {
                 .map(StageOutcome::without_usage),
             "loop" => self
                 .execute_loop(context, stage, statuses, stream_writer, trace)
+                .await
+                .map(StageOutcome::without_usage),
+            "map" => self
+                .execute_map(context, stage, statuses, stream_writer, trace)
                 .await
                 .map(StageOutcome::without_usage),
             "tool" => {
@@ -1148,6 +1185,113 @@ impl Engine {
         )?;
 
         Ok(StageStatus::Success(final_value))
+    }
+
+    async fn execute_map(
+        &self,
+        context: &ExecutionContext<'_>,
+        stage: &StageSpec,
+        statuses: &BTreeMap<String, StageStatus>,
+        mut stream_writer: Option<&mut StageStreamWriter>,
+        _trace: Option<&mut Vec<TraceWriter>>,
+    ) -> Result<StageStatus, LlmffError> {
+        let source = stage
+            .from
+            .as_ref()
+            .and_then(|parent| statuses.get(parent))
+            .and_then(success_value)
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "map requires successful input".to_string(),
+            })?;
+        let Value::Json(source_json) = source.clone() else {
+            return Err(LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "map requires JSON input".to_string(),
+            });
+        };
+        let items_path = stage
+            .items_from
+            .as_deref()
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "map requires items_from".to_string(),
+            })?;
+        let items_value =
+            get_json_path(&source_json, items_path).ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: format!("map items_from path `{items_path}` was not found"),
+            })?;
+        let serde_json::Value::Array(items) = items_value else {
+            return Err(LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: format!("map items_from path `{items_path}` must resolve to an array"),
+            });
+        };
+        let max_items = stage.max_items.unwrap_or(0);
+        let item_count = items.len().min(max_items);
+        let ordered_body = crate::graph::order_map_body_stages(stage)?;
+        let final_stage_id = stage
+            .final_output
+            .as_ref()
+            .map(|final_output| final_output.from.as_str())
+            .or_else(|| stage.body.last().map(|body_stage| body_stage.id.as_str()))
+            .ok_or_else(|| LlmffError::StageExecution {
+                stage_id: stage.id.clone(),
+                message: "map requires final stage".to_string(),
+            })?;
+        let mut mapped_items = Vec::with_capacity(item_count);
+
+        for (index, item) in items.iter().take(item_count).enumerate() {
+            let mut body_statuses = BTreeMap::new();
+            body_statuses.insert("input".to_string(), StageStatus::Success(source.clone()));
+            body_statuses.insert(
+                "item".to_string(),
+                StageStatus::Success(Value::Json(item.clone())),
+            );
+
+            for body_stage in &ordered_body {
+                let outcome = Box::pin(self.execute_stage_with_timeout(
+                    context,
+                    body_stage,
+                    &body_statuses,
+                    stream_writer.as_deref_mut(),
+                    None,
+                ))
+                .await?;
+                body_statuses.insert(body_stage.id.clone(), outcome.status);
+            }
+
+            let final_status =
+                body_statuses
+                    .get(final_stage_id)
+                    .ok_or_else(|| LlmffError::StageExecution {
+                        stage_id: stage.id.clone(),
+                        message: format!("map final stage `{final_stage_id}` did not run"),
+                    })?;
+            let (status, value) = map_item_output(stage, final_stage_id, final_status)?;
+            mapped_items.push(serde_json::json!({
+                "index": index,
+                "status": status,
+                "value": value
+            }));
+        }
+
+        let stop_reason = if items.len() > item_count {
+            "max_items"
+        } else {
+            "completed"
+        };
+
+        Ok(StageStatus::Success(Value::Json(serde_json::json!({
+            "items": mapped_items,
+            "metadata": {
+                "items_run": item_count,
+                "items_total": items.len(),
+                "stop_reason": stop_reason,
+                "parallel": false
+            }
+        }))))
     }
 
     fn execute_load(
@@ -2174,7 +2318,7 @@ fn infer_stage_value_kind(
             })
             .unwrap_or(StageValueKind::Text),
         "validate_json" | "retrieve" | "rerank" | "extract" | "predicate" | "accumulate"
-        | "score" | "select" => StageValueKind::Json,
+        | "score" | "select" | "map" => StageValueKind::Json,
         "write" | "cache" => stage
             .from
             .as_ref()
@@ -3102,6 +3246,52 @@ fn loop_final_value(
     }
 
     Ok(Value::Json(serde_json::Value::Object(output)))
+}
+
+fn map_item_output(
+    map_stage: &StageSpec,
+    final_stage_id: &str,
+    final_status: &StageStatus,
+) -> Result<(&'static str, serde_json::Value), LlmffError> {
+    let require_status = map_stage
+        .final_output
+        .as_ref()
+        .and_then(|final_output| final_output.require_status.as_deref())
+        .unwrap_or("success");
+    match (require_status, final_status) {
+        ("success", StageStatus::Success(value)) => {
+            Ok(("success", serialize_value_to_json(value)?))
+        }
+        ("invalid", StageStatus::Invalid { value, .. }) => {
+            Ok(("invalid", serialize_value_to_json(value)?))
+        }
+        ("any", StageStatus::Success(value)) => Ok(("success", serialize_value_to_json(value)?)),
+        ("any", StageStatus::Invalid { value, .. }) => {
+            Ok(("invalid", serialize_value_to_json(value)?))
+        }
+        ("any", StageStatus::Skipped) => Ok(("skipped", serde_json::Value::Null)),
+        ("success", StageStatus::Invalid { errors, .. }) => Err(LlmffError::StageExecution {
+            stage_id: map_stage.id.clone(),
+            message: format!(
+                "map final stage `{final_stage_id}` was invalid: {}",
+                errors.join("; ")
+            ),
+        }),
+        ("success", StageStatus::Skipped) => Err(LlmffError::StageExecution {
+            stage_id: map_stage.id.clone(),
+            message: format!("map final stage `{final_stage_id}` was skipped"),
+        }),
+        ("invalid", StageStatus::Success(_)) | ("invalid", StageStatus::Skipped) => {
+            Err(LlmffError::StageExecution {
+                stage_id: map_stage.id.clone(),
+                message: format!("map final stage `{final_stage_id}` did not finish invalid"),
+            })
+        }
+        _ => Err(LlmffError::StageExecution {
+            stage_id: map_stage.id.clone(),
+            message: "final.require_status must be success, invalid, or any".to_string(),
+        }),
+    }
 }
 
 fn serialize_value_to_json(value: &Value) -> Result<serde_json::Value, LlmffError> {

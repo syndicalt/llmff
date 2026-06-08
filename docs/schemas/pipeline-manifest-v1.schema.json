@@ -311,6 +311,15 @@
               }
             ]
           }
+        },
+        {
+          "if": {
+            "properties": { "op": { "const": "map" } },
+            "required": ["op"]
+          },
+          "then": {
+            "required": ["from", "items_from", "max_items", "body"]
+          }
         }
       ]
     }
