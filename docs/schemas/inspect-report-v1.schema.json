@@ -95,6 +95,7 @@
           "model",
           "plugin",
           "capability_constraints",
+          "loop",
           "writes_stdout"
         ],
         "properties": {
@@ -165,6 +166,86 @@
               "plugin": {
                 "type": "object"
               }
+            },
+            "additionalProperties": true
+          },
+          "loop": {
+            "type": ["object", "null"],
+            "required": [
+              "max_iterations",
+              "body_stage_count",
+              "max_expanded_stage_count",
+              "break_on",
+              "final",
+              "retain_iterations",
+              "on_iteration_error"
+            ],
+            "properties": {
+              "max_iterations": { "type": "integer", "minimum": 1 },
+              "body_stage_count": { "type": "integer", "minimum": 1 },
+              "max_expanded_stage_count": { "type": "integer", "minimum": 1 },
+              "break_on": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": ["type", "stage"],
+                    "properties": {
+                      "type": { "const": "stage_success" },
+                      "stage": { "type": "string" }
+                    },
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "stage"],
+                    "properties": {
+                      "type": { "const": "stage_failure" },
+                      "stage": { "type": "string" }
+                    },
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "stage", "field"],
+                    "properties": {
+                      "type": { "const": "field_true" },
+                      "stage": { "type": "string" },
+                      "field": { "type": "string" }
+                    },
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "stage", "field", "value"],
+                    "properties": {
+                      "type": { "const": "field_equals" },
+                      "stage": { "type": "string" },
+                      "field": { "type": "string" },
+                      "value": true
+                    },
+                    "additionalProperties": true
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type"],
+                    "properties": {
+                      "type": { "const": "never" }
+                    },
+                    "additionalProperties": true
+                  }
+                ]
+              },
+              "final": {
+                "type": ["object", "null"],
+                "required": ["from"],
+                "properties": {
+                  "from": { "type": "string" },
+                  "require_status": { "type": ["string", "null"] }
+                },
+                "additionalProperties": true
+              },
+              "retain_iterations": { "enum": ["none", "summaries", "all"] },
+              "on_iteration_error": { "enum": ["fail", "continue", "break"] }
             },
             "additionalProperties": true
           },

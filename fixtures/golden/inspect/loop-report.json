@@ -1,0 +1,119 @@
+{
+  "format_version": 1,
+  "compatibility": {
+    "pipeline_manifest_schema": 1,
+    "inspect_report_schema": 1,
+    "inline_graph_syntax": 1,
+    "plugin_protocol": 1
+  },
+  "manifest": {
+    "version": 1,
+    "source": {
+      "kind": "file",
+      "path": "examples/loop.yaml",
+      "cwd": "examples"
+    },
+    "hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "inputs": {
+    "prompt": {
+      "path": "./question.txt",
+      "format": "text"
+    }
+  },
+  "outputs": {},
+  "stage_order": ["load_prompt", "refine"],
+  "stages": [
+    {
+      "id": "load_prompt",
+      "op": "load",
+      "input": "prompt",
+      "from": null,
+      "model": null,
+      "sampler": null,
+      "plugin": null,
+      "capability_constraints": {
+        "kind": "input",
+        "required_fields": ["input"],
+        "optional_fields": [],
+        "capabilities": ["text-input", "json-input", "stdin"]
+      },
+      "loop": null,
+      "cache_policy": null,
+      "timeout_ms": null,
+      "retry": null,
+      "writes_stdout": false
+    },
+    {
+      "id": "refine",
+      "op": "loop",
+      "input": null,
+      "from": "load_prompt",
+      "model": null,
+      "sampler": null,
+      "plugin": null,
+      "capability_constraints": {
+        "kind": "control-flow",
+        "required_fields": ["from", "max_iterations", "break_on", "body"],
+        "optional_fields": ["carry", "final", "on_iteration_error", "retain_iterations"],
+        "capabilities": [
+          "bounded-iteration",
+          "body-subgraph",
+          "explicit-break-condition",
+          "loop-tracing"
+        ]
+      },
+      "loop": {
+        "max_iterations": 3,
+        "body_stage_count": 1,
+        "max_expanded_stage_count": 3,
+        "break_on": {
+          "type": "never"
+        },
+        "final": {
+          "from": "draft",
+          "require_status": "success"
+        },
+        "retain_iterations": "none",
+        "on_iteration_error": "fail"
+      },
+      "cache_policy": null,
+      "timeout_ms": null,
+      "retry": null,
+      "writes_stdout": false
+    }
+  ],
+  "execution": {
+    "scheduler": "sequential",
+    "max_concurrency": null,
+    "default_timeout_ms": null,
+    "default_retry": {
+      "attempts": 1,
+      "backoff_ms": 0
+    },
+    "checkpoint": {
+      "enabled": false,
+      "resume": false,
+      "path": null,
+      "resume_path": null
+    },
+    "stdout": {
+      "events": false,
+      "stream_stage": false,
+      "manifest_outputs": false
+    },
+    "artifacts": {
+      "trace": null,
+      "events": null,
+      "stream_stage": null
+    }
+  },
+  "backends": {
+    "registrations": []
+  },
+  "plugins": {
+    "directories": [],
+    "protocol_version": 1,
+    "manifests": []
+  }
+}
