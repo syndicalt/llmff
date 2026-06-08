@@ -1,0 +1,27 @@
+version: 1
+inputs:
+  payload:
+    path: ./map-items.json
+    format: json
+graph:
+  - id: load_payload
+    op: load
+    input: payload
+
+  - id: names
+    op: map
+    from: load_payload
+    items_from: items
+    max_items: 3
+    final:
+      from: name
+      require_status: success
+    body:
+      - id: name
+        op: extract
+        from: item
+        field: name
+outputs:
+  final:
+    from: names
+    path: ./map-batch-items.output.json

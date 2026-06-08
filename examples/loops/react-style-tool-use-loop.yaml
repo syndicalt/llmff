@@ -13,10 +13,14 @@ graph:
     max_iterations: 4
     break_on:
       type: field_true
-      stage: decide
-      field: task_complete
+      stage: task_done
+      field: passed
+    initial_carry:
+      history: []
+    carry:
+      history: updated_history
     final:
-      from: decide
+      from: tool_result
       require_status: success
     body:
       - id: decide
@@ -25,10 +29,34 @@ graph:
         model: mock:good
         response_format: json
         temperature: 0.2
-        prompt: |
-          Decide the next bounded action. Return JSON:
-          {"thought":"...", "action":"answer", "task_complete":true, "final_answer":"..."}
 
+      - id: validate_request
+        op: validate_json
+        from: decide
+        schema: '{"type":"object","required":["tool","args","done"],"properties":{"tool":{"type":"string"},"args":{"type":"object"},"done":{"type":"boolean"},"final_answer":{"type":"string"}}}'
+
+      - id: task_done
+        op: predicate
+        from: validate_request
+        field: done
+        mode: truthy
+
+      - id: call_tool
+        op: tool
+        from: validate_request
+        command: ["python3", "tool-result.py"]
+
+      - id: tool_result
+        op: validate_json
+        from: call_tool
+        schema: '{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"},"result":{},"error":{"type":"string"}}}'
+
+      - id: updated_history
+        op: accumulate
+        from: tool_result
+        state_from: history
+        mode: append
+        limit: 8
 outputs:
   final:
     from: react_loop

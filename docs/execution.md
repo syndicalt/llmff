@@ -73,6 +73,44 @@ break_on:
   field: passed
 ```
 
+## Map Stages
+
+`op: map` applies an embedded body graph to items from a JSON array inside one
+pipeline run. It is bounded by `max_items`; if the input array is longer, only
+the first `max_items` values are processed. This is separate from CLI batch
+mode, which runs the whole manifest once per input line.
+
+```yaml
+- id: map_names
+  op: map
+  from: load_payload
+  items_from: items
+  max_items: 3
+  body:
+    - id: name
+      op: extract
+      from: item
+      path: name
+```
+
+Each map body receives the reserved `item` value for the current array entry.
+The map stage output is a JSON value:
+
+```json
+{
+  "items": [],
+  "metadata": {
+    "items_run": 3,
+    "max_items": 3,
+    "body_stage_count": 1,
+    "final_stage": "name"
+  }
+}
+```
+
+Use `llmff inspect --format json` to read `items_from`, `max_items`,
+`body_stage_count`, and `max_expanded_stage_count` before dispatch.
+
 ## Cache Policy
 
 Cache stages default to `cache_policy: read`, which reuses an existing matching

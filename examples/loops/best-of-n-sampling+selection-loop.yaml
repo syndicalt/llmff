@@ -13,8 +13,12 @@ graph:
     max_iterations: 3
     break_on:
       type: never
+    retain_iterations:
+      mode: all
+      stages: [score_candidate]
+      include_values: true
     final:
-      from: score
+      from: score_candidate
       require_status: success
     body:
       - id: generate
@@ -23,15 +27,26 @@ graph:
         model: mock:good
         response_format: json
         temperature: 0.9
-        prompt: |
-          Generate one candidate answer. Return JSON:
-          {"candidate":"...", "score":0}
 
-      - id: score
+      - id: validate_candidate
         op: validate_json
         from: generate
         schema: '{"type":"object","required":["candidate","score"],"properties":{"candidate":{"type":"string"},"score":{"type":"number","minimum":0,"maximum":10}}}'
+
+      - id: score_candidate
+        op: score
+        from: validate_candidate
+        score_field: score
+        min_score: 0
+        max_score: 10
+
+  - id: best_candidate
+    op: select
+    from: best_of_n_loop
+    json_path: iterations
+    mode: highest_score
+    score_field: stages.score_candidate.value.score
 outputs:
   final:
-    from: best_of_n_loop
+    from: best_candidate
     path: ./best-of-n-sampling.output.json

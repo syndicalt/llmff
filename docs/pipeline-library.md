@@ -73,13 +73,15 @@ Use `examples/loops/` when you want copy-run manifests for v1.1 loop patterns
 beyond the single template above:
 
 - `examples/loops/self-refining-answer-loop.yaml`: schema-validated
-  refinement with `break_on: stage_success`.
+  refinement with `predicate` and `extract`.
 - `examples/loops/react-style-tool-use-loop.yaml`: ReAct-style control shape
-  with `break_on: field_true`.
+  with typed tool requests, a local `tool` subprocess, and `accumulate`.
 - `examples/loops/best-of-n-sampling+selection-loop.yaml`: fixed-count
-  sampling skeleton with `break_on: never`.
+  sampling with retained iteration scores and downstream `select`.
 - `examples/loops/iterative-research-fact-check-loop.yaml`: retrieval,
-  synthesis, and JSON fact-check validation with `break_on: field_true`.
+  synthesis, JSON fact-check validation, extraction, and accumulation.
+- `examples/loops/map-batch-items.yaml`: bounded in-pipeline mapping over a
+  JSON array with `max_items`.
 
 ```bash
 llmff inspect examples/loops/self-refining-answer-loop.yaml
@@ -89,7 +91,8 @@ llmff run examples/loops/self-refining-answer-loop.yaml \
 ```
 
 See [`examples/loops/README.md`](../examples/loops/README.md) for run commands
-for each loop pattern and notes on adapting them to real providers.
+for each loop and map pattern, the tool request/result contract, and notes on
+adapting model stages to real providers.
 
 ## RAG Answer
 

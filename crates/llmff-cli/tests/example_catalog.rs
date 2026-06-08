@@ -50,10 +50,10 @@ const LOOP_EXAMPLES: &[(&str, &str, &str)] = &[
     (
         "ReAct-Style Tool Loop",
         "examples/loops/react-style-tool-use-loop.yaml",
-        r#"{"thought":"The answer can be produced directly.","action":"answer","task_complete":true,"final_answer":"Use a bounded loop and inspect the trace."}"#,
+        r#"{"tool":"direct","args":{},"done":true,"final_answer":"Use a bounded loop and inspect the trace."}"#,
     ),
     (
-        "Best-of-N Sampling Skeleton",
+        "Best-of-N Sampling And Selection",
         "examples/loops/best-of-n-sampling+selection-loop.yaml",
         r#"{"candidate":"Candidate answer from a bounded sample.","score":8}"#,
     ),
@@ -61,6 +61,11 @@ const LOOP_EXAMPLES: &[(&str, &str, &str)] = &[
         "Iterative Research And Fact Check",
         "examples/loops/iterative-research-fact-check-loop.yaml",
         r#"{"supported":true,"claims":["Rust and Python are available in the local context."],"sources":["retrieval/rust.txt","retrieval/python.txt"]}"#,
+    ),
+    (
+        "Map Batch Items",
+        "examples/loops/map-batch-items.yaml",
+        r#"{}"#,
     ),
 ];
 
@@ -489,6 +494,7 @@ fn loop_examples_are_documented_inspectable_and_runnable_offline() {
         "react-style-tool-use.output.json",
         "best-of-n-sampling.output.json",
         "iterative-research-fact-check.output.json",
+        "map-batch-items.output.json",
     ] {
         let _ = std::fs::remove_file(root.join("examples/loops").join(path));
     }

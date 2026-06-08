@@ -63,6 +63,41 @@ stage before dispatch. Trace and event records from loop bodies include
 `loop_id`, `loop_iteration`, and `loop_stage_id`, which lets a supervisor show
 per-iteration progress without owning the loop body itself.
 
+When the manifest contains `op: map`, treat it as bounded in-pipeline
+collection processing, not as job scheduling. Use inspect metadata to read the
+item source, `max_items`, body stage count, and maximum expanded stage count.
+Use CLI batch mode when the supervisor needs independent per-item exit codes or
+artifact directories.
+
+For tool loops, keep the planning boundary explicit. The supervisor owns the
+available tool catalog and task-level policy; `llmff` executes the declared
+request, local command, HTTP tool, or plugin stage in the manifest. A practical
+ReAct-style loop validates a model-produced request before the `tool` stage:
+
+```json
+{
+  "tool": "lookup",
+  "args": { "query": "..." },
+  "done": false,
+  "final_answer": null
+}
+```
+
+Then validate the tool result before feeding it into `accumulate` or another
+model stage:
+
+```json
+{
+  "ok": true,
+  "result": {},
+  "error": null
+}
+```
+
+Use `predicate` on the validated request or result to stop the loop. Keep both
+request and result schemas in the manifest so malformed model output or tool
+output fails as a normal stage failure with traceable evidence.
+
 Use explicit artifact flags when the agent needs a different stream owner or
 when an older wrapper has not adopted `--run-dir`:
 

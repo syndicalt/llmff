@@ -12,10 +12,11 @@ graph:
     from: load_question
     max_iterations: 3
     break_on:
-      type: stage_success
-      stage: quality_check
+      type: field_true
+      stage: quality_ready
+      field: passed
     final:
-      from: draft
+      from: final_answer
       require_status: success
     body:
       - id: draft
@@ -24,14 +25,23 @@ graph:
         model: mock:good
         response_format: json
         temperature: 0.2
-        prompt: |
-          Draft a concise answer. Return JSON:
-          {"answer":"...", "confidence":0.0}
 
       - id: quality_check
         op: validate_json
         from: draft
         schema: '{"type":"object","required":["answer","confidence"],"properties":{"answer":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}}}'
+
+      - id: quality_ready
+        op: predicate
+        from: quality_check
+        field: confidence
+        mode: gte
+        value: 0.8
+
+      - id: final_answer
+        op: extract
+        from: quality_check
+        field: answer
 outputs:
   final:
     from: refine_loop

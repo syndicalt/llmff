@@ -163,10 +163,11 @@ memory, multi-agent loops, task schedulers, or host-level configuration
 systems. It should remain the execution runner those systems can call, observe,
 and supervise.
 
-### v1.1 Loop Stage Boundary
+### v1.1 Loop And Map Stage Boundary
 
-The v1.1 loop stage adds bounded repetition as an execution primitive. It does
-not add autonomous planning, host-level scheduling, memory, human approval
-policy, or a general workflow language. Complex orchestration remains above
-llmff; llmff executes the declared bounded contract and emits inspectable
+The v1.1 loop stage adds bounded repetition as an execution primitive. The v1.1
+map stage adds bounded in-pipeline collection processing with `max_items`. These
+stages do not add autonomous planning, host-level scheduling, memory, human
+approval policy, or a general workflow language. Complex orchestration remains
+above llmff; llmff executes the declared bounded contract and emits inspectable
 artifacts.
