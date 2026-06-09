@@ -7,10 +7,15 @@ graph:
     op: load
     input: prompt
 
+  - id: build_sampling_prompt
+    op: template
+    from: load_prompt
+    path: ../prompt.tmpl
+
   - id: best_of_n_loop
     op: loop
-    from: load_prompt
-    max_iterations: 3
+    from: build_sampling_prompt
+    max_iterations: 5
     break_on:
       type: never
     retain_iterations:
