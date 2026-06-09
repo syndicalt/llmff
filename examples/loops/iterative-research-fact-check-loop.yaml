@@ -7,10 +7,15 @@ graph:
     op: load
     input: question
 
+  - id: build_research_prompt
+    op: template
+    from: load_question
+    path: ../prompt.tmpl
+
   - id: research_loop
     op: loop
-    from: load_question
-    max_iterations: 3
+    from: build_research_prompt
+    max_iterations: 5
     break_on:
       type: field_true
       stage: supported

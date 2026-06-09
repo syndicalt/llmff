@@ -7,10 +7,15 @@ graph:
     op: load
     input: question
 
+  - id: build_initial_prompt
+    op: template
+    from: load_question
+    path: ../prompt.tmpl
+
   - id: refine_loop
     op: loop
-    from: load_question
-    max_iterations: 3
+    from: build_initial_prompt
+    max_iterations: 5
     break_on:
       type: field_true
       stage: quality_ready
@@ -24,11 +29,18 @@ graph:
         from: input
         model: mock:good
         response_format: json
-        temperature: 0.2
+        temperature: 0.7
+
+      - id: critique
+        op: infer
+        from: draft
+        model: mock:good
+        response_format: json
+        temperature: 0.3
 
       - id: quality_check
         op: validate_json
-        from: draft
+        from: critique
         schema: '{"type":"object","required":["answer","confidence"],"properties":{"answer":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}}}'
 
       - id: quality_ready
