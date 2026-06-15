@@ -94,6 +94,24 @@ See [`examples/loops/README.md`](../examples/loops/README.md) for run commands
 for each loop and map pattern, the tool request/result contract, and notes on
 adapting model stages to real providers.
 
+## Multi-Agent Topology Catalog
+
+Declared multi-agent topologies use `agents:` role bundles and per-stage
+`agent:` references, expanded at inspect time into a bounded, declared DAG. The
+catalog covers a generator/critic/reviser refine loop, a planner/executor
+pipeline, a debate/judge panel, and a triage/specialist bounded handoff over
+`route`.
+
+```bash
+llmff inspect examples/multi-agent/generator-critic-reviser.yaml
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"Set max_iterations and break on a success predicate.","accept":true,"issues":[]}' \
+llmff run examples/multi-agent/generator-critic-reviser.yaml \
+  --trace /tmp/llmff-generator-critic-reviser.trace.jsonl
+```
+
+See [`examples/multi-agent/README.md`](../examples/multi-agent/README.md) for the
+boundary notes and the rest of the catalog.
+
 ## RAG Answer
 
 Use this for local file-backed retrieval, lexical reranking, and answer

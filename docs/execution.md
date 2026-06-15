@@ -31,6 +31,35 @@ retry:
 HTTP tool retries are limited to transport errors and server-side 5xx
 responses. Client-side 4xx responses are treated as permanent failures.
 
+## Declared Agents
+
+A manifest may declare named `agents:` and reference one from an `infer` or
+`repair` stage with `agent: <name>`. An agent is a reusable bundle of a persona
+(`system`) plus model and sampling settings (`model`, `temperature`, `top_p`,
+`max_tokens`, `seed`, `stop`, `sampler`, `response_format`). References are
+resolved at inspect time into the stage's inference fields, recursing into loop
+and map bodies. Stage-level fields always override the referenced agent's
+defaults, and the resolved role name is reported by `inspect` and stamped onto
+stage trace and event records as `agent`.
+
+```yaml
+agents:
+  critic:
+    model: mock:good
+    response_format: json
+    system: "You are the Critic. Return {\"accept\": boolean}."
+graph:
+  - id: review
+    op: infer
+    agent: critic
+    from: draft
+```
+
+This is pure expansion sugar over the declared graph. It names the roles in a
+bounded, inspectable topology; it does not coordinate agents, schedule work, or
+choose which role runs next at runtime. Dynamic dispatch and agent-to-agent
+handoff beyond a declared, finite `route`/`select` remain a host concern.
+
 ## Loop Stages
 
 `op: loop` executes an embedded body graph sequentially. Every loop must declare

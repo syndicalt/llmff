@@ -69,6 +69,7 @@ code `130` for that case.
 | `op` | string | stage events | Stage operation such as `load`, `infer`, `retrieve`, or `write`. |
 | `status` | string | `stage_finished`, `run_finished` | Stage or run status. Stage values include `success`, `invalid`, and `skipped`. |
 | `duration_ms` | integer | `stage_finished` | Stage wall-clock duration in milliseconds. |
+| `agent` | string | stage events | Declared agent role name, when the stage references an `agent`. |
 | `model` | string | model stages | Manifest model alias, when applicable. |
 | `backend` | string | model stages | Resolved backend alias. |
 | `provider_model` | string | model stages | Model name sent to the provider after alias resolution. |
