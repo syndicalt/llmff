@@ -23,6 +23,8 @@ pub struct TraceEvent {
     pub map_index: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub map_stage_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     pub op: Option<String>,
     pub status: Option<String>,
     pub timestamp_ms: u128,

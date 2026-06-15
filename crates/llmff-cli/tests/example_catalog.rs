@@ -69,6 +69,29 @@ const LOOP_EXAMPLES: &[(&str, &str, &str)] = &[
     ),
 ];
 
+const MULTI_AGENT_EXAMPLES: &[(&str, &str, &str)] = &[
+    (
+        "Generator / Critic / Reviser",
+        "examples/multi-agent/generator-critic-reviser.yaml",
+        r#"{"answer":"Set max_iterations and break on a success predicate.","accept":true,"issues":[]}"#,
+    ),
+    (
+        "Planner / Executor",
+        "examples/multi-agent/planner-executor.yaml",
+        r#"{"steps":["Outline the bound.","Write the guard."],"answer":"Bound the loop with max_iterations and a success predicate.","status":"complete"}"#,
+    ),
+    (
+        "Debate / Judge",
+        "examples/multi-agent/debate-judge.yaml",
+        r#"{"argument":"Bounds make runs predictable.","winner":"advocate","rationale":"The bounded design is safer."}"#,
+    ),
+    (
+        "Triage / Specialist Handoff",
+        "examples/multi-agent/triage-specialist-handoff.yaml",
+        r#"{"route":"billing","answer":"Your duplicate charge will be refunded in 3-5 days.","category":"billing"}"#,
+    ),
+];
+
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -270,6 +293,63 @@ fn pipeline_library_catalog_is_documented_and_inspectable_offline() {
             library_source.contains(required_note),
             "pipeline docs should explain: {required_note}"
         );
+    }
+}
+
+#[test]
+fn multi_agent_examples_are_documented_inspectable_and_runnable_offline() {
+    let root = workspace_root();
+    let readme_path = root.join("examples/multi-agent/README.md");
+    let readme =
+        std::fs::read_to_string(&readme_path).expect("multi-agent README should be readable");
+    let examples_source = std::fs::read_to_string(root.join("examples/README.md"))
+        .expect("examples README should be readable");
+
+    assert!(
+        examples_source.contains("examples/multi-agent/README.md"),
+        "examples README should link the multi-agent catalog"
+    );
+
+    for (name, manifest, mock_response) in MULTI_AGENT_EXAMPLES {
+        let manifest_path = root.join(manifest);
+        assert!(
+            manifest_path.exists(),
+            "missing multi-agent example {manifest}"
+        );
+        assert!(
+            readme.contains(&format!("## {name}")),
+            "multi-agent README should document {name}"
+        );
+        assert!(
+            readme.contains(&format!("llmff inspect {manifest}")),
+            "multi-agent README should include inspect command for {manifest}"
+        );
+        assert!(
+            readme.contains(&format!("llmff run {manifest}")),
+            "multi-agent README should include run command for {manifest}"
+        );
+
+        Command::cargo_bin("llmff")
+            .unwrap()
+            .args(["inspect", manifest_path.to_str().unwrap()])
+            .assert()
+            .success();
+
+        Command::cargo_bin("llmff")
+            .unwrap()
+            .env("LLMFF_MOCK_GOOD_RESPONSE", mock_response)
+            .args(["run", manifest_path.to_str().unwrap()])
+            .assert()
+            .success();
+    }
+
+    for output in [
+        "generator-critic-reviser.output.json",
+        "planner-executor.output.json",
+        "debate-judge.output.json",
+        "triage-specialist-handoff.output.json",
+    ] {
+        let _ = std::fs::remove_file(root.join("examples/multi-agent").join(output));
     }
 }
 

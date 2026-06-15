@@ -10,6 +10,8 @@ pub struct Manifest {
     #[serde(default)]
     pub inputs: BTreeMap<String, InputSpec>,
     #[serde(default)]
+    pub agents: BTreeMap<String, AgentSpec>,
+    #[serde(default)]
     pub graph: Vec<StageSpec>,
     #[serde(default)]
     pub outputs: BTreeMap<String, OutputSpec>,
@@ -18,6 +20,94 @@ pub struct Manifest {
 impl Manifest {
     pub fn from_yaml_str(source: &str) -> Result<Self, LlmffError> {
         serde_yaml::from_str(source).map_err(LlmffError::ManifestParse)
+    }
+
+    /// Resolve `agent:` references on `infer`/`repair` stages into concrete
+    /// inference fields, recursing into loop/map bodies. This is pure
+    /// expansion sugar: an agent is a reusable bundle of a persona (`system`)
+    /// plus model and sampling settings. Stage-level fields always win over
+    /// the referenced agent's defaults, so explicit overrides are preserved.
+    ///
+    /// llmff does not coordinate agents. This only lets a manifest *name* the
+    /// roles in a declared, inspectable topology; the host above still owns
+    /// why the pipeline runs and what happens next.
+    pub fn resolve_agents(&mut self) -> Result<(), LlmffError> {
+        let agents = self.agents.clone();
+        for stage in &mut self.graph {
+            resolve_stage_agent(stage, &agents)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Default)]
+pub struct AgentSpec {
+    pub model: Option<String>,
+    pub system: Option<String>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub max_tokens: Option<u32>,
+    pub seed: Option<u64>,
+    #[serde(default)]
+    pub stop: Vec<String>,
+    pub sampler: Option<String>,
+    pub response_format: Option<String>,
+}
+
+fn resolve_stage_agent(
+    stage: &mut StageSpec,
+    agents: &BTreeMap<String, AgentSpec>,
+) -> Result<(), LlmffError> {
+    if let Some(name) = stage.agent.clone() {
+        if !matches!(stage.op.as_str(), "infer" | "repair") {
+            return Err(LlmffError::GraphValidation(format!(
+                "stage `{}` references agent `{name}` but op `{}` is not `infer` or `repair`",
+                stage.id, stage.op
+            )));
+        }
+        let agent = agents.get(&name).ok_or_else(|| {
+            LlmffError::GraphValidation(format!(
+                "stage `{}` references unknown agent `{name}`",
+                stage.id
+            ))
+        })?;
+        apply_agent_defaults(stage, agent);
+    }
+
+    for body_stage in &mut stage.body {
+        resolve_stage_agent(body_stage, agents)?;
+    }
+
+    Ok(())
+}
+
+fn apply_agent_defaults(stage: &mut StageSpec, agent: &AgentSpec) {
+    if stage.model.is_none() {
+        stage.model = agent.model.clone();
+    }
+    if stage.system.is_none() {
+        stage.system = agent.system.clone();
+    }
+    if stage.temperature.is_none() {
+        stage.temperature = agent.temperature;
+    }
+    if stage.top_p.is_none() {
+        stage.top_p = agent.top_p;
+    }
+    if stage.max_tokens.is_none() {
+        stage.max_tokens = agent.max_tokens;
+    }
+    if stage.seed.is_none() {
+        stage.seed = agent.seed;
+    }
+    if stage.sampler.is_none() {
+        stage.sampler = agent.sampler.clone();
+    }
+    if stage.response_format.is_none() {
+        stage.response_format = agent.response_format.clone();
+    }
+    if stage.stop.is_empty() {
+        stage.stop = agent.stop.clone();
     }
 }
 
@@ -37,6 +127,8 @@ pub struct OutputSpec {
 pub struct StageSpec {
     pub id: String,
     pub op: String,
+    pub agent: Option<String>,
+    pub system: Option<String>,
     pub input: Option<String>,
     pub from: Option<String>,
     pub state_from: Option<String>,
@@ -503,6 +595,99 @@ graph:
             manifest.graph[0].json_path.as_deref(),
             Some("result.final_answer")
         );
+    }
+
+    #[test]
+    fn resolve_agents_fills_inference_fields_and_recurses_into_bodies() {
+        let yaml = r#"
+version: 1
+agents:
+  critic:
+    model: mock:good
+    system: "Be terse."
+    temperature: 0.0
+    response_format: json
+graph:
+  - id: refine
+    op: loop
+    from: draft
+    max_iterations: 2
+    body:
+      - id: critique
+        op: infer
+        agent: critic
+        from: input
+"#;
+
+        let mut manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        manifest.resolve_agents().expect("agents should resolve");
+
+        let critique = &manifest.graph[0].body[0];
+        assert_eq!(critique.model.as_deref(), Some("mock:good"));
+        assert_eq!(critique.system.as_deref(), Some("Be terse."));
+        assert_eq!(critique.temperature, Some(0.0));
+        assert_eq!(critique.response_format.as_deref(), Some("json"));
+        // The reference is retained so traces and inspect can name the role.
+        assert_eq!(critique.agent.as_deref(), Some("critic"));
+    }
+
+    #[test]
+    fn resolve_agents_lets_stage_fields_override_agent_defaults() {
+        let yaml = r#"
+version: 1
+agents:
+  writer:
+    model: mock:good
+    temperature: 0.7
+graph:
+  - id: draft
+    op: infer
+    agent: writer
+    from: prompt
+    temperature: 0.1
+"#;
+
+        let mut manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        manifest.resolve_agents().expect("agents should resolve");
+
+        let draft = &manifest.graph[0];
+        assert_eq!(draft.model.as_deref(), Some("mock:good"));
+        assert_eq!(draft.temperature, Some(0.1));
+    }
+
+    #[test]
+    fn resolve_agents_rejects_unknown_agent_reference() {
+        let yaml = r#"
+version: 1
+graph:
+  - id: draft
+    op: infer
+    agent: ghost
+    from: prompt
+"#;
+
+        let mut manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let error = manifest.resolve_agents().unwrap_err().to_string();
+        assert!(error.contains("unknown agent `ghost`"), "got: {error}");
+    }
+
+    #[test]
+    fn resolve_agents_rejects_agent_on_non_inference_op() {
+        let yaml = r#"
+version: 1
+agents:
+  writer:
+    model: mock:good
+graph:
+  - id: classify
+    op: validate_json
+    agent: writer
+    from: prompt
+"#;
+
+        let mut manifest = Manifest::from_yaml_str(yaml).expect("manifest should parse");
+        let error = manifest.resolve_agents().unwrap_err().to_string();
+        assert!(error.contains("is not `infer` or `repair`"), "got: {error}");
     }
 
     #[test]

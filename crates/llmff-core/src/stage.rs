@@ -330,6 +330,8 @@ mod tests {
         let spec = StageSpec {
             id: "policy".to_string(),
             op: "system".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("load_prompt".to_string()),
             state_from: None,
@@ -407,6 +409,8 @@ mod tests {
         let spec = StageSpec {
             id: "validate".to_string(),
             op: "validate_json".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("draft".to_string()),
             state_from: None,
@@ -488,6 +492,8 @@ mod tests {
         let spec = StageSpec {
             id: "validate".to_string(),
             op: "validate_json".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("draft".to_string()),
             state_from: None,
@@ -566,6 +572,8 @@ mod tests {
         let spec = StageSpec {
             id: "validate".to_string(),
             op: "validate_json".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("draft".to_string()),
             state_from: None,
@@ -653,6 +661,8 @@ mod tests {
         let spec = StageSpec {
             id: "retrieve_context".to_string(),
             op: "retrieve".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("load_prompt".to_string()),
             state_from: None,
@@ -749,6 +759,8 @@ mod tests {
         let spec = StageSpec {
             id: "retrieve_context".to_string(),
             op: "retrieve".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("load_prompt".to_string()),
             state_from: None,
@@ -839,6 +851,8 @@ mod tests {
         let spec = StageSpec {
             id: "retrieve_context".to_string(),
             op: "retrieve".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("load_prompt".to_string()),
             state_from: None,
@@ -942,6 +956,8 @@ mod tests {
         let spec = StageSpec {
             id: "rerank_context".to_string(),
             op: "rerank".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("retrieve_context".to_string()),
             state_from: None,
@@ -1038,6 +1054,8 @@ mod tests {
         let spec = StageSpec {
             id: "policy".to_string(),
             op: "system".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("load_prompt".to_string()),
             state_from: None,
@@ -1126,6 +1144,8 @@ mod tests {
         let spec = StageSpec {
             id: "policy".to_string(),
             op: "system".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("load_prompt".to_string()),
             state_from: None,
@@ -1214,6 +1234,8 @@ mod tests {
         let spec = StageSpec {
             id: "render".to_string(),
             op: "template".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("load_prompt".to_string()),
             state_from: None,
@@ -1297,6 +1319,8 @@ mod tests {
         let spec = StageSpec {
             id: "render".to_string(),
             op: "template".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("load_prompt".to_string()),
             state_from: None,
@@ -1382,6 +1406,8 @@ mod tests {
         let spec = StageSpec {
             id: "render".to_string(),
             op: "template".to_string(),
+            agent: None,
+            system: None,
             input: None,
             from: Some("load_prompt".to_string()),
             state_from: None,

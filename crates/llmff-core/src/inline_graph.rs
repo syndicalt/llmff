@@ -48,6 +48,7 @@ impl Manifest {
         Ok(Self {
             version: 1,
             inputs,
+            agents: BTreeMap::new(),
             graph,
             outputs: BTreeMap::new(),
         })
@@ -273,6 +274,8 @@ fn empty_stage(id: String, op: String) -> StageSpec {
     StageSpec {
         id,
         op,
+        agent: None,
+        system: None,
         input: None,
         from: None,
         state_from: None,

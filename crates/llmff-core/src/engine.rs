@@ -366,6 +366,7 @@ impl Engine {
             TraceEvent {
                 run_id: options.run_id.clone(),
                 event: "run_started".to_string(),
+                agent: None,
                 stage_id: None,
                 loop_id: None,
                 loop_iteration: None,
@@ -444,6 +445,7 @@ impl Engine {
             TraceEvent {
                 run_id: options.run_id,
                 event: "run_finished".to_string(),
+                agent: None,
                 stage_id: None,
                 loop_id: None,
                 loop_iteration: None,
@@ -501,6 +503,7 @@ impl Engine {
             TraceEvent {
                 run_id: run_id.to_string(),
                 event: "stage_started".to_string(),
+                agent: stage.agent.clone(),
                 stage_id: Some(stage.id.clone()),
                 loop_id,
                 loop_iteration,
@@ -581,6 +584,7 @@ impl Engine {
             TraceEvent {
                 run_id: run_id.to_string(),
                 event: "stage_finished".to_string(),
+                agent: trace_stage.agent.clone(),
                 stage_id: Some(trace_stage.id.clone()),
                 loop_id,
                 loop_iteration,
@@ -627,6 +631,7 @@ impl Engine {
             TraceEvent {
                 run_id: run_id.to_string(),
                 event: "stage_finished".to_string(),
+                agent: trace_stage.agent.clone(),
                 stage_id: Some(trace_stage.id.clone()),
                 loop_id: Some(loop_context.loop_id.to_string()),
                 loop_iteration: Some(loop_context.iteration),
@@ -1483,7 +1488,7 @@ impl Engine {
         stream_writer: Option<&mut StageStreamWriter>,
         default_retry: RetryPolicy,
     ) -> Result<StageOutcome, LlmffError> {
-        let messages = parent_messages(stage, statuses)?;
+        let messages = with_agent_system_prompt(stage, parent_messages(stage, statuses)?);
         let model = required_model(stage)?;
         let resolved = self.backend_for_model(model)?;
         let mut request = InferRequest {
@@ -1560,14 +1565,17 @@ impl Engine {
                 let resolved = self.backend_for_model(model)?;
                 let mut request = InferRequest {
                     model: resolved.provider_model.to_string(),
-                    messages: vec![Message {
-                        role: "user".to_string(),
-                        content: format!(
-                            "Repair this output so it satisfies validation errors.\nErrors:\n{}\nOutput:\n{}",
-                            errors.join("\n"),
-                            serialize_value(value)?
-                        ),
-                    }],
+                    messages: with_agent_system_prompt(
+                        stage,
+                        vec![Message {
+                            role: "user".to_string(),
+                            content: format!(
+                                "Repair this output so it satisfies validation errors.\nErrors:\n{}\nOutput:\n{}",
+                                errors.join("\n"),
+                                serialize_value(value)?
+                            ),
+                        }],
+                    ),
                     temperature: stage.temperature,
                     top_p: stage.top_p,
                     max_tokens: stage.max_tokens,
@@ -1896,6 +1904,7 @@ impl Engine {
         TraceEvent {
             run_id: context.run_id.to_string(),
             event: "stage_started".to_string(),
+            agent: context.body_stage.agent.clone(),
             stage_id: Some(context.trace_stage.id.clone()),
             loop_id: None,
             loop_iteration: None,
@@ -1937,6 +1946,7 @@ impl Engine {
         TraceEvent {
             run_id: context.run_id.to_string(),
             event: "stage_finished".to_string(),
+            agent: context.body_stage.agent.clone(),
             stage_id: Some(context.trace_stage.id.clone()),
             loop_id: None,
             loop_iteration: None,
@@ -1970,6 +1980,7 @@ impl Engine {
         TraceEvent {
             run_id: context.run_id.to_string(),
             event: "stage_finished".to_string(),
+            agent: context.body_stage.agent.clone(),
             stage_id: Some(context.trace_stage.id.clone()),
             loop_id: None,
             loop_iteration: None,
@@ -3204,6 +3215,27 @@ fn required_model(stage: &StageSpec) -> Result<&str, LlmffError> {
             stage_id: stage.id.clone(),
             message: "stage requires model".to_string(),
         })
+}
+
+/// Prepend the stage's resolved `system` persona as a system message, unless
+/// the assembled messages already lead with one. The persona usually arrives
+/// via an `agent:` reference expanded in `Manifest::resolve_agents`, but an
+/// inline `system:` on the stage works the same way.
+fn with_agent_system_prompt(stage: &StageSpec, mut messages: Vec<Message>) -> Vec<Message> {
+    let Some(system) = stage.system.as_ref() else {
+        return messages;
+    };
+    if messages.first().map(|first| first.role.as_str()) == Some("system") {
+        return messages;
+    }
+    messages.insert(
+        0,
+        Message {
+            role: "system".to_string(),
+            content: system.clone(),
+        },
+    );
+    messages
 }
 
 fn serialize_value(value: &Value) -> Result<String, LlmffError> {
@@ -6527,6 +6559,74 @@ outputs:
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn agent_reference_expands_into_system_prompt_and_sampling() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt_path = dir.path().join("question.txt");
+        let output_path = dir.path().join("answer.txt");
+        std::fs::write(&prompt_path, "Return an answer.").unwrap();
+
+        let manifest = Manifest::from_yaml_str(&format!(
+            r#"
+version: 1
+inputs:
+  prompt:
+    path: {}
+agents:
+  writer:
+    model: recording:test-model
+    system: "Use terse JSON."
+    seed: 4242
+graph:
+  - id: load_prompt
+    op: load
+    input: prompt
+  - id: draft
+    op: infer
+    agent: writer
+    from: load_prompt
+outputs:
+  final:
+    from: draft
+    path: {}
+"#,
+            prompt_path.display(),
+            output_path.display()
+        ))
+        .unwrap();
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let seed = Arc::new(Mutex::new(None));
+        let response_format = Arc::new(Mutex::new(None));
+        let stop = Arc::new(Mutex::new(Vec::new()));
+        let engine = Engine::new().with_backend(
+            "recording",
+            Arc::new(RecordingBackend {
+                model: "test-model".to_string(),
+                messages: Arc::clone(&messages),
+                seed: Arc::clone(&seed),
+                response_format,
+                stop,
+            }),
+        );
+
+        engine.run_manifest(manifest, dir.path()).await.unwrap();
+
+        assert_eq!(
+            *messages.lock().unwrap(),
+            vec![
+                Message {
+                    role: "system".to_string(),
+                    content: "Use terse JSON.".to_string(),
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: "Return an answer.".to_string(),
+                },
+            ]
+        );
+        assert_eq!(*seed.lock().unwrap(), Some(4242));
     }
 
     #[tokio::test]
