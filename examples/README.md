@@ -218,6 +218,25 @@ execution while staying offline-friendly. See
 [`examples/loops/README.md`](loops/README.md) for the full copy-run catalog and
 real-provider adaptation notes.
 
+## Multi-Agent Topology
+
+Declared multi-agent topologies live in `examples/multi-agent/`. An `agent` is a
+reusable bundle of a persona, model, and sampling settings; stages reference one
+with `agent: <name>`, expanded at inspect time into a bounded, declared DAG.
+This describes a topology — it is not a dynamic orchestrator.
+
+### Generator / Critic / Reviser
+
+```bash
+llmff inspect examples/multi-agent/generator-critic-reviser.yaml
+LLMFF_MOCK_GOOD_RESPONSE='{"answer":"Set max_iterations and break on a success predicate.","accept":true,"issues":[]}' \
+llmff run examples/multi-agent/generator-critic-reviser.yaml \
+  --trace /tmp/llmff-generator-critic-reviser.trace.jsonl
+```
+
+See [`examples/multi-agent/README.md`](multi-agent/README.md) for the boundary
+notes and real-provider adaptation.
+
 ## Real-World Workflows
 
 Production-shaped examples live in `examples/real-world/`. They are offline mock

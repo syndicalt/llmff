@@ -1,0 +1,81 @@
+version: 1
+inputs:
+  request:
+    path: ./request.txt
+
+# A bounded handoff. A triage role labels the request, and `route` selects the
+# matching specialist's output from a DECLARED, FINITE set of agent stages. This
+# is the in-scope form of multi-agent handoff: the set of targets is fixed in
+# the manifest and visible to `inspect`. It is NOT dynamic dispatch — no role
+# invents a new target or chooses an undeclared successor at runtime.
+agents:
+  triage:
+    model: mock:good
+    response_format: json
+    temperature: 0.0
+    system: |
+      You are Triage. Classify the request and return JSON of the form
+      {"route": "billing" | "tech" | "general"}.
+  billing_specialist:
+    model: mock:good
+    response_format: json
+    system: |
+      You are the Billing specialist. Resolve billing requests and return JSON
+      of the form {"answer": string}.
+  tech_specialist:
+    model: mock:good
+    response_format: json
+    system: |
+      You are the Tech specialist. Resolve technical requests and return JSON
+      of the form {"answer": string}.
+  general_specialist:
+    model: mock:good
+    response_format: json
+    system: |
+      You are the General specialist. Handle anything else and return JSON of
+      the form {"answer": string}.
+
+graph:
+  - id: load_request
+    op: load
+    input: request
+
+  - id: classify
+    op: infer
+    agent: triage
+    from: load_request
+
+  - id: check_route
+    op: validate_json
+    from: classify
+    schema: '{"type":"object","required":["route"],"properties":{"route":{"type":"string"}}}'
+
+  - id: handle_billing
+    op: infer
+    agent: billing_specialist
+    from: load_request
+
+  - id: handle_tech
+    op: infer
+    agent: tech_specialist
+    from: load_request
+
+  - id: handle_general
+    op: infer
+    agent: general_specialist
+    from: load_request
+
+  - id: dispatch
+    op: route
+    from: check_route
+    field: route
+    cases:
+      billing: handle_billing
+      tech: handle_tech
+      general: handle_general
+    default: handle_general
+
+outputs:
+  final:
+    from: dispatch
+    path: ./triage-specialist-handoff.output.json

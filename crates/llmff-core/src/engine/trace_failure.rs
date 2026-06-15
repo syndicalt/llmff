@@ -43,6 +43,7 @@ pub(super) fn write_run_failed(
         TraceEvent {
             run_id: run_id.to_string(),
             event: "run_failed".to_string(),
+            agent: None,
             stage_id: failure_stage_id(error),
             loop_id: failure_loop_id(error),
             loop_iteration: failure_loop_iteration(error),

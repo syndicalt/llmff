@@ -1,0 +1,1 @@
+Claim: LLM pipelines should bound every retry loop with an explicit iteration cap.

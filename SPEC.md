@@ -171,3 +171,24 @@ stages do not add autonomous planning, host-level scheduling, memory, human
 approval policy, or a general workflow language. Complex orchestration remains
 above llmff; llmff executes the declared bounded contract and emits inspectable
 artifacts.
+
+### Declared Multi-Agent Topology Boundary
+
+A manifest may declare named `agents:` — reusable bundles of a persona
+(`system`), model, and sampling settings — and reference one from any
+`infer`/`repair` stage with `agent: <name>`. References are pure expansion
+sugar: `Manifest::resolve_agents` fills the stage's inference fields at inspect
+time, so the result stays a bounded, declared DAG. Stage-level fields always win
+over the referenced agent's defaults. The resolved role name is stamped onto
+stage trace events so a supervisor can attribute work per role.
+
+This lets a manifest *describe and bound* a multi-agent topology — for example a
+generator, a critic, and a reviser as three declared roles in one DAG, or a
+declared, finite handoff expressed with `route`/`select` over named agent
+stages. It does **not** make llmff a multi-agent orchestrator.
+
+The line is dynamic dispatch. llmff must not gain a primitive where model output
+chooses an undeclared or unbounded successor agent, spawns sub-agents, or drives
+open-ended agent-to-agent handoff. That is task decomposition and multi-agent
+coordination, which remain above the boundary with the host. `agents:` names the
+roles; it never decides which role runs next at runtime.

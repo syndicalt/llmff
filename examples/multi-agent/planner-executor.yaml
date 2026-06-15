@@ -1,0 +1,53 @@
+version: 1
+inputs:
+  task:
+    path: ./task.txt
+
+# A two-role pipeline: the planner decomposes the task into steps, the executor
+# carries the plan out. Both roles are declared agents expanded at inspect time.
+# The topology is fixed; nothing decides at runtime which role runs next.
+agents:
+  planner:
+    model: mock:good
+    response_format: json
+    temperature: 0.2
+    system: |
+      You are the Planner. Decompose the task into ordered steps and return JSON
+      of the form {"steps": [string]}. Do not solve the task yet.
+  executor:
+    model: mock:good
+    response_format: json
+    temperature: 0.0
+    system: |
+      You are the Executor. Carry out the plan and return JSON of the form
+      {"answer": string}. Follow the steps in order.
+
+graph:
+  - id: load_task
+    op: load
+    input: task
+
+  - id: plan
+    op: infer
+    agent: planner
+    from: load_task
+
+  - id: check_plan
+    op: validate_json
+    from: plan
+    schema: '{"type":"object","required":["steps"],"properties":{"steps":{"type":"array"}}}'
+
+  - id: execute
+    op: infer
+    agent: executor
+    from: check_plan
+
+  - id: check_answer
+    op: validate_json
+    from: execute
+    schema: '{"type":"object","required":["answer"],"properties":{"answer":{"type":"string"}}}'
+
+outputs:
+  final:
+    from: check_answer
+    path: ./planner-executor.output.json

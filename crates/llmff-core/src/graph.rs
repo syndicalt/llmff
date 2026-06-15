@@ -9,7 +9,8 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn from_manifest(manifest: Manifest) -> Result<Self, LlmffError> {
+    pub fn from_manifest(mut manifest: Manifest) -> Result<Self, LlmffError> {
+        manifest.resolve_agents()?;
         let input_ids = manifest.inputs.keys().cloned().collect::<BTreeSet<_>>();
         let mut stage_ids = BTreeSet::new();
 

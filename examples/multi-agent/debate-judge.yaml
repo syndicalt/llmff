@@ -1,0 +1,61 @@
+version: 1
+inputs:
+  topic:
+    path: ./topic.txt
+
+# Three declared roles converging on a decision: an advocate argues for the
+# claim, a skeptic argues against it, and a judge picks the stronger case. The
+# judge reads both arguments, but the wiring is fully declared — the judge does
+# not spawn debaters or choose who argues next.
+agents:
+  advocate:
+    model: mock:good
+    response_format: json
+    temperature: 0.6
+    system: |
+      You are the Advocate. Argue in favor of the claim and return JSON of the
+      form {"argument": string}.
+  skeptic:
+    model: mock:good
+    response_format: json
+    temperature: 0.6
+    system: |
+      You are the Skeptic. Argue against the claim and return JSON of the form
+      {"argument": string}.
+  judge:
+    model: mock:good
+    response_format: json
+    temperature: 0.0
+    system: |
+      You are the Judge. Weigh both arguments and return JSON of the form
+      {"winner": "advocate" | "skeptic", "rationale": string}.
+
+graph:
+  - id: load_topic
+    op: load
+    input: topic
+
+  - id: advocate_case
+    op: infer
+    agent: advocate
+    from: load_topic
+
+  - id: skeptic_case
+    op: infer
+    agent: skeptic
+    from: load_topic
+
+  - id: verdict
+    op: infer
+    agent: judge
+    from: skeptic_case
+
+  - id: check_verdict
+    op: validate_json
+    from: verdict
+    schema: '{"type":"object","required":["winner"],"properties":{"winner":{"type":"string"},"rationale":{"type":"string"}}}'
+
+outputs:
+  final:
+    from: check_verdict
+    path: ./debate-judge.output.json

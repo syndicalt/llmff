@@ -616,6 +616,7 @@ fn inspect_stage_view(stage: &llmff_core::manifest::StageSpec) -> serde_json::Va
     serde_json::json!({
         "id": stage.id,
         "op": stage.op,
+        "agent": stage.agent,
         "input": stage.input,
         "from": stage.from,
         "model": stage.model.as_ref().map(|model| model_view(model)),

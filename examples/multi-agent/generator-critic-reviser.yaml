@@ -1,0 +1,85 @@
+version: 1
+inputs:
+  task:
+    path: ./task.txt
+
+# Reusable role bundles. An "agent" here is a declared persona (`system`) plus
+# a model and sampling settings. References are expanded at inspect time into
+# concrete inference fields, so the graph stays a bounded, inspectable DAG.
+#
+# This does NOT make llmff an agent framework: there is no dynamic dispatch and
+# no agent choosing the next agent at runtime. The topology is fully declared.
+# The host above still owns why the pipeline runs and what happens next.
+agents:
+  generator:
+    model: mock:good
+    response_format: json
+    temperature: 0.7
+    system: |
+      You are the Generator. Produce a first-draft answer as JSON of the form
+      {"answer": string}. Be concrete and concise.
+  critic:
+    model: mock:good
+    response_format: json
+    temperature: 0.0
+    system: |
+      You are the Critic. Review the current answer and return JSON of the form
+      {"accept": boolean, "issues": [string]}. Accept only when the answer is
+      correct and complete.
+  reviser:
+    model: mock:good
+    response_format: json
+    temperature: 0.3
+    system: |
+      You are the Reviser. Apply the Critic's issues to the answer and return
+      JSON of the form {"answer": string}.
+
+graph:
+  - id: load_task
+    op: load
+    input: task
+
+  - id: draft
+    op: infer
+    agent: generator
+    from: load_task
+
+  - id: critique_loop
+    op: loop
+    from: draft
+    max_iterations: 2
+    break_on:
+      type: field_true
+      stage: judge
+      field: passed
+    carry:
+      input: revise
+    final:
+      from: revise
+      require_status: success
+    body:
+      - id: critique
+        op: infer
+        agent: critic
+        from: input
+
+      - id: check
+        op: validate_json
+        from: critique
+        schema: '{"type":"object","required":["accept"],"properties":{"accept":{"type":"boolean"},"issues":{"type":"array"}}}'
+
+      - id: judge
+        op: predicate
+        from: check
+        field: accept
+        mode: truthy
+
+      - id: revise
+        op: infer
+        agent: reviser
+        from: critique
+
+outputs:
+  final:
+    from: critique_loop
+    path: ./generator-critic-reviser.output.json
