@@ -5,6 +5,8 @@ export const SITE = {
   tagline: "FFmpeg-shaped pipelines for LLM workflows",
   repo: "https://github.com/syndicalt/llmff",
   base: process.env.BASE_URL || "/",
+  // Absolute deploy origin+base, used for social-card / canonical URLs.
+  canonical: (process.env.SITE_URL || "https://syndicalt.github.io/llmff").replace(/\/$/, ""),
 };
 
 export interface TocEntry { level: number; text: string; slug: string; }
@@ -89,8 +91,18 @@ export function shell(o: ShellOpts): string {
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>${escapeHtml(o.title)} · ${SITE.name}</title>
 <meta name="description" content="${escapeAttr(desc)}"/>
+<meta property="og:type" content="website"/>
+<meta property="og:site_name" content="${SITE.name}"/>
 <meta property="og:title" content="${escapeAttr(o.title)} · ${SITE.name}"/>
 <meta property="og:description" content="${escapeAttr(desc)}"/>
+<meta property="og:image" content="${SITE.canonical}/assets/llmff-card.png"/>
+<meta property="og:image:width" content="1568"/>
+<meta property="og:image:height" content="627"/>
+<meta property="og:image:alt" content="llmff — FFmpeg-shaped pipelines for LLM workflows"/>
+<meta name="twitter:card" content="summary_large_image"/>
+<meta name="twitter:title" content="${escapeAttr(o.title)} · ${SITE.name}"/>
+<meta name="twitter:description" content="${escapeAttr(desc)}"/>
+<meta name="twitter:image" content="${SITE.canonical}/assets/llmff-card.png"/>
 <link rel="icon" href="${url("/assets/favicon.svg")}"/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
