@@ -70,18 +70,18 @@ assets with:
 scripts/check-release-assets.sh v1.1.0
 ```
 
-Cut the `v1.2.0` tag only after the declared multi-agent topology review and
+Cut the `v1.3.0` tag only after the execution-core hardening review and
 this local preflight pass:
 
 ```bash
-scripts/release-preflight.sh v1.2.0
+scripts/release-preflight.sh v1.3.0
 ```
 
-After release CI completes for `v1.2.0`, verify the published GitHub Release
+After release CI completes for `v1.3.0`, verify the published GitHub Release
 assets with:
 
 ```bash
-scripts/check-release-assets.sh v1.2.0
+scripts/check-release-assets.sh v1.3.0
 ```
 
 For release tags in the release-candidate train, CI creates the GitHub Release when
@@ -90,7 +90,7 @@ Ubuntu/Debian packages, Arch packaging metadata, Windows MSI packages, and
 macOS `.pkg` packages to the matching GitHub Release assets. Manual dispatch
 keeps those outputs as Actions artifacts only.
 
-Unsigned Windows and macOS artifacts are acceptable for v1.2.0. The
+Unsigned Windows and macOS artifacts are acceptable for v1.3.0. The
 parked-signing policy — what ships unsigned today and what unparking
 Authenticode and Apple notarization requires — is in
 [`docs/distribution-trust.md`](distribution-trust.md#parked-signing-tracks).
