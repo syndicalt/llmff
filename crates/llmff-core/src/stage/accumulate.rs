@@ -7,6 +7,7 @@ use crate::manifest::StageSpec;
 use crate::value::{StageStatus, Value};
 
 use super::json_path::{clone_json_path, get_json_path};
+use super::specs::{AccumulateMode, AccumulateSpec};
 use super::{parse_json_stage_input, render_messages_as_text};
 
 pub(crate) fn accumulate(
@@ -19,20 +20,17 @@ pub(crate) fn accumulate(
         stage_id: spec.id.clone(),
         message: "accumulate requires input".to_string(),
     })?;
+    let typed = AccumulateSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
     let current_json = value_to_json(spec, current)?;
     let state_json = state.map(|value| value_to_json(spec, value)).transpose()?;
-    let mode = spec.mode.as_deref().unwrap_or("append");
-    let output = match mode {
-        "append" => accumulate_append(spec, &current_json, state_json)?,
-        "extend" => accumulate_extend(spec, &current_json, state_json)?,
-        "merge_object" => accumulate_merge_object(spec, &current_json, state_json)?,
-        _ => {
-            return Err(LlmffError::StageExecution {
-                stage_id: spec.id.clone(),
-                message: format!(
-                    "accumulate mode must be append, extend, or merge_object; got `{mode}`"
-                ),
-            });
+    let output = match typed.mode {
+        AccumulateMode::Append => accumulate_append(spec, &typed, &current_json, state_json)?,
+        AccumulateMode::Extend => accumulate_extend(spec, &typed, &current_json, state_json)?,
+        AccumulateMode::MergeObject => {
+            accumulate_merge_object(spec, &typed, &current_json, state_json)?
         }
     };
 
@@ -51,28 +49,30 @@ fn value_to_json(spec: &StageSpec, value: Value) -> Result<JsonValue, LlmffError
 
 fn accumulate_append(
     spec: &StageSpec,
+    typed: &AccumulateSpec,
     current: &JsonValue,
     state: Option<JsonValue>,
 ) -> Result<JsonValue, LlmffError> {
     let mut items = state_array(spec, state)?;
-    let item = select_current_value(spec, current)?;
-    if let Some(dedupe_field) = spec.dedupe_field.as_deref() {
+    let item = select_current_value(spec, typed, current)?;
+    if let Some(dedupe_field) = typed.dedupe_field.as_deref() {
         if let Some(dedupe_value) = get_json_path(&item, dedupe_field).cloned() {
             items.retain(|existing| get_json_path(existing, dedupe_field) != Some(&dedupe_value));
         }
     }
     items.push(item);
-    apply_limit(&mut items, spec.limit);
+    apply_limit(&mut items, typed.limit);
     Ok(JsonValue::Array(items))
 }
 
 fn accumulate_extend(
     spec: &StageSpec,
+    typed: &AccumulateSpec,
     current: &JsonValue,
     state: Option<JsonValue>,
 ) -> Result<JsonValue, LlmffError> {
     let mut items = state_array(spec, state)?;
-    let selected = select_current_value(spec, current)?;
+    let selected = select_current_value(spec, typed, current)?;
     let JsonValue::Array(new_items) = selected else {
         return Err(LlmffError::StageExecution {
             stage_id: spec.id.clone(),
@@ -80,30 +80,19 @@ fn accumulate_extend(
         });
     };
     items.extend(new_items);
-    if let Some(dedupe_field) = spec.dedupe_field.as_deref() {
+    if let Some(dedupe_field) = typed.dedupe_field.as_deref() {
         items = dedupe_last_by_field(&items, dedupe_field);
     }
-    apply_limit(&mut items, spec.limit);
+    apply_limit(&mut items, typed.limit);
     Ok(JsonValue::Array(items))
 }
 
 fn accumulate_merge_object(
     spec: &StageSpec,
+    typed: &AccumulateSpec,
     current: &JsonValue,
     state: Option<JsonValue>,
 ) -> Result<JsonValue, LlmffError> {
-    if spec.dedupe_field.is_some() {
-        return Err(LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: "dedupe_field is only supported for array accumulation".to_string(),
-        });
-    }
-    if spec.limit.is_some() {
-        return Err(LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: "limit is only supported for array accumulation".to_string(),
-        });
-    }
     let mut merged = match state {
         Some(JsonValue::Object(object)) => object,
         Some(_) => {
@@ -114,7 +103,7 @@ fn accumulate_merge_object(
         }
         None => JsonMap::new(),
     };
-    let selected = select_current_value(spec, current)?;
+    let selected = select_current_value(spec, typed, current)?;
     let JsonValue::Object(current_object) = selected else {
         return Err(LlmffError::StageExecution {
             stage_id: spec.id.clone(),
@@ -136,8 +125,12 @@ fn state_array(spec: &StageSpec, state: Option<JsonValue>) -> Result<Vec<JsonVal
     }
 }
 
-fn select_current_value(spec: &StageSpec, current: &JsonValue) -> Result<JsonValue, LlmffError> {
-    let Some(path) = spec.json_path.as_deref().or(spec.field.as_deref()) else {
+fn select_current_value(
+    spec: &StageSpec,
+    typed: &AccumulateSpec,
+    current: &JsonValue,
+) -> Result<JsonValue, LlmffError> {
+    let Some(path) = typed.path.as_deref() else {
         return Ok(current.clone());
     };
     clone_json_path(current, path).ok_or_else(|| LlmffError::StageExecution {

@@ -6,6 +6,7 @@ use crate::error::LlmffError;
 use crate::manifest::StageSpec;
 use crate::value::{StageStatus, Value};
 
+use super::specs::ValidateJsonSpec;
 use super::{parse_json_stage_input, render_messages_as_text, resolve_path};
 
 pub(super) fn validate_json(
@@ -48,18 +49,18 @@ pub(super) fn validate_json(
 }
 
 fn schema_source(spec: &StageSpec, cwd: &Path) -> Result<String, LlmffError> {
-    if let Some(schema) = &spec.schema {
-        return Ok(schema.clone());
+    let typed = ValidateJsonSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
+    if let Some(schema) = typed.schema {
+        return Ok(schema);
     }
 
-    let schema_path = spec
+    let schema_path = typed
         .schema_path
-        .as_ref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: "validate_json requires schema or schema_path".to_string(),
-        })?;
-    let path = resolve_path(cwd, schema_path);
+        .expect("ValidateJsonSpec::parse guarantees schema or schema_path");
+    let path = resolve_path(cwd, &schema_path);
     std::fs::read_to_string(&path).map_err(|error| LlmffError::StageExecution {
         stage_id: spec.id.clone(),
         message: format!("failed to read schema_path `{schema_path}`: {error}"),

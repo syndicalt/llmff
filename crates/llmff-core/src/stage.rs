@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::OnceLock;
 
 use serde::Serialize;
 
@@ -13,6 +14,7 @@ mod predicate;
 mod retrieval;
 mod score;
 mod select;
+pub(crate) mod specs;
 mod template;
 mod validate;
 
@@ -26,6 +28,320 @@ use select::select;
 use template::{system, template};
 use validate::validate_json;
 
+/// Exhaustive enum of every built-in stage operation. Adding a new builtin op
+/// means adding a variant here, which forces a compile error in every
+/// exhaustive `match` on `StageOp` (metadata catalog, deterministic dispatch,
+/// engine dispatch/validation, graph per-stage-kind validators) until each
+/// site accounts for it. Plugin ops (`op: plugin:<capability>`) and unknown
+/// ops are deliberately *not* variants here — they are resolved at the
+/// string boundary via [`StageOp::from_name`] returning `None`, exactly as
+/// before this enum existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum StageOp {
+    Load,
+    Cache,
+    System,
+    Template,
+    Retrieve,
+    Rerank,
+    Infer,
+    ValidateJson,
+    Extract,
+    Predicate,
+    Accumulate,
+    Score,
+    Select,
+    Repair,
+    Route,
+    Loop,
+    Map,
+    Tool,
+    Write,
+}
+
+impl StageOp {
+    /// Every built-in stage op, in the order `builtin_stage_metadata()` and
+    /// `llmff stages list` have always presented them.
+    pub(crate) const ALL: &'static [StageOp] = &[
+        StageOp::Load,
+        StageOp::Cache,
+        StageOp::System,
+        StageOp::Template,
+        StageOp::Retrieve,
+        StageOp::Rerank,
+        StageOp::Infer,
+        StageOp::ValidateJson,
+        StageOp::Extract,
+        StageOp::Predicate,
+        StageOp::Accumulate,
+        StageOp::Score,
+        StageOp::Select,
+        StageOp::Repair,
+        StageOp::Route,
+        StageOp::Loop,
+        StageOp::Map,
+        StageOp::Tool,
+        StageOp::Write,
+    ];
+
+    /// Resolve a manifest `op:` string to a builtin `StageOp`. Returns `None`
+    /// for plugin ops (`plugin:<capability>`) and for genuinely unknown ops —
+    /// callers handle that boundary explicitly, matching pre-enum behavior.
+    pub(crate) fn from_name(name: &str) -> Option<StageOp> {
+        Some(match name {
+            "load" => StageOp::Load,
+            "cache" => StageOp::Cache,
+            "system" => StageOp::System,
+            "template" => StageOp::Template,
+            "retrieve" => StageOp::Retrieve,
+            "rerank" => StageOp::Rerank,
+            "infer" => StageOp::Infer,
+            "validate_json" => StageOp::ValidateJson,
+            "extract" => StageOp::Extract,
+            "predicate" => StageOp::Predicate,
+            "accumulate" => StageOp::Accumulate,
+            "score" => StageOp::Score,
+            "select" => StageOp::Select,
+            "repair" => StageOp::Repair,
+            "route" => StageOp::Route,
+            "loop" => StageOp::Loop,
+            "map" => StageOp::Map,
+            "tool" => StageOp::Tool,
+            "write" => StageOp::Write,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            StageOp::Load => "load",
+            StageOp::Cache => "cache",
+            StageOp::System => "system",
+            StageOp::Template => "template",
+            StageOp::Retrieve => "retrieve",
+            StageOp::Rerank => "rerank",
+            StageOp::Infer => "infer",
+            StageOp::ValidateJson => "validate_json",
+            StageOp::Extract => "extract",
+            StageOp::Predicate => "predicate",
+            StageOp::Accumulate => "accumulate",
+            StageOp::Score => "score",
+            StageOp::Select => "select",
+            StageOp::Repair => "repair",
+            StageOp::Route => "route",
+            StageOp::Loop => "loop",
+            StageOp::Map => "map",
+            StageOp::Tool => "tool",
+            StageOp::Write => "write",
+        }
+    }
+
+    /// Static metadata for this op. Exhaustive: a new `StageOp` variant
+    /// without a matching arm here fails to compile.
+    fn metadata(self) -> StageMetadata {
+        match self {
+            StageOp::Load => StageMetadata {
+                name: self.as_str(),
+                kind: "input",
+                required_fields: &["input"],
+                optional_fields: &[],
+                capabilities: &["text-input", "json-input", "stdin"],
+            },
+            StageOp::Cache => StageMetadata {
+                name: self.as_str(),
+                kind: "storage",
+                required_fields: &["from"],
+                optional_fields: &["path", "key", "cache_policy"],
+                capabilities: &["persistent-cache"],
+            },
+            StageOp::System => StageMetadata {
+                name: self.as_str(),
+                kind: "prompt",
+                required_fields: &["from"],
+                optional_fields: &["path"],
+                capabilities: &["chat-messages", "system-prompt"],
+            },
+            StageOp::Template => StageMetadata {
+                name: self.as_str(),
+                kind: "prompt",
+                required_fields: &["from", "path"],
+                optional_fields: &[],
+                capabilities: &["file-template", "json-fields"],
+            },
+            StageOp::Retrieve => StageMetadata {
+                name: self.as_str(),
+                kind: "retrieval",
+                required_fields: &["from", "documents"],
+                optional_fields: &["top_k", "strategy", "command", "index"],
+                capabilities: &[
+                    "command-retrieval",
+                    "local-documents",
+                    "lexical-scoring",
+                    "local-embedding-scoring",
+                    "persistent-vector-index",
+                ],
+            },
+            StageOp::Rerank => StageMetadata {
+                name: self.as_str(),
+                kind: "retrieval",
+                required_fields: &["from"],
+                optional_fields: &["top_k", "strategy", "command"],
+                capabilities: &[
+                    "command-reranking",
+                    "retrieval-reranking",
+                    "lexical-scoring",
+                    "local-embedding-scoring",
+                ],
+            },
+            StageOp::Infer => StageMetadata {
+                name: self.as_str(),
+                kind: "model",
+                required_fields: &["from", "model"],
+                optional_fields: &[
+                    "temperature",
+                    "top_p",
+                    "max_tokens",
+                    "seed",
+                    "response_format",
+                    "stop",
+                    "sampler",
+                    "timeout_ms",
+                    "retry",
+                ],
+                capabilities: &[
+                    "chat-messages",
+                    "plugin-sampler",
+                    "response-format-json",
+                    "sampling",
+                    "seed-control",
+                    "stop-sequences",
+                    "usage-metadata",
+                ],
+            },
+            StageOp::ValidateJson => StageMetadata {
+                name: self.as_str(),
+                kind: "validation",
+                required_fields: &["from", "schema|schema_path"],
+                optional_fields: &[],
+                capabilities: &["json-schema"],
+            },
+            StageOp::Extract => StageMetadata {
+                name: self.as_str(),
+                kind: "transform",
+                required_fields: &["from", "field|json_path"],
+                optional_fields: &[],
+                capabilities: &["json-field-extraction", "dot-path"],
+            },
+            StageOp::Predicate => StageMetadata {
+                name: self.as_str(),
+                kind: "validation",
+                required_fields: &["from"],
+                optional_fields: &["field", "json_path", "mode", "value"],
+                capabilities: &["json-predicate", "loop-break-condition"],
+            },
+            StageOp::Accumulate => StageMetadata {
+                name: self.as_str(),
+                kind: "transform",
+                required_fields: &["from"],
+                optional_fields: &[
+                    "state_from",
+                    "field",
+                    "json_path",
+                    "mode",
+                    "limit",
+                    "dedupe_field",
+                ],
+                capabilities: &["json-accumulation", "loop-carry-state"],
+            },
+            StageOp::Score => StageMetadata {
+                name: self.as_str(),
+                kind: "transform",
+                required_fields: &["from", "score_field|field|json_path"],
+                optional_fields: &["reason_field", "label_field", "min_score", "max_score"],
+                capabilities: &["score-normalization", "json-transform"],
+            },
+            StageOp::Select => StageMetadata {
+                name: self.as_str(),
+                kind: "transform",
+                required_fields: &["from"],
+                optional_fields: &["json_path", "mode", "field", "score_field"],
+                capabilities: &["candidate-selection", "best-of-n"],
+            },
+            StageOp::Repair => StageMetadata {
+                name: self.as_str(),
+                kind: "model",
+                required_fields: &["from", "model"],
+                optional_fields: &[
+                    "temperature",
+                    "top_p",
+                    "max_tokens",
+                    "seed",
+                    "response_format",
+                    "stop",
+                    "sampler",
+                    "timeout_ms",
+                    "retry",
+                ],
+                capabilities: &[
+                    "json-repair",
+                    "plugin-sampler",
+                    "response-format-json",
+                    "sampling",
+                    "seed-control",
+                    "stop-sequences",
+                ],
+            },
+            StageOp::Route => StageMetadata {
+                name: self.as_str(),
+                kind: "control-flow",
+                required_fields: &["from", "target"],
+                optional_fields: &[
+                    "on_success",
+                    "on_invalid",
+                    "on_skipped",
+                    "field",
+                    "cases",
+                    "default",
+                ],
+                capabilities: &["status-routing", "json-field-routing"],
+            },
+            StageOp::Loop => StageMetadata {
+                name: self.as_str(),
+                kind: "control-flow",
+                required_fields: &["from", "max_iterations", "break_on", "body"],
+                optional_fields: &["carry", "final", "on_iteration_error", "retain_iterations"],
+                capabilities: &[
+                    "bounded-iteration",
+                    "body-subgraph",
+                    "explicit-break-condition",
+                    "loop-tracing",
+                ],
+            },
+            StageOp::Map => StageMetadata {
+                name: self.as_str(),
+                kind: "control-flow",
+                required_fields: &["from", "items_from", "max_items", "body"],
+                optional_fields: &["final", "parallel", "max_concurrency"],
+                capabilities: &["bounded-map", "body-subgraph", "json-array-items"],
+            },
+            StageOp::Tool => StageMetadata {
+                name: self.as_str(),
+                kind: "integration",
+                required_fields: &["from", "command|url|transport"],
+                optional_fields: &["method", "headers", "timeout_ms", "retry"],
+                capabilities: &["command-tool", "http-tool", "plugin-tool-transport"],
+            },
+            StageOp::Write => StageMetadata {
+                name: self.as_str(),
+                kind: "output",
+                required_fields: &["from", "path"],
+                optional_fields: &[],
+                capabilities: &["file-output", "stdout"],
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct StageMetadata {
     pub name: &'static str,
@@ -36,206 +352,8 @@ pub struct StageMetadata {
 }
 
 pub fn builtin_stage_metadata() -> &'static [StageMetadata] {
-    &[
-        StageMetadata {
-            name: "load",
-            kind: "input",
-            required_fields: &["input"],
-            optional_fields: &[],
-            capabilities: &["text-input", "json-input", "stdin"],
-        },
-        StageMetadata {
-            name: "cache",
-            kind: "storage",
-            required_fields: &["from"],
-            optional_fields: &["path", "key", "cache_policy"],
-            capabilities: &["persistent-cache"],
-        },
-        StageMetadata {
-            name: "system",
-            kind: "prompt",
-            required_fields: &["from"],
-            optional_fields: &["path"],
-            capabilities: &["chat-messages", "system-prompt"],
-        },
-        StageMetadata {
-            name: "template",
-            kind: "prompt",
-            required_fields: &["from", "path"],
-            optional_fields: &[],
-            capabilities: &["file-template", "json-fields"],
-        },
-        StageMetadata {
-            name: "retrieve",
-            kind: "retrieval",
-            required_fields: &["from", "documents"],
-            optional_fields: &["top_k", "strategy", "command", "index"],
-            capabilities: &[
-                "command-retrieval",
-                "local-documents",
-                "lexical-scoring",
-                "local-embedding-scoring",
-                "persistent-vector-index",
-            ],
-        },
-        StageMetadata {
-            name: "rerank",
-            kind: "retrieval",
-            required_fields: &["from"],
-            optional_fields: &["top_k", "strategy", "command"],
-            capabilities: &[
-                "command-reranking",
-                "retrieval-reranking",
-                "lexical-scoring",
-                "local-embedding-scoring",
-            ],
-        },
-        StageMetadata {
-            name: "infer",
-            kind: "model",
-            required_fields: &["from", "model"],
-            optional_fields: &[
-                "temperature",
-                "top_p",
-                "max_tokens",
-                "seed",
-                "response_format",
-                "stop",
-                "sampler",
-                "timeout_ms",
-                "retry",
-            ],
-            capabilities: &[
-                "chat-messages",
-                "plugin-sampler",
-                "response-format-json",
-                "sampling",
-                "seed-control",
-                "stop-sequences",
-                "usage-metadata",
-            ],
-        },
-        StageMetadata {
-            name: "validate_json",
-            kind: "validation",
-            required_fields: &["from", "schema|schema_path"],
-            optional_fields: &[],
-            capabilities: &["json-schema"],
-        },
-        StageMetadata {
-            name: "extract",
-            kind: "transform",
-            required_fields: &["from", "field|json_path"],
-            optional_fields: &[],
-            capabilities: &["json-field-extraction", "dot-path"],
-        },
-        StageMetadata {
-            name: "predicate",
-            kind: "validation",
-            required_fields: &["from"],
-            optional_fields: &["field", "json_path", "mode", "value"],
-            capabilities: &["json-predicate", "loop-break-condition"],
-        },
-        StageMetadata {
-            name: "accumulate",
-            kind: "transform",
-            required_fields: &["from"],
-            optional_fields: &[
-                "state_from",
-                "field",
-                "json_path",
-                "mode",
-                "limit",
-                "dedupe_field",
-            ],
-            capabilities: &["json-accumulation", "loop-carry-state"],
-        },
-        StageMetadata {
-            name: "score",
-            kind: "transform",
-            required_fields: &["from", "score_field|field|json_path"],
-            optional_fields: &["reason_field", "label_field", "min_score", "max_score"],
-            capabilities: &["score-normalization", "json-transform"],
-        },
-        StageMetadata {
-            name: "select",
-            kind: "transform",
-            required_fields: &["from"],
-            optional_fields: &["json_path", "mode", "field", "score_field"],
-            capabilities: &["candidate-selection", "best-of-n"],
-        },
-        StageMetadata {
-            name: "repair",
-            kind: "model",
-            required_fields: &["from", "model"],
-            optional_fields: &[
-                "temperature",
-                "top_p",
-                "max_tokens",
-                "seed",
-                "response_format",
-                "stop",
-                "sampler",
-                "timeout_ms",
-                "retry",
-            ],
-            capabilities: &[
-                "json-repair",
-                "plugin-sampler",
-                "response-format-json",
-                "sampling",
-                "seed-control",
-                "stop-sequences",
-            ],
-        },
-        StageMetadata {
-            name: "route",
-            kind: "control-flow",
-            required_fields: &["from", "target"],
-            optional_fields: &[
-                "on_success",
-                "on_invalid",
-                "on_skipped",
-                "field",
-                "cases",
-                "default",
-            ],
-            capabilities: &["status-routing", "json-field-routing"],
-        },
-        StageMetadata {
-            name: "loop",
-            kind: "control-flow",
-            required_fields: &["from", "max_iterations", "break_on", "body"],
-            optional_fields: &["carry", "final", "on_iteration_error", "retain_iterations"],
-            capabilities: &[
-                "bounded-iteration",
-                "body-subgraph",
-                "explicit-break-condition",
-                "loop-tracing",
-            ],
-        },
-        StageMetadata {
-            name: "map",
-            kind: "control-flow",
-            required_fields: &["from", "items_from", "max_items", "body"],
-            optional_fields: &["final", "parallel", "max_concurrency"],
-            capabilities: &["bounded-map", "body-subgraph", "json-array-items"],
-        },
-        StageMetadata {
-            name: "tool",
-            kind: "integration",
-            required_fields: &["from", "command|url|transport"],
-            optional_fields: &["method", "headers", "timeout_ms", "retry"],
-            capabilities: &["command-tool", "http-tool", "plugin-tool-transport"],
-        },
-        StageMetadata {
-            name: "write",
-            kind: "output",
-            required_fields: &["from", "path"],
-            optional_fields: &[],
-            capabilities: &["file-output", "stdout"],
-        },
-    ]
+    static METADATA: OnceLock<Vec<StageMetadata>> = OnceLock::new();
+    METADATA.get_or_init(|| StageOp::ALL.iter().map(|op| op.metadata()).collect())
 }
 
 pub fn execute_deterministic_stage(
@@ -243,17 +361,30 @@ pub fn execute_deterministic_stage(
     input: Option<Value>,
     cwd: &Path,
 ) -> Result<StageStatus, LlmffError> {
-    match spec.op.as_str() {
-        "system" => system(spec, input, cwd),
-        "template" => template(spec, input, cwd),
-        "retrieve" => retrieve(spec, input, cwd),
-        "rerank" => rerank(spec, input, cwd),
-        "validate_json" => validate_json(spec, input, cwd),
-        "extract" => extract(spec, input, cwd),
-        "predicate" => predicate(spec, input, cwd),
-        "score" => score(spec, input, cwd),
-        "select" => select(spec, input, cwd),
-        other => Err(LlmffError::UnknownStage(other.to_string())),
+    let Some(op) = StageOp::from_name(spec.op.as_str()) else {
+        return Err(LlmffError::UnknownStage(spec.op.clone()));
+    };
+
+    match op {
+        StageOp::System => system(spec, input, cwd),
+        StageOp::Template => template(spec, input, cwd),
+        StageOp::Retrieve => retrieve(spec, input, cwd),
+        StageOp::Rerank => rerank(spec, input, cwd),
+        StageOp::ValidateJson => validate_json(spec, input, cwd),
+        StageOp::Extract => extract(spec, input, cwd),
+        StageOp::Predicate => predicate(spec, input, cwd),
+        StageOp::Score => score(spec, input, cwd),
+        StageOp::Select => select(spec, input, cwd),
+        StageOp::Load
+        | StageOp::Cache
+        | StageOp::Infer
+        | StageOp::Accumulate
+        | StageOp::Repair
+        | StageOp::Route
+        | StageOp::Loop
+        | StageOp::Map
+        | StageOp::Tool
+        | StageOp::Write => Err(LlmffError::UnknownStage(spec.op.clone())),
     }
 }
 
@@ -323,6 +454,43 @@ mod tests {
         assert_eq!(tool.kind, "integration");
         assert!(tool.required_fields.contains(&"command|url|transport"));
         assert!(tool.capabilities.contains(&"plugin-tool-transport"));
+    }
+
+    #[test]
+    fn stage_op_round_trips_for_every_variant() {
+        for &op in StageOp::ALL {
+            let name = op.as_str();
+            assert_eq!(
+                StageOp::from_name(name),
+                Some(op),
+                "from_name(as_str()) should round-trip for {op:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn stage_op_names_match_builtin_stage_metadata_exactly() {
+        let metadata_names: std::collections::BTreeSet<&str> =
+            builtin_stage_metadata().iter().map(|m| m.name).collect();
+        let stage_op_names: std::collections::BTreeSet<&str> =
+            StageOp::ALL.iter().map(|op| op.as_str()).collect();
+        assert_eq!(
+            stage_op_names, metadata_names,
+            "StageOp::ALL must resolve to exactly the names builtin_stage_metadata() describes"
+        );
+
+        // And from_name must accept every metadata name, resolving to the op
+        // whose as_str() matches it (i.e. the string<->enum boundary agrees
+        // with the catalog in both directions).
+        for name in metadata_names {
+            let op = StageOp::from_name(name)
+                .unwrap_or_else(|| panic!("StageOp::from_name should resolve builtin op `{name}`"));
+            assert_eq!(op.as_str(), name);
+        }
+
+        // Unknown and plugin ops must not resolve.
+        assert_eq!(StageOp::from_name("plugin:custom"), None);
+        assert_eq!(StageOp::from_name("not_a_real_op"), None);
     }
 
     #[test]

@@ -2,6 +2,10 @@ use std::collections::BTreeSet;
 
 use crate::error::LlmffError;
 use crate::manifest::{LoopBreakSpec, LoopRetentionSpec, Manifest, StageSpec};
+use crate::stage::specs::{
+    AccumulateSpec, ExtractSpec, PredicateSpec, ScoreSpec, SelectSpec, ToolSpec, WriteSpec,
+};
+use crate::stage::StageOp;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Graph {
@@ -47,13 +51,7 @@ impl Graph {
                 }
             }
             validate_route_targets(stage, &stage_ids)?;
-            validate_extract_stage(stage)?;
-            validate_predicate_stage(stage)?;
-            validate_accumulate_stage(stage)?;
-            validate_score_stage(stage)?;
-            validate_select_stage(stage)?;
-            validate_tool_stage(stage)?;
-            validate_write_stage(stage)?;
+            validate_stage_op_fields(stage)?;
             validate_loop_stage(stage)?;
             validate_map_stage(stage)?;
         }
@@ -269,13 +267,7 @@ fn validate_loop_stage(stage: &StageSpec) -> Result<(), LlmffError> {
             }
         }
         validate_route_targets(body_stage, &body_ids)?;
-        validate_extract_stage(body_stage)?;
-        validate_predicate_stage(body_stage)?;
-        validate_accumulate_stage(body_stage)?;
-        validate_score_stage(body_stage)?;
-        validate_select_stage(body_stage)?;
-        validate_tool_stage(body_stage)?;
-        validate_write_stage(body_stage)?;
+        validate_stage_op_fields(body_stage)?;
     }
 
     if let Some(break_on) = &stage.break_on {
@@ -366,13 +358,7 @@ fn validate_map_stage(stage: &StageSpec) -> Result<(), LlmffError> {
             }
         }
         validate_route_targets(body_stage, &body_ids)?;
-        validate_extract_stage(body_stage)?;
-        validate_predicate_stage(body_stage)?;
-        validate_accumulate_stage(body_stage)?;
-        validate_score_stage(body_stage)?;
-        validate_select_stage(body_stage)?;
-        validate_tool_stage(body_stage)?;
-        validate_write_stage(body_stage)?;
+        validate_stage_op_fields(body_stage)?;
     }
 
     if let Some(final_output) = &stage.final_output {
@@ -427,186 +413,81 @@ fn validate_loop_retention(
     Ok(())
 }
 
-fn validate_extract_stage(stage: &StageSpec) -> Result<(), LlmffError> {
-    if stage.op != "extract" {
+/// Dispatch per-stage-kind field validation by resolved `StageOp`. Exhaustive
+/// over every builtin op: a new `StageOp` variant that needs its own field
+/// validator (or an explicit "no extra fields to check" decision) must be
+/// added here or the crate fails to compile. Unknown and plugin ops are
+/// validated elsewhere (engine `validate_stage`); this dispatcher no-ops for
+/// them, matching the pre-enum behavior where each per-op validator function
+/// silently skipped stages whose `op` didn't match.
+fn validate_stage_op_fields(stage: &StageSpec) -> Result<(), LlmffError> {
+    let Some(op) = StageOp::from_name(stage.op.as_str()) else {
         return Ok(());
-    }
+    };
 
-    if stage.from.is_none() {
-        return Err(LlmffError::GraphValidation(
-            "extract requires from".to_string(),
-        ));
+    match op {
+        StageOp::Extract => validate_extract_stage(stage),
+        StageOp::Predicate => validate_predicate_stage(stage),
+        StageOp::Accumulate => validate_accumulate_stage(stage),
+        StageOp::Score => validate_score_stage(stage),
+        StageOp::Select => validate_select_stage(stage),
+        StageOp::Tool => validate_tool_stage(stage),
+        StageOp::Write => validate_write_stage(stage),
+        StageOp::Load
+        | StageOp::Cache
+        | StageOp::System
+        | StageOp::Template
+        | StageOp::Retrieve
+        | StageOp::Rerank
+        | StageOp::Infer
+        | StageOp::ValidateJson
+        | StageOp::Repair
+        | StageOp::Route
+        | StageOp::Loop
+        | StageOp::Map => Ok(()),
     }
-    if stage.field.is_some() || stage.json_path.is_some() {
-        Ok(())
-    } else {
-        Err(LlmffError::GraphValidation(
-            "extract requires field or json_path".to_string(),
-        ))
-    }
+}
+
+fn validate_extract_stage(stage: &StageSpec) -> Result<(), LlmffError> {
+    ExtractSpec::parse(stage)
+        .map(|_| ())
+        .map_err(LlmffError::GraphValidation)
 }
 
 fn validate_predicate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
-    if stage.op != "predicate" {
-        return Ok(());
-    }
-
-    if stage.from.is_none() {
-        return Err(LlmffError::GraphValidation(
-            "predicate requires from".to_string(),
-        ));
-    }
-    let mode = stage.mode.as_deref().unwrap_or("truthy");
-    match mode {
-        "truthy" | "exists" | "equals" | "gt" | "gte" | "lt" | "lte" | "contains" => {}
-        other => {
-            return Err(LlmffError::GraphValidation(format!(
-                "predicate mode `{other}` is not supported"
-            )));
-        }
-    }
-    if matches!(mode, "equals" | "gt" | "gte" | "lt" | "lte") && stage.value.is_none() {
-        return Err(LlmffError::GraphValidation(format!(
-            "predicate mode `{mode}` requires value"
-        )));
-    }
-
-    Ok(())
+    PredicateSpec::parse(stage)
+        .map(|_| ())
+        .map_err(LlmffError::GraphValidation)
 }
 
 fn validate_accumulate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
-    if stage.op != "accumulate" {
-        return Ok(());
-    }
-
-    if stage.from.is_none() {
-        return Err(LlmffError::GraphValidation(
-            "accumulate requires from".to_string(),
-        ));
-    }
-    let mode = stage.mode.as_deref().unwrap_or("append");
-    match mode {
-        "append" | "extend" | "merge_object" => {}
-        other => {
-            return Err(LlmffError::GraphValidation(format!(
-                "accumulate mode `{other}` is not supported"
-            )));
-        }
-    }
-    if mode == "merge_object" && stage.dedupe_field.is_some() {
-        return Err(LlmffError::GraphValidation(
-            "dedupe_field is only supported for array accumulation".to_string(),
-        ));
-    }
-    if mode == "merge_object" && stage.limit.is_some() {
-        return Err(LlmffError::GraphValidation(
-            "limit is only supported for array accumulation".to_string(),
-        ));
-    }
-
-    Ok(())
+    AccumulateSpec::parse(stage)
+        .map(|_| ())
+        .map_err(LlmffError::GraphValidation)
 }
 
 fn validate_score_stage(stage: &StageSpec) -> Result<(), LlmffError> {
-    if stage.op != "score" {
-        return Ok(());
-    }
-
-    if stage.from.is_none() {
-        return Err(LlmffError::GraphValidation(
-            "score requires from".to_string(),
-        ));
-    }
-    if stage.score_field.is_none() && stage.field.is_none() && stage.json_path.is_none() {
-        return Err(LlmffError::GraphValidation(
-            "score requires score_field, field, or json_path".to_string(),
-        ));
-    }
-    if let (Some(min_score), Some(max_score)) = (stage.min_score, stage.max_score) {
-        if min_score > max_score {
-            return Err(LlmffError::GraphValidation(
-                "min_score cannot be greater than max_score".to_string(),
-            ));
-        }
-    }
-
-    Ok(())
+    ScoreSpec::parse(stage)
+        .map(|_| ())
+        .map_err(LlmffError::GraphValidation)
 }
 
 fn validate_select_stage(stage: &StageSpec) -> Result<(), LlmffError> {
-    if stage.op != "select" {
-        return Ok(());
-    }
-
-    if stage.from.is_none() {
-        return Err(LlmffError::GraphValidation(
-            "select requires from".to_string(),
-        ));
-    }
-    let mode = stage.mode.as_deref().unwrap_or("highest_score");
-    if !matches!(
-        mode,
-        "first_success" | "last_success" | "highest_score" | "field_max" | "field_min"
-    ) {
-        return Err(LlmffError::GraphValidation(
-            "select mode must be first_success, last_success, highest_score, field_max, or field_min"
-                .to_string(),
-        ));
-    }
-    if matches!(mode, "field_max" | "field_min")
-        && stage.field.is_none()
-        && stage.score_field.is_none()
-    {
-        return Err(LlmffError::GraphValidation(
-            "select field_max and field_min require field or score_field".to_string(),
-        ));
-    }
-
-    Ok(())
+    SelectSpec::parse(stage)
+        .map(|_| ())
+        .map_err(LlmffError::GraphValidation)
 }
 
 fn validate_tool_stage(stage: &StageSpec) -> Result<(), LlmffError> {
-    if stage.op != "tool" {
-        return Ok(());
-    }
-
-    let transport_count = usize::from(stage.command.is_some())
-        + usize::from(stage.url.is_some())
-        + usize::from(stage.transport.is_some());
-    if transport_count == 0 {
-        return Err(LlmffError::GraphValidation(
-            "tool requires command, url, or plugin transport".to_string(),
-        ));
-    }
-    if transport_count > 1 {
-        return Err(LlmffError::GraphValidation(
-            "tool cannot define more than one transport".to_string(),
-        ));
-    }
-
-    match (&stage.command, &stage.url) {
-        (Some(command), None) if command.is_empty() => Err(LlmffError::GraphValidation(
-            "tool command cannot be empty".to_string(),
-        )),
-        (None, Some(_)) if stage.method.is_none() => Err(LlmffError::GraphValidation(
-            "http tool requires method".to_string(),
-        )),
-        _ => Ok(()),
-    }
+    ToolSpec::parse(stage)
+        .map(|_| ())
+        .map_err(LlmffError::GraphValidation)
 }
 
 fn validate_write_stage(stage: &StageSpec) -> Result<(), LlmffError> {
-    if stage.op != "write" {
-        return Ok(());
-    }
-
-    if stage.path.is_some() {
-        Ok(())
-    } else {
-        Err(LlmffError::GraphValidation(
-            "write requires path".to_string(),
-        ))
-    }
+    WriteSpec::parse(stage)
+        .map(|_| ())
+        .map_err(LlmffError::GraphValidation)
 }
 
 #[cfg(test)]
@@ -1075,6 +956,188 @@ graph:
         .unwrap();
         let error = Graph::from_manifest(invalid_mode).unwrap_err().to_string();
         assert!(error.contains("predicate mode `unknown` is not supported"));
+
+        let missing_from = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: ready
+    op: predicate
+    field: score
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_from).unwrap_err().to_string();
+        assert!(error.contains("predicate requires from"));
+    }
+
+    #[test]
+    fn validates_accumulate_stage_contract() {
+        let missing_from = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: history
+    op: accumulate
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_from).unwrap_err().to_string();
+        assert!(error.contains("accumulate requires from"));
+
+        let invalid_mode = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: history
+    op: accumulate
+    from: source
+    mode: unknown
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(invalid_mode).unwrap_err().to_string();
+        assert!(error.contains("accumulate mode `unknown` is not supported"));
+
+        let dedupe_with_merge = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: history
+    op: accumulate
+    from: source
+    mode: merge_object
+    dedupe_field: id
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(dedupe_with_merge)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("dedupe_field is only supported for array accumulation"));
+
+        let limit_with_merge = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: history
+    op: accumulate
+    from: source
+    mode: merge_object
+    limit: 2
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(limit_with_merge)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("limit is only supported for array accumulation"));
+    }
+
+    #[test]
+    fn validates_score_stage_contract() {
+        let missing_from = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: normalized
+    op: score
+    score_field: score
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_from).unwrap_err().to_string();
+        assert!(error.contains("score requires from"));
+
+        let missing_path = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: normalized
+    op: score
+    from: source
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_path).unwrap_err().to_string();
+        assert!(error.contains("score requires score_field, field, or json_path"));
+
+        let inverted_bounds = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: normalized
+    op: score
+    from: source
+    score_field: score
+    min_score: 10
+    max_score: 0
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(inverted_bounds)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("min_score cannot be greater than max_score"));
+    }
+
+    #[test]
+    fn validates_select_stage_contract() {
+        let missing_from = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: winner
+    op: select
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_from).unwrap_err().to_string();
+        assert!(error.contains("select requires from"));
+
+        let invalid_mode = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: winner
+    op: select
+    from: source
+    mode: unknown
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(invalid_mode).unwrap_err().to_string();
+        assert!(error.contains(
+            "select mode must be first_success, last_success, highest_score, field_max, or field_min"
+        ));
+
+        let missing_field = Manifest::from_yaml_str(
+            r#"
+version: 1
+graph:
+  - id: source
+    op: load
+  - id: winner
+    op: select
+    from: source
+    mode: field_max
+"#,
+        )
+        .unwrap();
+        let error = Graph::from_manifest(missing_field).unwrap_err().to_string();
+        assert!(error.contains("select field_max and field_min require field or score_field"));
     }
 
     #[test]

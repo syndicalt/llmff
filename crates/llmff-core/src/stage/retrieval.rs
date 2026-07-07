@@ -11,6 +11,7 @@ use crate::error::LlmffError;
 use crate::manifest::StageSpec;
 use crate::value::{StageStatus, Value};
 
+use super::specs::{RerankSpec, RetrieveSpec, RetrieveStrategy};
 use super::{render_messages_as_text, resolve_path};
 
 pub(super) fn retrieve(
@@ -24,17 +25,20 @@ pub(super) fn retrieve(
             stage_id: spec.id.clone(),
             message: "retrieve requires input".to_string(),
         })?;
-    let strategy = RetrieveStrategy::from_stage(spec, "retrieve", RetrieveStrategy::Lexical)?;
-    if strategy == RetrieveStrategy::Command {
-        return command_retrieve(spec, cwd, query);
+    let typed = RetrieveSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
+    if typed.strategy == RetrieveStrategy::Command {
+        return command_retrieve(spec, &typed, cwd, query);
     }
-    let indexed_documents = if strategy == RetrieveStrategy::Embedding {
-        load_retrieve_documents(spec, cwd)?
+    let indexed_documents = if typed.strategy == RetrieveStrategy::Embedding {
+        load_retrieve_documents(spec, &typed, cwd)?
     } else {
-        RetrieveDocuments::unindexed(read_retrieve_documents(spec, cwd)?)
+        RetrieveDocuments::unindexed(read_retrieve_documents(spec, &typed.documents, cwd)?)
     };
     let query_terms = tokenize(&query);
-    let query_embedding = match strategy {
+    let query_embedding = match typed.strategy {
         RetrieveStrategy::Lexical => BTreeMap::new(),
         RetrieveStrategy::Embedding => hashed_embedding(&query),
         RetrieveStrategy::Command => BTreeMap::new(),
@@ -42,7 +46,7 @@ pub(super) fn retrieve(
     let mut matches = Vec::new();
 
     for document in &indexed_documents.documents {
-        let score = score_document(strategy, &query_terms, &query_embedding, document);
+        let score = score_document(typed.strategy, &query_terms, &query_embedding, document);
         if score.rank > 0.0 {
             matches.push(RetrieveMatch {
                 path: document.path.clone(),
@@ -66,13 +70,13 @@ pub(super) fn retrieve(
             })
             .then_with(|| left.path.cmp(&right.path))
     });
-    if let Some(top_k) = spec.top_k {
+    if let Some(top_k) = typed.top_k {
         matches.truncate(top_k);
     }
 
     let mut output = serde_json::json!({
         "query": query,
-        "strategy": strategy.as_str(),
+        "strategy": typed.strategy.as_str(),
         "matches": matches
             .into_iter()
             .map(|retrieved| {
@@ -128,18 +132,31 @@ pub(super) fn rerank(
             stage_id: spec.id.clone(),
             message: "rerank requires matches array".to_string(),
         })?;
-    let strategy = RetrieveStrategy::from_stage(spec, "rerank", RetrieveStrategy::Embedding)?;
-    if strategy == RetrieveStrategy::Command {
-        if let Some(top_k) = spec.top_k {
+    let typed = RerankSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
+    if typed.strategy == RetrieveStrategy::Command {
+        if let Some(top_k) = typed.top_k {
             root.insert(
                 "top_k".to_string(),
                 serde_json::Value::Number(serde_json::Number::from(top_k)),
             );
         }
-        return execute_json_command(spec, cwd, serde_json::Value::Object(root), "rerank command");
+        let command = typed
+            .command
+            .as_deref()
+            .expect("RerankSpec::parse guarantees command for command strategy");
+        return execute_json_command(
+            spec,
+            cwd,
+            serde_json::Value::Object(root),
+            "rerank command",
+            command,
+        );
     }
     let query_terms = tokenize(&query);
-    let query_embedding = match strategy {
+    let query_embedding = match typed.strategy {
         RetrieveStrategy::Lexical => BTreeMap::new(),
         RetrieveStrategy::Embedding => hashed_embedding(&query),
         RetrieveStrategy::Command => BTreeMap::new(),
@@ -169,7 +186,7 @@ pub(super) fn rerank(
                 message: "rerank match requires string text".to_string(),
             })?
             .to_string();
-        let score = score_text(strategy, &query_terms, &query_embedding, &text);
+        let score = score_text(typed.strategy, &query_terms, &query_embedding, &text);
         candidate.insert("score".to_string(), score.value.clone());
         reranked.push(RerankMatch {
             path,
@@ -192,14 +209,14 @@ pub(super) fn rerank(
             })
             .then_with(|| left.path.cmp(&right.path))
     });
-    if let Some(top_k) = spec.top_k {
+    if let Some(top_k) = typed.top_k {
         reranked.truncate(top_k);
     }
 
     root.insert("query".to_string(), serde_json::Value::String(query));
     root.insert(
         "strategy".to_string(),
-        serde_json::Value::String(strategy.as_str().to_string()),
+        serde_json::Value::String(typed.strategy.as_str().to_string()),
     );
     root.insert(
         "matches".to_string(),
@@ -218,11 +235,12 @@ pub(super) fn rerank(
 
 fn command_retrieve(
     spec: &StageSpec,
+    typed: &RetrieveSpec,
     cwd: &Path,
     query: String,
 ) -> Result<StageStatus, LlmffError> {
     let mut documents = Vec::new();
-    for document in &spec.documents {
+    for document in &typed.documents {
         let text = std::fs::read_to_string(resolve_path(cwd, document)).map_err(|error| {
             LlmffError::StageExecution {
                 stage_id: spec.id.clone(),
@@ -238,25 +256,36 @@ fn command_retrieve(
     let mut request = serde_json::Map::new();
     request.insert("query".to_string(), serde_json::Value::String(query));
     request.insert("documents".to_string(), serde_json::Value::Array(documents));
-    if let Some(top_k) = spec.top_k {
+    if let Some(top_k) = typed.top_k {
         request.insert(
             "top_k".to_string(),
             serde_json::Value::Number(serde_json::Number::from(top_k)),
         );
     }
 
+    let command = typed
+        .command
+        .as_deref()
+        .expect("RetrieveSpec::parse guarantees command for command strategy");
     execute_json_command(
         spec,
         cwd,
         serde_json::Value::Object(request),
         "retrieve command",
+        command,
     )
 }
 
-fn load_retrieve_documents(spec: &StageSpec, cwd: &Path) -> Result<RetrieveDocuments, LlmffError> {
-    let Some(index_path) = spec.index.as_deref() else {
+fn load_retrieve_documents(
+    spec: &StageSpec,
+    typed: &RetrieveSpec,
+    cwd: &Path,
+) -> Result<RetrieveDocuments, LlmffError> {
+    let Some(index_path) = typed.index.as_deref() else {
         return Ok(RetrieveDocuments::unindexed(read_retrieve_documents(
-            spec, cwd,
+            spec,
+            &typed.documents,
+            cwd,
         )?));
     };
     let resolved_index_path = resolve_path(cwd, index_path);
@@ -271,7 +300,7 @@ fn load_retrieve_documents(spec: &StageSpec, cwd: &Path) -> Result<RetrieveDocum
     let mut reused_documents = 0usize;
     let mut indexed_documents = 0usize;
 
-    for document in &spec.documents {
+    for document in &typed.documents {
         let metadata = retrieve_document_metadata(spec, cwd, document)?;
         let existing = existing_entries.remove(document);
         let record = if let Some(record) = existing {
@@ -316,9 +345,10 @@ fn load_retrieve_documents(spec: &StageSpec, cwd: &Path) -> Result<RetrieveDocum
 
 fn read_retrieve_documents(
     spec: &StageSpec,
+    documents: &[String],
     cwd: &Path,
 ) -> Result<Vec<IndexedRetrieveDocument>, LlmffError> {
-    spec.documents
+    documents
         .iter()
         .map(|document| {
             let text = read_retrieve_document_text(spec, cwd, document)?;
@@ -492,14 +522,8 @@ fn execute_json_command(
     cwd: &Path,
     request: serde_json::Value,
     label: &str,
+    command: &[String],
 ) -> Result<StageStatus, LlmffError> {
-    let command = spec
-        .command
-        .as_ref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: format!("{label} requires command"),
-        })?;
     let program = command.first().ok_or_else(|| LlmffError::StageExecution {
         stage_id: spec.id.clone(),
         message: format!("{label} cannot be empty"),
@@ -561,41 +585,6 @@ fn execute_json_command(
         });
     }
     Ok(StageStatus::Success(Value::Json(response)))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RetrieveStrategy {
-    Lexical,
-    Embedding,
-    Command,
-}
-
-impl RetrieveStrategy {
-    fn from_stage(
-        spec: &StageSpec,
-        operation: &str,
-        default: RetrieveStrategy,
-    ) -> Result<Self, LlmffError> {
-        match spec.strategy.as_deref().unwrap_or(default.as_str()) {
-            "lexical" => Ok(Self::Lexical),
-            "embedding" => Ok(Self::Embedding),
-            "command" => Ok(Self::Command),
-            strategy => Err(LlmffError::StageExecution {
-                stage_id: spec.id.clone(),
-                message: format!(
-                    "{operation} strategy must be lexical, embedding, or command, got `{strategy}`"
-                ),
-            }),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Lexical => "lexical",
-            Self::Embedding => "embedding",
-            Self::Command => "command",
-        }
-    }
 }
 
 const RETRIEVE_INDEX_VERSION: u32 = 1;
