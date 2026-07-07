@@ -81,8 +81,8 @@ Required final evidence:
 - dependency and security review is recorded in the release issue or notes;
 - dependency and security review evidence is recorded before the final tag;
 - `docs/migration/pre-1.0-to-1.0.md` is complete;
-- unsigned Windows and macOS status is repeated unless signing and notarization
-  are live;
+- unsigned-artifact status is repeated per
+  [`docs/distribution-trust.md`](distribution-trust.md#parked-signing-tracks);
 - package-manager publication claims match channels that maintainers have
   explicitly marked support-ready.
 

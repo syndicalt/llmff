@@ -90,10 +90,10 @@ Ubuntu/Debian packages, Arch packaging metadata, Windows MSI packages, and
 macOS `.pkg` packages to the matching GitHub Release assets. Manual dispatch
 keeps those outputs as Actions artifacts only.
 
-Unsigned Windows and macOS artifacts are acceptable for v1.2.0. Windows release
-tags publish an unsigned `.zip` and unsigned MSI. macOS release tags publish
-unsigned `.pkg` installers. Trusted Authenticode signing, Apple Developer ID
-signing, and notarization remain deferred paid distribution tracks.
+Unsigned Windows and macOS artifacts are acceptable for v1.2.0. The
+parked-signing policy — what ships unsigned today and what unparking
+Authenticode and Apple notarization requires — is in
+[`docs/distribution-trust.md`](distribution-trust.md#parked-signing-tracks).
 
 Current packaged artifact targets and installer assumptions are documented in
 [`docs/platform-support.md`](platform-support.md).
@@ -132,26 +132,24 @@ package-manager channel:
   `scripts/check-opentelemetry-bridge.sh` public integration gates.
 - [ ] The target channel is marked support-ready by maintainers in the release
   issue or release notes.
-- [ ] Homebrew, Scoop, winget, and AUR metadata pin immutable GitHub Release
-  asset URLs and SHA-256 digests before publication.
+- [ ] Homebrew, Scoop, winget, and AUR metadata publication follows the
+  channel trust requirements in
+  [`docs/distribution-trust.md`](distribution-trust.md#channel-trust-requirements).
 - [ ] apt remains parked; no `packaging/apt` repository metadata or
   `sources.list.d` instructions are shipped.
-- [ ] Unsigned Windows and macOS status is repeated in release notes unless
-  Authenticode signing, Apple Developer ID signing, and notarization are live.
-- [ ] SBOM/provenance posture is explicit: the release publishes
-  `llmff-<version>-release-trust.json`, and maintainers either publish
-  generated SBOM/provenance artifacts or record that the channel uses
-  checksum-only verification for this release.
-- [ ] Manifest schema, plugin protocol, CLI flags, and trace/event field changes
-  are additive or have a documented deprecation path.
-- [ ] Deprecated surfaces include replacement guidance, warning behavior when
-  practical, release-note coverage, and removal timing.
+- [ ] Release notes repeat the unsigned-artifact status per
+  [`docs/distribution-trust.md`](distribution-trust.md#parked-signing-tracks).
+- [ ] SBOM/provenance posture follows the readiness gate in
+  [`docs/distribution-trust.md`](distribution-trust.md#sbom-and-provenance-readiness-gate).
+- [ ] Manifest, plugin, CLI, and trace/event changes follow the additive and
+  deprecation policy in
+  [`docs/governance.md`](governance.md#deprecation-policy).
 - [ ] Provider, stage, and plugin examples still pass their focused validation
   gates and do not require live credentials for default tests.
 
-The checklist is a release decision aid, not an automatic publication trigger.
-Publishing remains parked for each channel until maintainers decide that
-channel is support-ready.
+The checklist is a release decision aid, not an automatic publication
+trigger; see [`docs/governance.md`](governance.md#decision-owners) for who
+decides a channel is support-ready.
 
 ## V0.8 API Freeze
 

@@ -23,10 +23,9 @@ smoke gate that protects it.
 ## Promotion Policy
 
 Registry promotion, package-manager publication, and live-provider
-certification are support commitments. Metadata can be checked into this
-repository before publication, but maintainers must explicitly accept ownership
-for updates, user reports, rollback, and security fixes before a channel is
-advertised as supported.
+certification are support commitments; see
+[`docs/governance.md`](governance.md#decision-owners) for who decides a
+channel is support-ready.
 
 Local gates should run without secrets or network access. Live gates must be
 explicitly opt-in and must document required secrets, runner assumptions, and
