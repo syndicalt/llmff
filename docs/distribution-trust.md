@@ -67,9 +67,9 @@ assets include it.
 ## Channel Trust Requirements
 
 Homebrew, Scoop, winget, and AUR metadata must pin release asset URLs and
-SHA-256 digests. The metadata can live in the repository before publication,
-but publish only after maintainers accept support ownership for updates, user
-reports, rollback, and security fixes.
+SHA-256 digests. The metadata can live in the repository before publication;
+see [`docs/governance.md`](governance.md#decision-owners) for the maintainer
+support-ready decision that gates publishing it.
 
 apt remains parked because a repository is a stronger trust commitment than a
 standalone `.deb`. It needs signed repository metadata, hosting, key rotation,

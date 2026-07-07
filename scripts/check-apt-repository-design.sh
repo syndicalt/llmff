@@ -1,27 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
+REQUIRE_FILE_LABEL="missing apt repository design artifact"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
 
-require_file() {
-  local path="$1"
-  if [ ! -f "$path" ]; then
-    printf 'error: missing apt repository design artifact: %s\n' "$path" >&2
-    exit 1
-  fi
-}
-
-require_text() {
-  local path="$1"
-  local text="$2"
-  require_file "$path"
-  if ! grep -Fq -- "$text" "$path"; then
-    printf 'error: %s must contain: %s\n' "$path" "$text" >&2
-    exit 1
-  fi
-}
-
+# require_absent_path is only duplicated in 2 scripts (below the 3+ lib
+# threshold); kept local per script rather than promoted to lib/checks.sh.
 require_absent_path() {
   local path="$1"
   if [ -e "$path" ]; then

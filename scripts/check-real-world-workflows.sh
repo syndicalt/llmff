@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
+REQUIRE_FILE_LABEL="missing real-world workflow example"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
 
@@ -14,17 +18,13 @@ elif [[ "$LLMFF_BIN" != /* ]]; then
   export LLMFF_BIN="$repo_root/$LLMFF_BIN"
 fi
 
-require_file() {
-  local path="$1"
-  if [ ! -f "$path" ]; then
-    printf 'error: missing real-world workflow example: %s\n' "$path" >&2
-    exit 1
-  fi
-}
-
+# The shared require_text dumps the actual and expected value shape (path +
+# text) on failure but not full file contents; reproduce that diagnostic here
+# since these assertions run against small generated tmp-dir output files.
 require_text() {
   local path="$1"
   local text="$2"
+  require_file "$path"
   if ! grep -Fq -- "$text" "$path"; then
     printf 'error: %s must contain: %s\n' "$path" "$text" >&2
     printf '%s contents:\n' "$path" >&2

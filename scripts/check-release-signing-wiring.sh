@@ -21,28 +21,13 @@ if [ "$#" -ne 0 ]; then
   exit 2
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
+
 workspace_version="$(
   sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1
 )"
 release_tag="v${workspace_version}"
-
-require_file() {
-  local path="$1"
-  if [ ! -f "$path" ]; then
-    printf 'error: missing required file: %s\n' "$path" >&2
-    exit 1
-  fi
-}
-
-require_text() {
-  local file="$1"
-  local needle="$2"
-  require_file "$file"
-  if ! grep -Fq -- "$needle" "$file"; then
-    printf 'error: %s must contain: %s\n' "$file" "$needle" >&2
-    exit 1
-  fi
-}
 
 require_file 'scripts/check-release-signing-gates.sh'
 require_file 'scripts/check-github-release-secrets.sh'

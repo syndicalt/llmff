@@ -21,25 +21,11 @@ if [ "$#" -ne 0 ]; then
   exit 2
 fi
 
-require_file() {
-  local path="$1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
 
-  if [ ! -f "$path" ]; then
-    printf 'error: missing required file: %s\n' "$path" >&2
-    exit 1
-  fi
-}
-
-require_text() {
-  local file="$1"
-  local needle="$2"
-
-  if ! grep -Fq -- "$needle" "$file"; then
-    printf 'error: %s does not mention required text: %s\n' "$file" "$needle" >&2
-    exit 1
-  fi
-}
-
+# reject_text is only used in this 1 script (below the 3+ lib threshold);
+# kept local rather than promoted to lib/checks.sh.
 reject_text() {
   local file="$1"
   local needle="$2"

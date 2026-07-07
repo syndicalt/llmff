@@ -1,36 +1,38 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use futures::StreamExt;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt as _;
-use tokio::process::Command;
-
-use crate::backend::{Backend, InferRequest, InferResponse, UsageMetadata};
+use crate::backend::{Backend, UsageMetadata};
 use crate::error::LlmffError;
 use crate::graph::Graph;
-use crate::manifest::{LoopBreakSpec, LoopRetentionSpec, Manifest, RetrySpec, StageSpec};
+use crate::manifest::{Manifest, RetrySpec, StageSpec};
 use crate::plugin::{
     discover_plugin_samplers, discover_plugin_stages, discover_plugin_tool_transports,
     PluginSampler, PluginStage, PluginToolTransport,
 };
-use crate::stage::{accumulate, execute_deterministic_stage, get_json_path};
+use crate::stage::specs::{RerankSpec, RetrieveSpec};
+use crate::stage::{accumulate, execute_deterministic_stage, StageOp};
 use crate::trace::{TraceEvent, TraceWriter};
 use crate::value::{Message, StageStatus, Value};
 
+mod backends;
 mod checkpoint;
+mod inference;
+mod loop_exec;
+mod map_exec;
 mod scheduler;
+mod stage_ops;
 mod streaming;
+mod tool_exec;
 mod trace_failure;
 
 use checkpoint::{manifest_fingerprint, read_checkpoint, validate_replay_trace};
+use loop_exec::loop_retention_config;
 use scheduler::{run_stages_in_parallel, run_stages_sequentially};
 use streaming::{create_stage_stream_writer, StageStreamWriter};
+use tool_exec::execute_command_stage;
 use trace_failure::{create_trace_writers, write_run_failed, write_trace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,67 +74,6 @@ pub(super) struct StageOutcome {
     cache_path: Option<String>,
     attempts: Option<usize>,
     stream_written: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct LoopTraceContext<'a> {
-    loop_id: &'a str,
-    iteration: usize,
-}
-
-struct FinishStageTrace<'a> {
-    trace_stage: &'a StageSpec,
-    status_stage_id: &'a str,
-    loop_stage_id: &'a str,
-    stage_started: Instant,
-    outcome: StageOutcome,
-    loop_context: Option<LoopTraceContext<'a>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
-enum LoopStopReason {
-    BreakCondition,
-    MaxIterations,
-    Error,
-}
-
-struct InferAttemptResult {
-    response: InferResponse,
-    attempts: usize,
-}
-
-struct ToolAttemptResult {
-    status: StageStatus,
-    attempts: usize,
-}
-
-struct MapItemResult {
-    index: usize,
-    status: &'static str,
-    value: serde_json::Value,
-    trace_events: Vec<TraceEvent>,
-}
-
-struct MapItemExecution<'a, 'ctx> {
-    context: &'a ExecutionContext<'ctx>,
-    map_stage: &'a StageSpec,
-    source: &'a Value,
-    ordered_body: &'a [StageSpec],
-    final_stage_id: &'a str,
-    index: usize,
-    item: serde_json::Value,
-    stream_writer: Option<&'a mut StageStreamWriter>,
-    trace_enabled: bool,
-}
-
-#[derive(Clone, Copy)]
-struct MapTraceContext<'a> {
-    run_id: &'a str,
-    map_stage: &'a StageSpec,
-    index: usize,
-    body_stage: &'a StageSpec,
-    trace_stage: &'a StageSpec,
 }
 
 pub(super) struct PluginExecutionContext<'a> {
@@ -478,190 +419,6 @@ impl Engine {
         Ok(report)
     }
 
-    fn start_stage_trace(
-        &self,
-        trace: &mut Vec<TraceWriter>,
-        run_id: &str,
-        stage: &StageSpec,
-    ) -> Result<Instant, LlmffError> {
-        self.start_stage_trace_with_loop(trace, run_id, stage, &stage.id, None)
-    }
-
-    fn start_stage_trace_with_loop(
-        &self,
-        trace: &mut Vec<TraceWriter>,
-        run_id: &str,
-        stage: &StageSpec,
-        loop_stage_id: &str,
-        loop_context: Option<LoopTraceContext<'_>>,
-    ) -> Result<Instant, LlmffError> {
-        let started = Instant::now();
-        let loop_id = loop_context.map(|context| context.loop_id.to_string());
-        let loop_iteration = loop_context.map(|context| context.iteration);
-        write_trace(
-            trace,
-            TraceEvent {
-                run_id: run_id.to_string(),
-                event: "stage_started".to_string(),
-                agent: stage.agent.clone(),
-                stage_id: Some(stage.id.clone()),
-                loop_id,
-                loop_iteration,
-                loop_stage_id: loop_context.map(|_| loop_stage_id.to_string()),
-                map_id: None,
-                map_index: None,
-                map_stage_id: None,
-                op: Some(stage.op.clone()),
-                status: None,
-                timestamp_ms: timestamp_ms(),
-                duration_ms: None,
-                attempts: None,
-                model: None,
-                backend: None,
-                provider_model: None,
-                validation_errors: None,
-                tool_kind: None,
-                tool_target: None,
-                output_path: None,
-                prompt_tokens: None,
-                completion_tokens: None,
-                total_tokens: None,
-                cache_hit: None,
-                cache_path: None,
-                failure_kind: None,
-                failure_message: None,
-            },
-        )?;
-        Ok(started)
-    }
-
-    fn finish_stage_trace(
-        &self,
-        trace: &mut Vec<TraceWriter>,
-        run_id: &str,
-        stage: &StageSpec,
-        stage_started: Instant,
-        outcome: StageOutcome,
-        statuses: &mut BTreeMap<String, StageStatus>,
-    ) -> Result<(), LlmffError> {
-        self.finish_stage_trace_with_loop(
-            trace,
-            run_id,
-            statuses,
-            FinishStageTrace {
-                trace_stage: stage,
-                status_stage_id: &stage.id,
-                loop_stage_id: &stage.id,
-                stage_started,
-                outcome,
-                loop_context: None,
-            },
-        )
-    }
-
-    fn finish_stage_trace_with_loop(
-        &self,
-        trace: &mut Vec<TraceWriter>,
-        run_id: &str,
-        statuses: &mut BTreeMap<String, StageStatus>,
-        finish: FinishStageTrace<'_>,
-    ) -> Result<(), LlmffError> {
-        let trace_stage = finish.trace_stage;
-        let outcome = finish.outcome;
-        let status = outcome.status;
-        let status_name = status_name(&status).to_string();
-        let metadata = self.trace_metadata(trace_stage, &status, outcome.usage.as_ref());
-        let cache_hit = outcome.cache_hit;
-        let cache_path = outcome.cache_path;
-        let attempts = outcome.attempts;
-        let loop_id = finish
-            .loop_context
-            .map(|context| context.loop_id.to_string());
-        let loop_iteration = finish.loop_context.map(|context| context.iteration);
-        statuses.insert(finish.status_stage_id.to_string(), status);
-        write_trace(
-            trace,
-            TraceEvent {
-                run_id: run_id.to_string(),
-                event: "stage_finished".to_string(),
-                agent: trace_stage.agent.clone(),
-                stage_id: Some(trace_stage.id.clone()),
-                loop_id,
-                loop_iteration,
-                loop_stage_id: finish
-                    .loop_context
-                    .map(|_| finish.loop_stage_id.to_string()),
-                map_id: None,
-                map_index: None,
-                map_stage_id: None,
-                op: Some(trace_stage.op.clone()),
-                status: Some(status_name),
-                timestamp_ms: timestamp_ms(),
-                duration_ms: Some(finish.stage_started.elapsed().as_millis()),
-                attempts,
-                model: metadata.model,
-                backend: metadata.backend,
-                provider_model: metadata.provider_model,
-                validation_errors: metadata.validation_errors,
-                tool_kind: metadata.tool_kind,
-                tool_target: metadata.tool_target,
-                output_path: metadata.output_path,
-                prompt_tokens: metadata.prompt_tokens,
-                completion_tokens: metadata.completion_tokens,
-                total_tokens: metadata.total_tokens,
-                cache_hit,
-                cache_path,
-                failure_kind: None,
-                failure_message: None,
-            },
-        )
-    }
-
-    fn finish_stage_trace_error_with_loop(
-        &self,
-        trace: &mut Vec<TraceWriter>,
-        run_id: &str,
-        trace_stage: &StageSpec,
-        loop_stage_id: &str,
-        stage_started: Instant,
-        loop_context: LoopTraceContext<'_>,
-    ) -> Result<(), LlmffError> {
-        write_trace(
-            trace,
-            TraceEvent {
-                run_id: run_id.to_string(),
-                event: "stage_finished".to_string(),
-                agent: trace_stage.agent.clone(),
-                stage_id: Some(trace_stage.id.clone()),
-                loop_id: Some(loop_context.loop_id.to_string()),
-                loop_iteration: Some(loop_context.iteration),
-                loop_stage_id: Some(loop_stage_id.to_string()),
-                map_id: None,
-                map_index: None,
-                map_stage_id: None,
-                op: Some(trace_stage.op.clone()),
-                status: Some("error".to_string()),
-                timestamp_ms: timestamp_ms(),
-                duration_ms: Some(stage_started.elapsed().as_millis()),
-                attempts: None,
-                model: None,
-                backend: None,
-                provider_model: None,
-                validation_errors: None,
-                tool_kind: None,
-                tool_target: None,
-                output_path: None,
-                prompt_tokens: None,
-                completion_tokens: None,
-                total_tokens: None,
-                cache_hit: None,
-                cache_path: None,
-                failure_kind: None,
-                failure_message: None,
-            },
-        )
-    }
-
     fn validate_stage(
         &self,
         stage: &StageSpec,
@@ -684,23 +441,27 @@ impl Engine {
             };
         }
 
-        if !matches!(stage.op.as_str(), "infer" | "repair") {
+        let Some(op) = StageOp::from_name(&stage.op) else {
+            return Err(LlmffError::UnknownStage(stage.op.clone()));
+        };
+
+        if !matches!(op, StageOp::Infer | StageOp::Repair) {
             reject_sampler_on_non_model_stage(stage)?;
         }
 
-        match stage.op.as_str() {
-            "load" => {
+        match op {
+            StageOp::Load => {
                 require_stage_field(stage, stage.input.as_deref(), "load requires input")?;
                 Ok(())
             }
-            "infer" => {
+            StageOp::Infer => {
                 require_stage_field(stage, stage.from.as_deref(), "infer requires from")?;
                 validate_sampler_reference(stage, plugin_samplers)?;
                 let model =
                     require_stage_field(stage, stage.model.as_deref(), "infer requires model")?;
                 self.backend_for_model(model).map(|_| ())
             }
-            "validate_json" => {
+            StageOp::ValidateJson => {
                 require_stage_field(stage, stage.from.as_deref(), "validate_json requires from")?;
                 if stage.schema.is_none() && stage.schema_path.is_none() {
                     return Err(stage_validation_error(
@@ -710,7 +471,7 @@ impl Engine {
                 }
                 Ok(())
             }
-            "extract" => {
+            StageOp::Extract => {
                 require_stage_field(stage, stage.from.as_deref(), "extract requires from")?;
                 if stage.field.is_none() && stage.json_path.is_none() {
                     return Err(stage_validation_error(
@@ -720,86 +481,49 @@ impl Engine {
                 }
                 Ok(())
             }
-            "predicate" => {
+            StageOp::Predicate => {
                 require_stage_field(stage, stage.from.as_deref(), "predicate requires from")?;
                 validate_predicate_stage(stage)
             }
-            "accumulate" => {
+            StageOp::Accumulate => {
                 require_stage_field(stage, stage.from.as_deref(), "accumulate requires from")?;
                 validate_accumulate_stage(stage)
             }
-            "score" => {
+            StageOp::Score => {
                 require_stage_field(stage, stage.from.as_deref(), "score requires from")?;
                 validate_score_stage(stage)
             }
-            "select" => {
+            StageOp::Select => {
                 require_stage_field(stage, stage.from.as_deref(), "select requires from")?;
                 validate_select_stage(stage)
             }
-            "system" => {
+            StageOp::System => {
                 require_stage_field(stage, stage.from.as_deref(), "system requires from")?;
                 Ok(())
             }
-            "template" => {
+            StageOp::Template => {
                 require_stage_field(stage, stage.from.as_deref(), "template requires from")?;
                 require_stage_field(stage, stage.path.as_deref(), "template requires path")?;
                 Ok(())
             }
-            "retrieve" => {
-                require_stage_field(stage, stage.from.as_deref(), "retrieve requires from")?;
-                if stage.documents.is_empty() && !is_command_retrieval_strategy(stage) {
-                    return Err(stage_validation_error(stage, "retrieve requires documents"));
-                }
-                if is_command_retrieval_strategy(stage) && stage.command.is_none() {
-                    return Err(stage_validation_error(
-                        stage,
-                        "retrieve command strategy requires command",
-                    ));
-                }
-                if stage.index.is_some() && stage.strategy.as_deref() != Some("embedding") {
-                    return Err(stage_validation_error(
-                        stage,
-                        "retrieve index requires embedding strategy",
-                    ));
-                }
-                if let Some(0) = stage.top_k {
-                    return Err(stage_validation_error(
-                        stage,
-                        "retrieve top_k must be greater than 0",
-                    ));
-                }
-                validate_retrieve_strategy(stage)?;
-                Ok(())
-            }
-            "rerank" => {
-                require_stage_field(stage, stage.from.as_deref(), "rerank requires from")?;
-                if is_command_retrieval_strategy(stage) && stage.command.is_none() {
-                    return Err(stage_validation_error(
-                        stage,
-                        "rerank command strategy requires command",
-                    ));
-                }
-                if let Some(0) = stage.top_k {
-                    return Err(stage_validation_error(
-                        stage,
-                        "rerank top_k must be greater than 0",
-                    ));
-                }
-                validate_rerank_strategy(stage)?;
-                Ok(())
-            }
-            "cache" => {
+            StageOp::Retrieve => RetrieveSpec::parse(stage)
+                .map(|_| ())
+                .map_err(|message| stage_validation_error(stage, message)),
+            StageOp::Rerank => RerankSpec::parse(stage)
+                .map(|_| ())
+                .map_err(|message| stage_validation_error(stage, message)),
+            StageOp::Cache => {
                 require_stage_field(stage, stage.from.as_deref(), "cache requires from")?;
                 Ok(())
             }
-            "repair" => {
+            StageOp::Repair => {
                 require_stage_field(stage, stage.from.as_deref(), "repair requires from")?;
                 validate_sampler_reference(stage, plugin_samplers)?;
                 let model =
                     require_stage_field(stage, stage.model.as_deref(), "repair requires model")?;
                 self.backend_for_model(model).map(|_| ())
             }
-            "route" => {
+            StageOp::Route => {
                 require_stage_field(stage, stage.from.as_deref(), "route requires from")?;
                 if stage.on_success.is_none()
                     && stage.on_invalid.is_none()
@@ -814,7 +538,7 @@ impl Engine {
                 }
                 Ok(())
             }
-            "loop" => {
+            StageOp::Loop => {
                 require_stage_field(stage, stage.from.as_deref(), "loop requires from")?;
                 if stage.max_iterations.unwrap_or(0) == 0 {
                     return Err(stage_validation_error(
@@ -834,7 +558,7 @@ impl Engine {
                 }
                 Ok(())
             }
-            "map" => {
+            StageOp::Map => {
                 require_stage_field(stage, stage.from.as_deref(), "map requires from")?;
                 require_stage_field(
                     stage,
@@ -867,15 +591,14 @@ impl Engine {
                 }
                 Ok(())
             }
-            "tool" => {
+            StageOp::Tool => {
                 require_stage_field(stage, stage.from.as_deref(), "tool requires from")?;
                 Ok(())
             }
-            "write" => {
+            StageOp::Write => {
                 require_stage_field(stage, stage.from.as_deref(), "write requires from")?;
                 Ok(())
             }
-            other => Err(LlmffError::UnknownStage(other.to_string())),
         }
     }
 
@@ -892,9 +615,8 @@ impl Engine {
         if let Some(timeout_ms) = timeout_ms {
             return tokio::time::timeout(Duration::from_millis(timeout_ms), run)
                 .await
-                .map_err(|_| LlmffError::StageExecution {
+                .map_err(|_| LlmffError::StageTimeout {
                     stage_id: stage.id.clone(),
-                    message: "stage timed out".to_string(),
                 })?;
         }
 
@@ -913,11 +635,28 @@ impl Engine {
             return Ok(StageOutcome::without_usage(StageStatus::Skipped));
         }
 
-        match stage.op.as_str() {
-            "load" => self
+        if let Some(plugin_stage_name) = plugin_stage_name(&stage.op) {
+            return self
+                .execute_plugin_stage(
+                    stage,
+                    statuses,
+                    context.cwd,
+                    context.plugins.stages,
+                    plugin_stage_name,
+                )
+                .await
+                .map(StageOutcome::without_usage);
+        }
+
+        let Some(op) = StageOp::from_name(&stage.op) else {
+            return Err(LlmffError::UnknownStage(stage.op.clone()));
+        };
+
+        match op {
+            StageOp::Load => self
                 .execute_load(context.manifest, stage, context.cwd)
                 .map(StageOutcome::without_usage),
-            "infer" => {
+            StageOp::Infer => {
                 self.execute_infer(
                     stage,
                     statuses,
@@ -927,8 +666,15 @@ impl Engine {
                 )
                 .await
             }
-            "validate_json" | "system" | "template" | "retrieve" | "rerank" | "extract"
-            | "predicate" | "score" | "select" => {
+            StageOp::ValidateJson
+            | StageOp::System
+            | StageOp::Template
+            | StageOp::Retrieve
+            | StageOp::Rerank
+            | StageOp::Extract
+            | StageOp::Predicate
+            | StageOp::Score
+            | StageOp::Select => {
                 let input = stage
                     .from
                     .as_ref()
@@ -937,7 +683,7 @@ impl Engine {
                 execute_deterministic_stage(stage, input, context.cwd)
                     .map(StageOutcome::without_usage)
             }
-            "accumulate" => {
+            StageOp::Accumulate => {
                 let input = stage
                     .from
                     .as_ref()
@@ -950,8 +696,8 @@ impl Engine {
                     .and_then(success_value);
                 accumulate(stage, input, state, context.cwd).map(StageOutcome::without_usage)
             }
-            "cache" => self.execute_cache(stage, statuses, context.cwd),
-            "repair" => {
+            StageOp::Cache => self.execute_cache(stage, statuses, context.cwd),
+            StageOp::Repair => {
                 self.execute_repair(
                     stage,
                     statuses,
@@ -960,18 +706,18 @@ impl Engine {
                 )
                 .await
             }
-            "route" => self
+            StageOp::Route => self
                 .execute_route(stage, statuses)
                 .map(StageOutcome::without_usage),
-            "loop" => self
+            StageOp::Loop => self
                 .execute_loop(context, stage, statuses, stream_writer, trace)
                 .await
                 .map(StageOutcome::without_usage),
-            "map" => self
+            StageOp::Map => self
                 .execute_map(context, stage, statuses, stream_writer, trace)
                 .await
                 .map(StageOutcome::without_usage),
-            "tool" => {
+            StageOp::Tool => {
                 self.execute_tool(
                     stage,
                     statuses,
@@ -981,702 +727,10 @@ impl Engine {
                 )
                 .await
             }
-            "write" => self
+            StageOp::Write => self
                 .execute_write(stage, statuses, context.cwd)
                 .map(StageOutcome::without_usage),
-            other => {
-                if let Some(plugin_stage_name) = plugin_stage_name(other) {
-                    return self
-                        .execute_plugin_stage(
-                            stage,
-                            statuses,
-                            context.cwd,
-                            context.plugins.stages,
-                            plugin_stage_name,
-                        )
-                        .await
-                        .map(StageOutcome::without_usage);
-                }
-                Err(LlmffError::UnknownStage(other.to_string()))
-            }
         }
-    }
-
-    async fn execute_loop(
-        &self,
-        context: &ExecutionContext<'_>,
-        stage: &StageSpec,
-        statuses: &BTreeMap<String, StageStatus>,
-        mut stream_writer: Option<&mut StageStreamWriter>,
-        mut trace: Option<&mut Vec<TraceWriter>>,
-    ) -> Result<StageStatus, LlmffError> {
-        let source = stage
-            .from
-            .as_ref()
-            .and_then(|parent| statuses.get(parent))
-            .and_then(success_value)
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "loop requires successful input".to_string(),
-            })?;
-        let max_iterations = stage.max_iterations.unwrap_or(0);
-        let ordered_body = crate::graph::order_loop_body_stages(stage)?;
-        let final_stage_id = stage
-            .final_output
-            .as_ref()
-            .map(|final_output| final_output.from.as_str())
-            .or_else(|| stage.body.last().map(|body_stage| body_stage.id.as_str()))
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "loop requires final stage".to_string(),
-            })?;
-        let iteration_error_policy = stage.on_iteration_error.as_deref().unwrap_or("fail");
-        let retention = loop_retention_config(stage)?;
-        let mut retained_iterations = Vec::new();
-        let mut previous_body_statuses: BTreeMap<String, StageStatus> = BTreeMap::new();
-        let mut last_body_statuses: BTreeMap<String, StageStatus> = BTreeMap::new();
-        let mut latest_final_status = None;
-        let mut latest_iteration_error = None;
-        let mut stop_reason = LoopStopReason::MaxIterations;
-        let mut iterations_run = 0usize;
-
-        for iteration in 1..=max_iterations {
-            iterations_run = iteration;
-            let mut body_statuses = BTreeMap::new();
-            body_statuses.insert("input".to_string(), StageStatus::Success(source.clone()));
-            if iteration == 1 {
-                for (input_name, value) in &stage.initial_carry {
-                    body_statuses.insert(
-                        input_name.clone(),
-                        StageStatus::Success(Value::Json(value.clone())),
-                    );
-                }
-            }
-            for (input_name, previous_stage_id) in &stage.carry {
-                if let Some(previous_status) = previous_body_statuses.get(previous_stage_id) {
-                    body_statuses.insert(input_name.clone(), previous_status.clone());
-                }
-            }
-
-            for body_stage in &ordered_body {
-                if iteration == 1 {
-                    reject_missing_first_iteration_carry_alias(stage, body_stage, &body_statuses)?;
-                }
-
-                let trace_stage = loop_trace_stage(stage, body_stage);
-                let loop_context = LoopTraceContext {
-                    loop_id: &stage.id,
-                    iteration,
-                };
-                let stage_started = if let Some(trace) = trace.as_deref_mut() {
-                    Some(self.start_stage_trace_with_loop(
-                        trace,
-                        context.run_id,
-                        &trace_stage,
-                        &body_stage.id,
-                        Some(loop_context),
-                    )?)
-                } else {
-                    None
-                };
-                let outcome = match Box::pin(self.execute_stage_with_timeout(
-                    context,
-                    body_stage,
-                    &body_statuses,
-                    stream_writer.as_deref_mut(),
-                    None,
-                ))
-                .await
-                {
-                    Ok(outcome) => outcome,
-                    Err(error) => match iteration_error_policy {
-                        "fail" => {
-                            return Err(loop_trace_error(
-                                error,
-                                &trace_stage,
-                                &body_stage.id,
-                                loop_context,
-                            ));
-                        }
-                        "break" => {
-                            if let (Some(trace), Some(stage_started)) =
-                                (trace.as_deref_mut(), stage_started)
-                            {
-                                self.finish_stage_trace_error_with_loop(
-                                    trace,
-                                    context.run_id,
-                                    &trace_stage,
-                                    &body_stage.id,
-                                    stage_started,
-                                    loop_context,
-                                )?;
-                            }
-                            latest_iteration_error = Some((iteration, body_stage.id.clone()));
-                            stop_reason = LoopStopReason::Error;
-                            break;
-                        }
-                        "continue" => {
-                            if let (Some(trace), Some(stage_started)) =
-                                (trace.as_deref_mut(), stage_started)
-                            {
-                                self.finish_stage_trace_error_with_loop(
-                                    trace,
-                                    context.run_id,
-                                    &trace_stage,
-                                    &body_stage.id,
-                                    stage_started,
-                                    loop_context,
-                                )?;
-                            }
-                            latest_iteration_error = Some((iteration, body_stage.id.clone()));
-                            break;
-                        }
-                        _ => return Err(error),
-                    },
-                };
-                if let (Some(trace), Some(stage_started)) = (trace.as_deref_mut(), stage_started) {
-                    self.finish_stage_trace_with_loop(
-                        trace,
-                        context.run_id,
-                        &mut body_statuses,
-                        FinishStageTrace {
-                            trace_stage: &trace_stage,
-                            status_stage_id: &body_stage.id,
-                            loop_stage_id: &body_stage.id,
-                            stage_started,
-                            outcome,
-                            loop_context: Some(loop_context),
-                        },
-                    )?;
-                } else {
-                    body_statuses.insert(body_stage.id.clone(), outcome.status);
-                }
-                if body_stage.id == final_stage_id {
-                    if let Some(final_status) = body_statuses
-                        .get(final_stage_id)
-                        .filter(|status| !matches!(status, StageStatus::Skipped))
-                    {
-                        latest_final_status = Some(final_status.clone());
-                    }
-                }
-            }
-
-            if let Some(retention) = &retention {
-                retained_iterations.push(loop_iteration_record(
-                    iteration,
-                    &ordered_body,
-                    &body_statuses,
-                    retention,
-                )?);
-            }
-
-            if matches!(stop_reason, LoopStopReason::Error) {
-                if body_statuses.contains_key(final_stage_id) {
-                    last_body_statuses = body_statuses;
-                }
-                break;
-            }
-
-            if latest_iteration_error
-                .as_ref()
-                .is_some_and(|(error_iteration, _)| *error_iteration == iteration)
-            {
-                previous_body_statuses = body_statuses;
-                continue;
-            }
-
-            let should_break =
-                evaluate_loop_break(stage.break_on.as_ref().unwrap(), &body_statuses)?;
-            previous_body_statuses = body_statuses.clone();
-            last_body_statuses = body_statuses;
-            if should_break {
-                stop_reason = LoopStopReason::BreakCondition;
-                break;
-            }
-        }
-
-        let final_status = last_body_statuses
-            .get(final_stage_id)
-            .filter(|status| !matches!(status, StageStatus::Skipped))
-            .or(latest_final_status.as_ref())
-            .ok_or_else(|| {
-                if let Some((iteration, body_stage_id)) = latest_iteration_error.as_ref() {
-                    let message = if matches!(stop_reason, LoopStopReason::Error) {
-                        format!(
-                            "loop `{}` stopped on iteration error at iteration {iteration} in body stage `{body_stage_id}` with no final output available",
-                            stage.id
-                        )
-                    } else {
-                        format!(
-                            "loop `{}` produced no final output after iteration errors",
-                            stage.id
-                        )
-                    };
-                    return LlmffError::StageExecution {
-                        stage_id: stage.id.clone(),
-                        message,
-                    };
-                }
-
-                LlmffError::StageExecution {
-                    stage_id: stage.id.clone(),
-                    message: format!("loop final stage `{final_stage_id}` did not run"),
-                }
-            })?;
-        let final_value = loop_final_value(
-            stage,
-            final_stage_id,
-            final_status,
-            iterations_run,
-            &stop_reason,
-            &retained_iterations,
-        )?;
-
-        Ok(StageStatus::Success(final_value))
-    }
-
-    async fn execute_map(
-        &self,
-        context: &ExecutionContext<'_>,
-        stage: &StageSpec,
-        statuses: &BTreeMap<String, StageStatus>,
-        mut stream_writer: Option<&mut StageStreamWriter>,
-        trace: Option<&mut Vec<TraceWriter>>,
-    ) -> Result<StageStatus, LlmffError> {
-        let source = stage
-            .from
-            .as_ref()
-            .and_then(|parent| statuses.get(parent))
-            .and_then(success_value)
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "map requires successful input".to_string(),
-            })?;
-        let Value::Json(source_json) = source.clone() else {
-            return Err(LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "map requires JSON input".to_string(),
-            });
-        };
-        let items_path = stage
-            .items_from
-            .as_deref()
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "map requires items_from".to_string(),
-            })?;
-        let items_value =
-            get_json_path(&source_json, items_path).ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: format!("map items_from path `{items_path}` was not found"),
-            })?;
-        let serde_json::Value::Array(items) = items_value else {
-            return Err(LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: format!("map items_from path `{items_path}` must resolve to an array"),
-            });
-        };
-        let max_items = stage.max_items.unwrap_or(0);
-        let item_count = items.len().min(max_items);
-        let ordered_body = crate::graph::order_map_body_stages(stage)?;
-        let final_stage_id = stage
-            .final_output
-            .as_ref()
-            .map(|final_output| final_output.from.as_str())
-            .or_else(|| stage.body.last().map(|body_stage| body_stage.id.as_str()))
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "map requires final stage".to_string(),
-            })?;
-        let trace_enabled = trace.is_some();
-        let parallel = stage.parallel.unwrap_or(false);
-        let item_inputs = items
-            .iter()
-            .take(item_count)
-            .cloned()
-            .enumerate()
-            .collect::<Vec<_>>();
-        let mut item_results = if parallel {
-            let max_concurrency = stage.max_concurrency.unwrap_or(1).max(1);
-            futures::stream::iter(item_inputs)
-                .map(|(index, item)| {
-                    self.execute_map_item(MapItemExecution {
-                        context,
-                        map_stage: stage,
-                        source: &source,
-                        ordered_body: &ordered_body,
-                        final_stage_id,
-                        index,
-                        item,
-                        stream_writer: None,
-                        trace_enabled,
-                    })
-                })
-                .buffer_unordered(max_concurrency)
-                .collect::<Vec<_>>()
-                .await
-        } else {
-            let mut results = Vec::with_capacity(item_count);
-            for (index, item) in item_inputs {
-                results.push(
-                    self.execute_map_item(MapItemExecution {
-                        context,
-                        map_stage: stage,
-                        source: &source,
-                        ordered_body: &ordered_body,
-                        final_stage_id,
-                        index,
-                        item,
-                        stream_writer: stream_writer.as_deref_mut(),
-                        trace_enabled,
-                    })
-                    .await,
-                );
-            }
-            results
-        }
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
-
-        item_results.sort_by_key(|item| item.index);
-        if let Some(trace) = trace {
-            for item in &item_results {
-                for event in &item.trace_events {
-                    write_trace(trace, event.clone())?;
-                }
-            }
-        }
-        let mapped_items = item_results
-            .into_iter()
-            .map(|item| {
-                serde_json::json!({
-                    "index": item.index,
-                    "status": item.status,
-                    "value": item.value
-                })
-            })
-            .collect::<Vec<_>>();
-
-        let stop_reason = if items.len() > item_count {
-            "max_items"
-        } else {
-            "completed"
-        };
-
-        Ok(StageStatus::Success(Value::Json(serde_json::json!({
-            "items": mapped_items,
-            "metadata": {
-                "items_run": item_count,
-                "items_total": items.len(),
-                "stop_reason": stop_reason,
-                "parallel": parallel
-            }
-        }))))
-    }
-
-    async fn execute_map_item(
-        &self,
-        mut item_context: MapItemExecution<'_, '_>,
-    ) -> Result<MapItemResult, LlmffError> {
-        let mut trace_events = Vec::new();
-        let mut body_statuses = BTreeMap::new();
-        body_statuses.insert(
-            "input".to_string(),
-            StageStatus::Success(item_context.source.clone()),
-        );
-        body_statuses.insert(
-            "item".to_string(),
-            StageStatus::Success(Value::Json(item_context.item)),
-        );
-
-        for body_stage in item_context.ordered_body {
-            let trace_stage =
-                map_trace_stage(item_context.map_stage, item_context.index, body_stage);
-            let trace_context = MapTraceContext {
-                run_id: item_context.context.run_id,
-                map_stage: item_context.map_stage,
-                index: item_context.index,
-                body_stage,
-                trace_stage: &trace_stage,
-            };
-            let stage_started = Instant::now();
-            if item_context.trace_enabled {
-                trace_events.push(self.map_trace_started(trace_context));
-            }
-            let outcome = match Box::pin(self.execute_stage_with_timeout(
-                item_context.context,
-                body_stage,
-                &body_statuses,
-                item_context.stream_writer.as_deref_mut(),
-                None,
-            ))
-            .await
-            {
-                Ok(outcome) => outcome,
-                Err(error) => {
-                    if item_context.trace_enabled {
-                        trace_events.push(self.map_trace_error(trace_context, stage_started));
-                    }
-                    return Err(error);
-                }
-            };
-            if item_context.trace_enabled {
-                trace_events.push(self.map_trace_finished(trace_context, stage_started, &outcome));
-            }
-            body_statuses.insert(body_stage.id.clone(), outcome.status);
-        }
-
-        let final_status = body_statuses
-            .get(item_context.final_stage_id)
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: item_context.map_stage.id.clone(),
-                message: format!(
-                    "map final stage `{}` did not run",
-                    item_context.final_stage_id
-                ),
-            })?;
-        let (status, value) = map_item_output(
-            item_context.map_stage,
-            item_context.final_stage_id,
-            final_status,
-        )?;
-        Ok(MapItemResult {
-            index: item_context.index,
-            status,
-            value,
-            trace_events,
-        })
-    }
-
-    fn execute_load(
-        &self,
-        manifest: &Manifest,
-        stage: &StageSpec,
-        cwd: &Path,
-    ) -> Result<StageStatus, LlmffError> {
-        let input_name = stage
-            .input
-            .as_ref()
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "load requires input".to_string(),
-            })?;
-        let input = manifest
-            .inputs
-            .get(input_name)
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: format!("unknown input `{input_name}`"),
-            })?;
-        let path = input
-            .path
-            .as_ref()
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "input requires path".to_string(),
-            })?;
-        let text = read_input(cwd, path)?;
-
-        decode_input(stage, input_name, input.format.as_deref(), text)
-    }
-
-    async fn execute_infer(
-        &self,
-        stage: &StageSpec,
-        statuses: &BTreeMap<String, StageStatus>,
-        plugin_samplers: &BTreeMap<String, PluginSampler>,
-        stream_writer: Option<&mut StageStreamWriter>,
-        default_retry: RetryPolicy,
-    ) -> Result<StageOutcome, LlmffError> {
-        let messages = with_agent_system_prompt(stage, parent_messages(stage, statuses)?);
-        let model = required_model(stage)?;
-        let resolved = self.backend_for_model(model)?;
-        let mut request = InferRequest {
-            model: resolved.provider_model.to_string(),
-            messages,
-            temperature: stage.temperature,
-            top_p: stage.top_p,
-            max_tokens: stage.max_tokens,
-            seed: stage.seed,
-            response_format: stage.response_format.clone(),
-            stop: stage.stop.clone(),
-        };
-        apply_plugin_sampler(stage, plugin_samplers, &mut request).await?;
-
-        if let Some(writer) = stream_writer {
-            if writer.stage_id == stage.id {
-                let mut stream = resolved.backend.stream(request);
-                let mut text = String::new();
-                let mut usage = None;
-                while let Some(chunk) = stream.next().await {
-                    let chunk = chunk?;
-                    if !chunk.delta.is_empty() {
-                        writer.write_delta(&chunk.delta)?;
-                        text.push_str(&chunk.delta);
-                    }
-                    if chunk.usage.is_some() {
-                        usage = chunk.usage;
-                    }
-                    if chunk.done {
-                        break;
-                    }
-                }
-
-                return Ok(StageOutcome::with_streamed_usage(
-                    StageStatus::Success(Value::Text(text)),
-                    usage,
-                ));
-            }
-        }
-
-        let result =
-            infer_with_retry(stage, resolved.backend.as_ref(), request, default_retry).await?;
-
-        Ok(StageOutcome::with_usage_attempts(
-            StageStatus::Success(Value::Text(result.response.text)),
-            result.response.usage,
-            result.attempts,
-        ))
-    }
-
-    async fn execute_repair(
-        &self,
-        stage: &StageSpec,
-        statuses: &BTreeMap<String, StageStatus>,
-        plugin_samplers: &BTreeMap<String, PluginSampler>,
-        default_retry: RetryPolicy,
-    ) -> Result<StageOutcome, LlmffError> {
-        let parent = stage
-            .from
-            .as_ref()
-            .and_then(|parent| statuses.get(parent))
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "repair requires parent stage".to_string(),
-            })?;
-
-        match parent {
-            StageStatus::Success(value) => Ok(StageOutcome::without_usage(StageStatus::Success(
-                value.clone(),
-            ))),
-            StageStatus::Skipped => Ok(StageOutcome::without_usage(StageStatus::Skipped)),
-            StageStatus::Invalid { value, errors } => {
-                let model = required_model(stage)?;
-                let resolved = self.backend_for_model(model)?;
-                let mut request = InferRequest {
-                    model: resolved.provider_model.to_string(),
-                    messages: with_agent_system_prompt(
-                        stage,
-                        vec![Message {
-                            role: "user".to_string(),
-                            content: format!(
-                                "Repair this output so it satisfies validation errors.\nErrors:\n{}\nOutput:\n{}",
-                                errors.join("\n"),
-                                serialize_value(value)?
-                            ),
-                        }],
-                    ),
-                    temperature: stage.temperature,
-                    top_p: stage.top_p,
-                    max_tokens: stage.max_tokens,
-                    seed: stage.seed,
-                    response_format: stage.response_format.clone(),
-                    stop: stage.stop.clone(),
-                };
-                apply_plugin_sampler(stage, plugin_samplers, &mut request).await?;
-                let result =
-                    infer_with_retry(stage, resolved.backend.as_ref(), request, default_retry)
-                        .await?;
-
-                Ok(StageOutcome::with_usage_attempts(
-                    StageStatus::Success(Value::Text(result.response.text)),
-                    result.response.usage,
-                    result.attempts,
-                ))
-            }
-        }
-    }
-
-    fn execute_route(
-        &self,
-        stage: &StageSpec,
-        statuses: &BTreeMap<String, StageStatus>,
-    ) -> Result<StageStatus, LlmffError> {
-        let source_id = stage
-            .from
-            .as_ref()
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "route requires from".to_string(),
-            })?;
-        let source = statuses
-            .get(source_id)
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: format!("route source `{source_id}` is not available"),
-            })?;
-
-        let selected = if let Some(field) = &stage.field {
-            select_field_route(stage, field, source)?
-        } else {
-            select_status_route(stage, source)
-        };
-
-        let target_id = selected.ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "route did not match any target".to_string(),
-        })?;
-        statuses
-            .get(target_id)
-            .cloned()
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: format!("route target `{target_id}` is not available"),
-            })
-    }
-
-    async fn execute_tool(
-        &self,
-        stage: &StageSpec,
-        statuses: &BTreeMap<String, StageStatus>,
-        cwd: &Path,
-        plugin_tool_transports: &BTreeMap<String, PluginToolTransport>,
-        default_retry: RetryPolicy,
-    ) -> Result<StageOutcome, LlmffError> {
-        if let Some(command) = &stage.command {
-            return execute_command_tool(stage, statuses, cwd, command)
-                .await
-                .map(StageOutcome::without_usage);
-        }
-        if stage.url.is_some() {
-            let result = execute_http_tool_with_retry(stage, statuses, default_retry).await?;
-            return Ok(StageOutcome::with_usage_attempts(
-                result.status,
-                None,
-                result.attempts,
-            ));
-        }
-        if let Some(transport) = &stage.transport {
-            let plugin_transport = plugin_tool_transports.get(transport).ok_or_else(|| {
-                LlmffError::StageExecution {
-                    stage_id: stage.id.clone(),
-                    message: format!("unknown plugin tool transport `{transport}`"),
-                }
-            })?;
-            return execute_command_tool(
-                stage,
-                statuses,
-                cwd,
-                &[plugin_transport.entrypoint.to_string_lossy().into_owned()],
-            )
-            .await
-            .map(StageOutcome::without_usage);
-        }
-
-        Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "tool requires command, url, or plugin transport".to_string(),
-        })
     }
 
     async fn execute_plugin_stage(
@@ -1702,152 +756,6 @@ impl Engine {
             "plugin stage",
         )
         .await
-    }
-
-    fn execute_write(
-        &self,
-        stage: &StageSpec,
-        statuses: &BTreeMap<String, StageStatus>,
-        cwd: &Path,
-    ) -> Result<StageStatus, LlmffError> {
-        let parent = stage
-            .from
-            .as_ref()
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "write requires parent stage".to_string(),
-            })?;
-        let status = statuses
-            .get(parent)
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: format!("unknown parent stage `{parent}`"),
-            })?;
-        let value = match status {
-            StageStatus::Success(value) => value,
-            StageStatus::Invalid { errors, .. } => {
-                return Err(LlmffError::StageExecution {
-                    stage_id: stage.id.clone(),
-                    message: format!("parent stage is invalid: {}", errors.join("; ")),
-                });
-            }
-            StageStatus::Skipped => {
-                return Err(LlmffError::StageExecution {
-                    stage_id: stage.id.clone(),
-                    message: "parent stage was skipped".to_string(),
-                });
-            }
-        };
-        let path = stage
-            .path
-            .as_deref()
-            .ok_or_else(|| LlmffError::StageExecution {
-                stage_id: stage.id.clone(),
-                message: "write requires path".to_string(),
-            })?;
-
-        write_output(cwd, path, &serialize_value(value)?)?;
-
-        Ok(StageStatus::Success(value.clone()))
-    }
-
-    fn execute_cache(
-        &self,
-        stage: &StageSpec,
-        statuses: &BTreeMap<String, StageStatus>,
-        cwd: &Path,
-    ) -> Result<StageOutcome, LlmffError> {
-        let value = parent_success_value(stage, statuses)?;
-        let cache_path = stage
-            .path
-            .clone()
-            .unwrap_or_else(|| ".llmff/cache".to_string());
-        let cache_dir = resolve_path(cwd, &cache_path);
-        let cache_file = cache_dir.join(format!("{}.json", cache_digest(stage, value)?));
-        let cache_policy = stage.cache_policy.as_deref().unwrap_or("read");
-
-        if cache_policy == "bypass" {
-            return Ok(StageOutcome::with_cache(
-                StageStatus::Success(value.clone()),
-                false,
-                cache_path,
-            ));
-        }
-
-        if cache_policy != "refresh" && cache_file.exists() {
-            let source = std::fs::read_to_string(&cache_file).map_err(|error| {
-                LlmffError::StageExecution {
-                    stage_id: stage.id.clone(),
-                    message: format!(
-                        "failed to read cache file `{}`: {error}",
-                        cache_file.display()
-                    ),
-                }
-            })?;
-            let record: CacheRecord =
-                serde_json::from_str(&source).map_err(|error| LlmffError::StageExecution {
-                    stage_id: stage.id.clone(),
-                    message: format!("invalid cache file `{}`: {error}", cache_file.display()),
-                })?;
-            if record.version != CACHE_RECORD_VERSION {
-                return Err(LlmffError::StageExecution {
-                    stage_id: stage.id.clone(),
-                    message: format!(
-                        "unsupported cache file `{}` version {}",
-                        cache_file.display(),
-                        record.version
-                    ),
-                });
-            }
-
-            return Ok(StageOutcome::with_cache(
-                StageStatus::Success(record.value),
-                true,
-                cache_path,
-            ));
-        }
-
-        std::fs::create_dir_all(&cache_dir).map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!(
-                "failed to create cache directory `{}`: {error}",
-                cache_dir.display()
-            ),
-        })?;
-        let record = CacheRecord {
-            version: CACHE_RECORD_VERSION,
-            value: value.clone(),
-        };
-        let encoded = serde_json::to_vec_pretty(&record).map_err(LlmffError::Json)?;
-        write_cache_file(stage, &cache_file, &encoded)?;
-
-        Ok(StageOutcome::with_cache(
-            StageStatus::Success(value.clone()),
-            false,
-            cache_path,
-        ))
-    }
-
-    fn backend_for_model<'a>(&'a self, model: &'a str) -> Result<ResolvedBackend<'a>, LlmffError> {
-        if let Some(backend) = self.backends.get(model) {
-            return Ok(ResolvedBackend {
-                backend,
-                provider_model: model,
-            });
-        }
-
-        if let Some((alias, provider_model)) = model.split_once(':') {
-            if let Some(backend) = self.backends.get(alias) {
-                return Ok(ResolvedBackend {
-                    backend,
-                    provider_model,
-                });
-            }
-        }
-
-        Err(LlmffError::Backend(format!(
-            "no backend configured for `{model}`"
-        )))
     }
 
     fn trace_metadata(
@@ -1898,160 +806,6 @@ impl Engine {
         }
 
         metadata
-    }
-
-    fn map_trace_started(&self, context: MapTraceContext<'_>) -> TraceEvent {
-        TraceEvent {
-            run_id: context.run_id.to_string(),
-            event: "stage_started".to_string(),
-            agent: context.body_stage.agent.clone(),
-            stage_id: Some(context.trace_stage.id.clone()),
-            loop_id: None,
-            loop_iteration: None,
-            loop_stage_id: None,
-            map_id: Some(context.map_stage.id.clone()),
-            map_index: Some(context.index),
-            map_stage_id: Some(context.body_stage.id.clone()),
-            op: Some(context.body_stage.op.clone()),
-            status: None,
-            timestamp_ms: timestamp_ms(),
-            duration_ms: None,
-            attempts: None,
-            model: None,
-            backend: None,
-            provider_model: None,
-            validation_errors: None,
-            tool_kind: None,
-            tool_target: None,
-            output_path: None,
-            prompt_tokens: None,
-            completion_tokens: None,
-            total_tokens: None,
-            cache_hit: None,
-            cache_path: None,
-            failure_kind: None,
-            failure_message: None,
-        }
-    }
-
-    fn map_trace_finished(
-        &self,
-        context: MapTraceContext<'_>,
-        stage_started: Instant,
-        outcome: &StageOutcome,
-    ) -> TraceEvent {
-        let status_name = status_name(&outcome.status).to_string();
-        let metadata =
-            self.trace_metadata(context.body_stage, &outcome.status, outcome.usage.as_ref());
-        TraceEvent {
-            run_id: context.run_id.to_string(),
-            event: "stage_finished".to_string(),
-            agent: context.body_stage.agent.clone(),
-            stage_id: Some(context.trace_stage.id.clone()),
-            loop_id: None,
-            loop_iteration: None,
-            loop_stage_id: None,
-            map_id: Some(context.map_stage.id.clone()),
-            map_index: Some(context.index),
-            map_stage_id: Some(context.body_stage.id.clone()),
-            op: Some(context.body_stage.op.clone()),
-            status: Some(status_name),
-            timestamp_ms: timestamp_ms(),
-            duration_ms: Some(stage_started.elapsed().as_millis()),
-            attempts: outcome.attempts,
-            model: metadata.model,
-            backend: metadata.backend,
-            provider_model: metadata.provider_model,
-            validation_errors: metadata.validation_errors,
-            tool_kind: metadata.tool_kind,
-            tool_target: metadata.tool_target,
-            output_path: metadata.output_path,
-            prompt_tokens: metadata.prompt_tokens,
-            completion_tokens: metadata.completion_tokens,
-            total_tokens: metadata.total_tokens,
-            cache_hit: outcome.cache_hit,
-            cache_path: outcome.cache_path.clone(),
-            failure_kind: None,
-            failure_message: None,
-        }
-    }
-
-    fn map_trace_error(&self, context: MapTraceContext<'_>, stage_started: Instant) -> TraceEvent {
-        TraceEvent {
-            run_id: context.run_id.to_string(),
-            event: "stage_finished".to_string(),
-            agent: context.body_stage.agent.clone(),
-            stage_id: Some(context.trace_stage.id.clone()),
-            loop_id: None,
-            loop_iteration: None,
-            loop_stage_id: None,
-            map_id: Some(context.map_stage.id.clone()),
-            map_index: Some(context.index),
-            map_stage_id: Some(context.body_stage.id.clone()),
-            op: Some(context.body_stage.op.clone()),
-            status: Some("error".to_string()),
-            timestamp_ms: timestamp_ms(),
-            duration_ms: Some(stage_started.elapsed().as_millis()),
-            attempts: None,
-            model: None,
-            backend: None,
-            provider_model: None,
-            validation_errors: None,
-            tool_kind: None,
-            tool_target: None,
-            output_path: None,
-            prompt_tokens: None,
-            completion_tokens: None,
-            total_tokens: None,
-            cache_hit: None,
-            cache_path: None,
-            failure_kind: None,
-            failure_message: None,
-        }
-    }
-
-    fn resolve_backend_metadata(&self, model: &str) -> Option<ResolvedBackendMetadata> {
-        if self.backends.contains_key(model) {
-            return Some(ResolvedBackendMetadata {
-                backend_alias: model.to_string(),
-                provider_model: model.to_string(),
-            });
-        }
-
-        let (alias, provider_model) = model.split_once(':')?;
-        self.backends
-            .contains_key(alias)
-            .then(|| ResolvedBackendMetadata {
-                backend_alias: alias.to_string(),
-                provider_model: provider_model.to_string(),
-            })
-    }
-}
-
-fn loop_trace_stage(loop_stage: &StageSpec, body_stage: &StageSpec) -> StageSpec {
-    let mut trace_stage = body_stage.clone();
-    trace_stage.id = format!("{}.{}", loop_stage.id, body_stage.id);
-    trace_stage
-}
-
-fn map_trace_stage(map_stage: &StageSpec, index: usize, body_stage: &StageSpec) -> StageSpec {
-    let mut trace_stage = body_stage.clone();
-    trace_stage.id = format!("{}[{index}].{}", map_stage.id, body_stage.id);
-    trace_stage
-}
-
-fn loop_trace_error(
-    error: LlmffError,
-    trace_stage: &StageSpec,
-    loop_stage_id: &str,
-    loop_context: LoopTraceContext<'_>,
-) -> LlmffError {
-    LlmffError::LoopStageExecution {
-        stage_id: trace_stage.id.clone(),
-        loop_id: loop_context.loop_id.to_string(),
-        loop_iteration: loop_context.iteration,
-        loop_stage_id: loop_stage_id.to_string(),
-        source: Box::new(error),
     }
 }
 
@@ -2255,14 +1009,6 @@ fn reject_sampler_on_non_model_stage(stage: &StageSpec) -> Result<(), LlmffError
     Ok(())
 }
 
-fn validate_retrieve_strategy(stage: &StageSpec) -> Result<(), LlmffError> {
-    validate_retrieval_strategy(stage, "retrieve")
-}
-
-fn validate_rerank_strategy(stage: &StageSpec) -> Result<(), LlmffError> {
-    validate_retrieval_strategy(stage, "rerank")
-}
-
 fn validate_predicate_stage(stage: &StageSpec) -> Result<(), LlmffError> {
     let mode = stage.mode.as_deref().unwrap_or("truthy");
     match mode {
@@ -2351,22 +1097,6 @@ fn validate_select_stage(stage: &StageSpec) -> Result<(), LlmffError> {
     Ok(())
 }
 
-fn validate_retrieval_strategy(stage: &StageSpec, operation: &str) -> Result<(), LlmffError> {
-    match stage.strategy.as_deref().unwrap_or("lexical") {
-        "lexical" | "embedding" | "command" => Ok(()),
-        strategy => Err(stage_validation_error(
-            stage,
-            format!(
-                "{operation} strategy must be lexical, embedding, or command, got `{strategy}`"
-            ),
-        )),
-    }
-}
-
-fn is_command_retrieval_strategy(stage: &StageSpec) -> bool {
-    stage.strategy.as_deref() == Some("command")
-}
-
 fn validate_when_condition(stage: &StageSpec) -> Result<(), LlmffError> {
     let Some(condition) = stage.when.as_deref() else {
         return Ok(());
@@ -2420,98 +1150,6 @@ fn should_execute_stage(
 
 fn plugin_stage_name(op: &str) -> Option<&str> {
     op.strip_prefix("plugin:").filter(|name| !name.is_empty())
-}
-
-const CACHE_RECORD_VERSION: u32 = 1;
-
-#[derive(Debug, Deserialize, Serialize)]
-struct CacheRecord {
-    version: u32,
-    value: Value,
-}
-
-fn parent_success_value<'a>(
-    stage: &StageSpec,
-    statuses: &'a BTreeMap<String, StageStatus>,
-) -> Result<&'a Value, LlmffError> {
-    let parent = stage
-        .from
-        .as_ref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "cache requires parent stage".to_string(),
-        })?;
-    let status = statuses
-        .get(parent)
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("unknown parent stage `{parent}`"),
-        })?;
-
-    match status {
-        StageStatus::Success(value) => Ok(value),
-        StageStatus::Invalid { errors, .. } => Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("parent stage is invalid: {}", errors.join("; ")),
-        }),
-        StageStatus::Skipped => Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "parent stage was skipped".to_string(),
-        }),
-    }
-}
-
-fn cache_digest(stage: &StageSpec, value: &Value) -> Result<String, LlmffError> {
-    let preimage = if let Some(key) = &stage.key {
-        serde_json::json!({
-            "version": CACHE_RECORD_VERSION,
-            "stage_id": stage.id,
-            "key": key,
-        })
-    } else {
-        serde_json::json!({
-            "version": CACHE_RECORD_VERSION,
-            "stage_id": stage.id,
-            "key": stage.id,
-            "value": value,
-        })
-    };
-    let encoded = serde_json::to_vec(&preimage).map_err(LlmffError::Json)?;
-    let digest = Sha256::digest(encoded);
-
-    Ok(digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>())
-}
-
-fn write_cache_file(
-    stage: &StageSpec,
-    cache_file: &Path,
-    encoded: &[u8],
-) -> Result<(), LlmffError> {
-    let tmp_file = cache_file.with_extension(format!(
-        "json.tmp.{}.{}",
-        std::process::id(),
-        timestamp_ms()
-    ));
-    std::fs::write(&tmp_file, encoded).map_err(|error| LlmffError::StageExecution {
-        stage_id: stage.id.clone(),
-        message: format!(
-            "failed to write cache file `{}`: {error}",
-            tmp_file.display()
-        ),
-    })?;
-    std::fs::rename(&tmp_file, cache_file).map_err(|error| LlmffError::StageExecution {
-        stage_id: stage.id.clone(),
-        message: format!(
-            "failed to move cache file `{}` into `{}`: {error}",
-            tmp_file.display(),
-            cache_file.display()
-        ),
-    })?;
-
-    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2618,180 +1256,6 @@ struct TraceMetadata {
     total_tokens: Option<u64>,
 }
 
-struct ResolvedBackendMetadata {
-    backend_alias: String,
-    provider_model: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SamplerOverrides {
-    temperature: Option<f32>,
-    top_p: Option<f32>,
-    max_tokens: Option<u32>,
-    seed: Option<u64>,
-    response_format: Option<String>,
-    stop: Option<Vec<String>>,
-}
-
-async fn apply_plugin_sampler(
-    stage: &StageSpec,
-    plugin_samplers: &BTreeMap<String, PluginSampler>,
-    request: &mut InferRequest,
-) -> Result<(), LlmffError> {
-    let Some(sampler_name) = stage.sampler.as_deref() else {
-        return Ok(());
-    };
-    let sampler = plugin_samplers
-        .get(sampler_name)
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("unknown plugin sampler `{sampler_name}`"),
-        })?;
-    let encoded = serde_json::to_vec(request).map_err(LlmffError::Json)?;
-    let mut child = Command::new(&sampler.entrypoint)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("failed to start plugin sampler `{sampler_name}`: {error}"),
-        })?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("failed to open plugin sampler `{sampler_name}` stdin"),
-        })?;
-    stdin
-        .write_all(&encoded)
-        .await
-        .map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("failed to write plugin sampler `{sampler_name}` request: {error}"),
-        })?;
-    drop(stdin);
-
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("failed to wait for plugin sampler `{sampler_name}`: {error}"),
-        })?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!(
-                "plugin sampler `{sampler_name}` exited with status {}: {}",
-                output.status,
-                stderr.trim()
-            ),
-        });
-    }
-
-    let overrides: SamplerOverrides =
-        serde_json::from_slice(&output.stdout).map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("plugin sampler `{sampler_name}` returned invalid JSON: {error}"),
-        })?;
-    validate_sampler_overrides(stage, sampler_name, &overrides)?;
-    apply_sampler_overrides(request, overrides);
-    Ok(())
-}
-
-fn validate_sampler_overrides(
-    stage: &StageSpec,
-    sampler_name: &str,
-    overrides: &SamplerOverrides,
-) -> Result<(), LlmffError> {
-    if overrides
-        .temperature
-        .is_some_and(|temperature| temperature < 0.0)
-    {
-        return Err(plugin_sampler_override_error(
-            stage,
-            sampler_name,
-            "temperature must be greater than or equal to 0",
-        ));
-    }
-    if overrides
-        .top_p
-        .is_some_and(|top_p| !(0.0..=1.0).contains(&top_p))
-    {
-        return Err(plugin_sampler_override_error(
-            stage,
-            sampler_name,
-            "top_p must be between 0 and 1",
-        ));
-    }
-    if overrides.max_tokens == Some(0) {
-        return Err(plugin_sampler_override_error(
-            stage,
-            sampler_name,
-            "max_tokens must be greater than 0",
-        ));
-    }
-    if overrides
-        .response_format
-        .as_deref()
-        .is_some_and(|response_format| response_format != "json")
-    {
-        return Err(plugin_sampler_override_error(
-            stage,
-            sampler_name,
-            "response_format must be json",
-        ));
-    }
-    if overrides
-        .stop
-        .as_ref()
-        .is_some_and(|stop| stop.iter().any(|sequence| sequence.is_empty()))
-    {
-        return Err(plugin_sampler_override_error(
-            stage,
-            sampler_name,
-            "stop sequences cannot be empty",
-        ));
-    }
-    Ok(())
-}
-
-fn plugin_sampler_override_error(
-    stage: &StageSpec,
-    sampler_name: &str,
-    message: &str,
-) -> LlmffError {
-    LlmffError::StageExecution {
-        stage_id: stage.id.clone(),
-        message: format!("plugin sampler `{sampler_name}` returned invalid overrides: {message}"),
-    }
-}
-
-fn apply_sampler_overrides(request: &mut InferRequest, overrides: SamplerOverrides) {
-    if let Some(temperature) = overrides.temperature {
-        request.temperature = Some(temperature);
-    }
-    if let Some(top_p) = overrides.top_p {
-        request.top_p = Some(top_p);
-    }
-    if let Some(max_tokens) = overrides.max_tokens {
-        request.max_tokens = Some(max_tokens);
-    }
-    if let Some(seed) = overrides.seed {
-        request.seed = Some(seed);
-    }
-    if let Some(response_format) = overrides.response_format {
-        request.response_format = Some(response_format);
-    }
-    if let Some(stop) = overrides.stop {
-        request.stop = stop;
-    }
-}
-
 fn load_plugin_tool_transports(
     plugin_dirs: &[PathBuf],
 ) -> Result<BTreeMap<String, PluginToolTransport>, LlmffError> {
@@ -2846,396 +1310,11 @@ fn load_plugin_samplers(
     Ok(samplers)
 }
 
-async fn execute_command_tool(
-    stage: &StageSpec,
-    statuses: &BTreeMap<String, StageStatus>,
-    cwd: &Path,
-    command: &[String],
-) -> Result<StageStatus, LlmffError> {
-    execute_command_stage(stage, statuses, cwd, command, "tool command").await
-}
-
-async fn execute_command_stage(
-    stage: &StageSpec,
-    statuses: &BTreeMap<String, StageStatus>,
-    cwd: &Path,
-    command: &[String],
-    label: &str,
-) -> Result<StageStatus, LlmffError> {
-    let input = parent_text(stage, statuses)?;
-    let program = command.first().ok_or_else(|| LlmffError::StageExecution {
-        stage_id: stage.id.clone(),
-        message: format!("{label} cannot be empty"),
-    })?;
-    let mut child = Command::new(resolve_command_path(cwd, program))
-        .args(&command[1..])
-        .current_dir(cwd)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("failed to start {label} `{program}`: {error}"),
-        })?;
-
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("failed to open {label} stdin"),
-        })?;
-    stdin
-        .write_all(input.as_bytes())
-        .await
-        .map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("failed to write {label} stdin: {error}"),
-        })?;
-    drop(stdin);
-
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("failed to wait for {label} `{program}`: {error}"),
-        })?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!(
-                "{label} exited with status {}: {}",
-                output.status,
-                stderr.trim()
-            ),
-        });
-    }
-
-    let stdout = String::from_utf8(output.stdout).map_err(|error| LlmffError::StageExecution {
-        stage_id: stage.id.clone(),
-        message: format!("{label} stdout was not valid UTF-8: {error}"),
-    })?;
-    Ok(StageStatus::Success(Value::Text(stdout)))
-}
-
-fn resolve_command_path(cwd: &Path, program: &str) -> PathBuf {
-    let path = Path::new(program);
-    if path.is_relative() && path.components().count() > 1 {
-        cwd.join(path)
-    } else {
-        path.to_path_buf()
-    }
-}
-
-async fn execute_http_tool(
-    stage: &StageSpec,
-    statuses: &BTreeMap<String, StageStatus>,
-) -> Result<StageStatus, LlmffError> {
-    let input = parent_text(stage, statuses)?;
-    let method = stage
-        .method
-        .as_deref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "http tool requires method".to_string(),
-        })?
-        .parse::<reqwest::Method>()
-        .map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("invalid http tool method: {error}"),
-        })?;
-    let url = stage
-        .url
-        .as_deref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "http tool requires url".to_string(),
-        })?;
-
-    let client = reqwest::Client::new();
-    let mut request = client.request(method.clone(), url);
-    for (name, value) in &stage.headers {
-        request = request.header(name, value);
-    }
-    if method_allows_body(&method) {
-        request = request.body(input);
-    }
-
-    let response = request
-        .send()
-        .await
-        .map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("http tool request failed: {error}"),
-        })?;
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|error| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("failed to read http tool response: {error}"),
-        })?;
-
-    if !status.is_success() {
-        return Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("http tool returned status {status}: {body}"),
-        });
-    }
-
-    Ok(StageStatus::Success(Value::Text(body)))
-}
-
-async fn infer_with_retry(
-    stage: &StageSpec,
-    backend: &dyn Backend,
-    request: InferRequest,
-    default_retry: RetryPolicy,
-) -> Result<InferAttemptResult, LlmffError> {
-    let policy = retry_policy(stage, default_retry);
-    let mut attempt = 1usize;
-
-    loop {
-        match backend.infer(request.clone()).await {
-            Ok(response) => {
-                return Ok(InferAttemptResult {
-                    response,
-                    attempts: attempt,
-                })
-            }
-            Err(error) if attempt < policy.attempts => {
-                attempt += 1;
-                sleep_for_retry(policy.backoff_ms).await;
-                drop(error);
-            }
-            Err(error) => return Err(error),
-        }
-    }
-}
-
-async fn execute_http_tool_with_retry(
-    stage: &StageSpec,
-    statuses: &BTreeMap<String, StageStatus>,
-    default_retry: RetryPolicy,
-) -> Result<ToolAttemptResult, LlmffError> {
-    let policy = retry_policy(stage, default_retry);
-    let mut attempt = 1usize;
-
-    loop {
-        match execute_http_tool(stage, statuses).await {
-            Ok(status) => {
-                return Ok(ToolAttemptResult {
-                    status,
-                    attempts: attempt,
-                })
-            }
-            Err(error) if attempt < policy.attempts && is_retryable_http_tool_error(&error) => {
-                attempt += 1;
-                sleep_for_retry(policy.backoff_ms).await;
-                drop(error);
-            }
-            Err(error) => return Err(error),
-        }
-    }
-}
-
-fn is_retryable_http_tool_error(error: &LlmffError) -> bool {
-    let LlmffError::StageExecution { message, .. } = error else {
-        return false;
-    };
-    message.starts_with("http tool request failed:")
-        || message.contains("http tool returned status 500")
-        || message.contains("http tool returned status 502")
-        || message.contains("http tool returned status 503")
-        || message.contains("http tool returned status 504")
-}
-
-async fn sleep_for_retry(backoff_ms: u64) {
-    if backoff_ms > 0 {
-        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
-    }
-}
-
-fn method_allows_body(method: &reqwest::Method) -> bool {
-    matches!(
-        *method,
-        reqwest::Method::POST | reqwest::Method::PUT | reqwest::Method::PATCH
-    )
-}
-
-fn select_status_route<'a>(stage: &'a StageSpec, source: &StageStatus) -> Option<&'a str> {
-    match source {
-        StageStatus::Success(_) => stage.on_success.as_deref().or(stage.default.as_deref()),
-        StageStatus::Invalid { .. } => stage.on_invalid.as_deref().or(stage.default.as_deref()),
-        StageStatus::Skipped => stage.on_skipped.as_deref().or(stage.default.as_deref()),
-    }
-}
-
-fn select_field_route<'a>(
-    stage: &'a StageSpec,
-    field: &str,
-    source: &StageStatus,
-) -> Result<Option<&'a str>, LlmffError> {
-    let StageStatus::Success(Value::Json(serde_json::Value::Object(object))) = source else {
-        return Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "field route requires successful JSON object source".to_string(),
-        });
-    };
-    let value = object
-        .get(field)
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("field route source is missing field `{field}`"),
-        })?;
-    let key = route_value_key(value).ok_or_else(|| LlmffError::StageExecution {
-        stage_id: stage.id.clone(),
-        message: format!("field route `{field}` must be string, number, or boolean"),
-    })?;
-
-    Ok(stage
-        .cases
-        .get(&key)
-        .map(String::as_str)
-        .or(stage.default.as_deref()))
-}
-
-fn route_value_key(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(text) => Some(text.clone()),
-        serde_json::Value::Number(number) => Some(number.to_string()),
-        serde_json::Value::Bool(boolean) => Some(boolean.to_string()),
-        serde_json::Value::Null | serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
-            None
-        }
-    }
-}
-
-struct ResolvedBackend<'a> {
-    backend: &'a Arc<dyn Backend>,
-    provider_model: &'a str,
-}
-
-impl std::ops::Deref for ResolvedBackend<'_> {
-    type Target = Arc<dyn Backend>;
-
-    fn deref(&self) -> &Self::Target {
-        self.backend
-    }
-}
-
 fn success_value(status: &StageStatus) -> Option<Value> {
     match status {
         StageStatus::Success(value) => Some(value.clone()),
         StageStatus::Invalid { .. } | StageStatus::Skipped => None,
     }
-}
-
-fn parent_text(
-    stage: &StageSpec,
-    statuses: &BTreeMap<String, StageStatus>,
-) -> Result<String, LlmffError> {
-    let parent = stage
-        .from
-        .as_ref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "stage requires parent input".to_string(),
-        })?;
-    let status = statuses
-        .get(parent)
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("unknown parent stage `{parent}`"),
-        })?;
-    match status {
-        StageStatus::Success(Value::Text(text)) => Ok(text.clone()),
-        StageStatus::Success(Value::Messages(messages)) => Ok(render_messages_as_text(messages)),
-        StageStatus::Success(Value::Json(json)) => Ok(json.to_string()),
-        StageStatus::Invalid { errors, .. } => Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("parent stage is invalid: {}", errors.join("; ")),
-        }),
-        StageStatus::Skipped => Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "parent stage was skipped".to_string(),
-        }),
-    }
-}
-
-fn parent_messages(
-    stage: &StageSpec,
-    statuses: &BTreeMap<String, StageStatus>,
-) -> Result<Vec<Message>, LlmffError> {
-    let parent = stage
-        .from
-        .as_ref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "stage requires parent input".to_string(),
-        })?;
-    let status = statuses
-        .get(parent)
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("unknown parent stage `{parent}`"),
-        })?;
-    match status {
-        StageStatus::Success(Value::Messages(messages)) => Ok(messages.clone()),
-        StageStatus::Success(Value::Text(text)) => Ok(vec![Message {
-            role: "user".to_string(),
-            content: text.clone(),
-        }]),
-        StageStatus::Success(Value::Json(json)) => Ok(vec![Message {
-            role: "user".to_string(),
-            content: json.to_string(),
-        }]),
-        StageStatus::Invalid { errors, .. } => Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: format!("parent stage is invalid: {}", errors.join("; ")),
-        }),
-        StageStatus::Skipped => Err(LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "parent stage was skipped".to_string(),
-        }),
-    }
-}
-
-fn required_model(stage: &StageSpec) -> Result<&str, LlmffError> {
-    stage
-        .model
-        .as_deref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: stage.id.clone(),
-            message: "stage requires model".to_string(),
-        })
-}
-
-/// Prepend the stage's resolved `system` persona as a system message, unless
-/// the assembled messages already lead with one. The persona usually arrives
-/// via an `agent:` reference expanded in `Manifest::resolve_agents`, but an
-/// inline `system:` on the stage works the same way.
-fn with_agent_system_prompt(stage: &StageSpec, mut messages: Vec<Message>) -> Vec<Message> {
-    let Some(system) = stage.system.as_ref() else {
-        return messages;
-    };
-    if messages.first().map(|first| first.role.as_str()) == Some("system") {
-        return messages;
-    }
-    messages.insert(
-        0,
-        Message {
-            role: "system".to_string(),
-            content: system.clone(),
-        },
-    );
-    messages
 }
 
 fn serialize_value(value: &Value) -> Result<String, LlmffError> {
@@ -3305,289 +1384,6 @@ fn status_name(status: &StageStatus) -> &'static str {
     }
 }
 
-fn loop_stop_reason_name(reason: &LoopStopReason) -> &'static str {
-    match reason {
-        LoopStopReason::BreakCondition => "break_condition",
-        LoopStopReason::MaxIterations => "max_iterations",
-        LoopStopReason::Error => "error",
-    }
-}
-
-struct LoopRetentionConfig {
-    mode: String,
-    stages: BTreeSet<String>,
-    include_values: bool,
-}
-
-fn loop_retention_config(stage: &StageSpec) -> Result<Option<LoopRetentionConfig>, LlmffError> {
-    let Some(retention) = &stage.retain_iterations else {
-        return Ok(None);
-    };
-    let (mode, stages, include_values) = match retention {
-        LoopRetentionSpec::Mode(mode) => (
-            mode.clone(),
-            BTreeSet::new(),
-            matches!(mode.as_str(), "all"),
-        ),
-        LoopRetentionSpec::Config {
-            mode,
-            stages,
-            include_values,
-        } => (
-            mode.clone(),
-            stages.iter().cloned().collect::<BTreeSet<_>>(),
-            include_values.unwrap_or_else(|| mode == "all"),
-        ),
-    };
-    if mode == "none" {
-        return Ok(None);
-    }
-    if !matches!(mode.as_str(), "summaries" | "all") {
-        return Err(stage_validation_error(
-            stage,
-            "retain_iterations must be none, summaries, or all",
-        ));
-    }
-
-    Ok(Some(LoopRetentionConfig {
-        mode,
-        stages,
-        include_values,
-    }))
-}
-
-fn loop_iteration_record(
-    iteration: usize,
-    ordered_body: &[StageSpec],
-    body_statuses: &BTreeMap<String, StageStatus>,
-    retention: &LoopRetentionConfig,
-) -> Result<serde_json::Value, LlmffError> {
-    let mut stages = serde_json::Map::new();
-    for body_stage in ordered_body {
-        if !retention.stages.is_empty() && !retention.stages.contains(&body_stage.id) {
-            continue;
-        }
-        let Some(status) = body_statuses.get(&body_stage.id) else {
-            continue;
-        };
-        let mut stage_record = serde_json::Map::new();
-        stage_record.insert(
-            "status".to_string(),
-            serde_json::Value::String(status_name(status).to_string()),
-        );
-        if retention.include_values {
-            match status {
-                StageStatus::Success(value) => {
-                    stage_record.insert("value".to_string(), serialize_value_to_json(value)?);
-                }
-                StageStatus::Invalid { value, errors } => {
-                    stage_record.insert("value".to_string(), serialize_value_to_json(value)?);
-                    stage_record.insert(
-                        "errors".to_string(),
-                        serde_json::Value::Array(
-                            errors
-                                .iter()
-                                .cloned()
-                                .map(serde_json::Value::String)
-                                .collect(),
-                        ),
-                    );
-                }
-                StageStatus::Skipped => {}
-            }
-        }
-        stages.insert(
-            body_stage.id.clone(),
-            serde_json::Value::Object(stage_record),
-        );
-    }
-
-    Ok(serde_json::json!({
-        "iteration": iteration,
-        "mode": retention.mode.clone(),
-        "stages": stages
-    }))
-}
-
-fn evaluate_loop_break(
-    break_on: &LoopBreakSpec,
-    statuses: &BTreeMap<String, StageStatus>,
-) -> Result<bool, LlmffError> {
-    match break_on {
-        LoopBreakSpec::StageSuccess { stage } => {
-            Ok(matches!(statuses.get(stage), Some(StageStatus::Success(_))))
-        }
-        LoopBreakSpec::StageFailure { stage } => Ok(matches!(
-            statuses.get(stage),
-            Some(StageStatus::Invalid { .. }) | Some(StageStatus::Skipped)
-        )),
-        LoopBreakSpec::FieldTrue { stage, field } => {
-            let Some(value) = statuses.get(stage).and_then(success_value) else {
-                return Ok(false);
-            };
-            Ok(json_field(&value, field)
-                .and_then(|value| value.as_bool())
-                .unwrap_or(false))
-        }
-        LoopBreakSpec::FieldEquals {
-            stage,
-            field,
-            value,
-        } => {
-            let Some(actual) = statuses
-                .get(stage)
-                .and_then(success_value)
-                .and_then(|value| json_field(&value, field).cloned())
-            else {
-                return Ok(false);
-            };
-            Ok(actual == *value)
-        }
-        LoopBreakSpec::Never => Ok(false),
-    }
-}
-
-fn json_field<'a>(value: &'a Value, field: &str) -> Option<&'a serde_json::Value> {
-    match value {
-        Value::Json(json) => json.get(field),
-        _ => None,
-    }
-}
-
-fn reject_missing_first_iteration_carry_alias(
-    loop_stage: &StageSpec,
-    body_stage: &StageSpec,
-    body_statuses: &BTreeMap<String, StageStatus>,
-) -> Result<(), LlmffError> {
-    for parent in [body_stage.from.as_ref(), body_stage.state_from.as_ref()]
-        .into_iter()
-        .flatten()
-    {
-        if !loop_stage.carry.contains_key(parent) || body_statuses.contains_key(parent) {
-            continue;
-        }
-
-        return Err(LlmffError::StageExecution {
-            stage_id: loop_stage.id.clone(),
-            message: format!(
-                "loop `{}` cannot read carry alias `{parent}` on iteration 1 before it has a previous value",
-                loop_stage.id
-            ),
-        });
-    }
-
-    Ok(())
-}
-
-fn loop_final_value(
-    loop_stage: &StageSpec,
-    final_stage_id: &str,
-    final_status: &StageStatus,
-    iterations_run: usize,
-    stop_reason: &LoopStopReason,
-    retained_iterations: &[serde_json::Value],
-) -> Result<Value, LlmffError> {
-    let require_status = loop_stage
-        .final_output
-        .as_ref()
-        .and_then(|final_output| final_output.require_status.as_deref())
-        .unwrap_or("success");
-    let final_payload = match (require_status, final_status) {
-        ("success", StageStatus::Success(value)) => serialize_value_to_json(value)?,
-        ("invalid", StageStatus::Invalid { value, .. }) => serialize_value_to_json(value)?,
-        ("any", StageStatus::Success(value)) => serialize_value_to_json(value)?,
-        ("any", StageStatus::Invalid { value, .. }) => serialize_value_to_json(value)?,
-        ("any", StageStatus::Skipped) => serde_json::Value::Null,
-        ("success", StageStatus::Invalid { errors, .. }) => {
-            return Err(LlmffError::StageExecution {
-                stage_id: loop_stage.id.clone(),
-                message: format!(
-                    "loop final stage `{final_stage_id}` was invalid: {}",
-                    errors.join("; ")
-                ),
-            });
-        }
-        ("success", StageStatus::Skipped) => {
-            return Err(LlmffError::StageExecution {
-                stage_id: loop_stage.id.clone(),
-                message: format!("loop final stage `{final_stage_id}` was skipped"),
-            });
-        }
-        ("invalid", StageStatus::Success(_)) | ("invalid", StageStatus::Skipped) => {
-            return Err(LlmffError::StageExecution {
-                stage_id: loop_stage.id.clone(),
-                message: format!("loop final stage `{final_stage_id}` did not finish invalid"),
-            });
-        }
-        _ => serde_json::Value::Null,
-    };
-
-    let mut output = serde_json::Map::new();
-    output.insert("final".to_string(), final_payload);
-    output.insert(
-        "metadata".to_string(),
-        serde_json::json!({
-            "iterations_run": iterations_run,
-            "stop_reason": loop_stop_reason_name(stop_reason),
-            "final_stage": final_stage_id
-        }),
-    );
-    if !retained_iterations.is_empty() {
-        output.insert(
-            "iterations".to_string(),
-            serde_json::Value::Array(retained_iterations.to_vec()),
-        );
-    }
-
-    Ok(Value::Json(serde_json::Value::Object(output)))
-}
-
-fn map_item_output(
-    map_stage: &StageSpec,
-    final_stage_id: &str,
-    final_status: &StageStatus,
-) -> Result<(&'static str, serde_json::Value), LlmffError> {
-    let require_status = map_stage
-        .final_output
-        .as_ref()
-        .and_then(|final_output| final_output.require_status.as_deref())
-        .unwrap_or("success");
-    match (require_status, final_status) {
-        ("success", StageStatus::Success(value)) => {
-            Ok(("success", serialize_value_to_json(value)?))
-        }
-        ("invalid", StageStatus::Invalid { value, .. }) => {
-            Ok(("invalid", serialize_value_to_json(value)?))
-        }
-        ("any", StageStatus::Success(value)) => Ok(("success", serialize_value_to_json(value)?)),
-        ("any", StageStatus::Invalid { value, .. }) => {
-            Ok(("invalid", serialize_value_to_json(value)?))
-        }
-        ("any", StageStatus::Skipped) => Ok(("skipped", serde_json::Value::Null)),
-        ("success", StageStatus::Invalid { errors, .. }) => Err(LlmffError::StageExecution {
-            stage_id: map_stage.id.clone(),
-            message: format!(
-                "map final stage `{final_stage_id}` was invalid: {}",
-                errors.join("; ")
-            ),
-        }),
-        ("success", StageStatus::Skipped) => Err(LlmffError::StageExecution {
-            stage_id: map_stage.id.clone(),
-            message: format!("map final stage `{final_stage_id}` was skipped"),
-        }),
-        ("invalid", StageStatus::Success(_)) | ("invalid", StageStatus::Skipped) => {
-            Err(LlmffError::StageExecution {
-                stage_id: map_stage.id.clone(),
-                message: format!("map final stage `{final_stage_id}` did not finish invalid"),
-            })
-        }
-        _ => Err(LlmffError::StageExecution {
-            stage_id: map_stage.id.clone(),
-            message: "final.require_status must be success, invalid, or any".to_string(),
-        }),
-    }
-}
-
 fn serialize_value_to_json(value: &Value) -> Result<serde_json::Value, LlmffError> {
     match value {
         Value::Text(text) => Ok(serde_json::Value::String(text.clone())),
@@ -3603,11 +1399,11 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use tempfile::tempdir;
 
-    use crate::backend::{InferResponse, MockBackend, UsageMetadata};
+    use crate::backend::{InferRequest, InferResponse, MockBackend, UsageMetadata};
     use crate::manifest::Manifest;
     use wiremock::matchers::{body_string, header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};

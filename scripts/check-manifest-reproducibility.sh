@@ -1,26 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
+REQUIRE_FILE_LABEL="missing manifest reproducibility artifact"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
-
-require_file() {
-  local path="$1"
-  if [ ! -f "$path" ]; then
-    printf 'error: missing manifest reproducibility artifact: %s\n' "$path" >&2
-    exit 1
-  fi
-}
-
-require_text() {
-  local path="$1"
-  local text="$2"
-  require_file "$path"
-  if ! grep -Fq -- "$text" "$path"; then
-    printf 'error: %s must contain: %s\n' "$path" "$text" >&2
-    exit 1
-  fi
-}
 
 guide="docs/manifest-reproducibility.md"
 schema="docs/schemas/inspect-report-v1.schema.json"

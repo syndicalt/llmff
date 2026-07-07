@@ -1,27 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
+REQUIRE_FILE_LABEL="missing provider smoke readiness artifact"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
 
-require_file() {
-  local path="$1"
-  if [ ! -f "$path" ]; then
-    printf 'error: missing provider smoke readiness artifact: %s\n' "$path" >&2
-    exit 1
-  fi
-}
-
-require_text() {
-  local path="$1"
-  local text="$2"
-  require_file "$path"
-  if ! grep -Fq -- "$text" "$path"; then
-    printf 'error: %s must contain: %s\n' "$path" "$text" >&2
-    exit 1
-  fi
-}
-
+# require_absent_text is only used in this 1 script (below the 3+ lib
+# threshold); kept local rather than promoted to lib/checks.sh.
 require_absent_text() {
   local path="$1"
   local text="$2"

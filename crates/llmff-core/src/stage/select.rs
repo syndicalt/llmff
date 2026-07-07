@@ -7,6 +7,7 @@ use crate::manifest::StageSpec;
 use crate::value::{StageStatus, Value};
 
 use super::json_path::get_json_path;
+use super::specs::{SelectMode, SelectSpec};
 use super::{parse_json_stage_input, render_messages_as_text};
 
 pub(super) fn select(
@@ -18,8 +19,12 @@ pub(super) fn select(
         stage_id: spec.id.clone(),
         message: "select requires input".to_string(),
     })?;
+    let typed = SelectSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
     let source = value_to_json(spec, value)?;
-    let candidates_value = match spec.json_path.as_deref() {
+    let candidates_value = match typed.json_path.as_deref() {
         Some(path) => get_json_path(&source, path).ok_or_else(|| LlmffError::StageExecution {
             stage_id: spec.id.clone(),
             message: format!("select path `{path}` was not found"),
@@ -39,31 +44,33 @@ pub(super) fn select(
         });
     }
 
-    let mode = spec.mode.as_deref().unwrap_or("highest_score");
+    let mode = typed.mode;
     let (index, score) = match mode {
-        "highest_score" => select_numeric(candidates, score_field(spec), true, spec)?,
-        "field_max" => select_numeric(candidates, required_field(spec)?, true, spec)?,
-        "field_min" => select_numeric(candidates, required_field(spec)?, false, spec)?,
-        "first_success" => select_success(candidates, true, spec)?,
-        "last_success" => select_success(candidates, false, spec)?,
-        _ => {
-            return Err(LlmffError::StageExecution {
-                stage_id: spec.id.clone(),
-                message:
-                    "select mode must be first_success, last_success, highest_score, field_max, or field_min"
-                        .to_string(),
-            });
-        }
+        SelectMode::HighestScore => select_numeric(candidates, score_field(&typed), true, spec)?,
+        SelectMode::FieldMax => select_numeric(candidates, required_field(&typed), true, spec)?,
+        SelectMode::FieldMin => select_numeric(candidates, required_field(&typed), false, spec)?,
+        SelectMode::FirstSuccess => select_success(candidates, true, spec)?,
+        SelectMode::LastSuccess => select_success(candidates, false, spec)?,
     };
 
     Ok(StageStatus::Success(Value::Json(json!({
         "selected": candidates[index].clone(),
         "metadata": {
             "selected_index": index,
-            "mode": mode,
+            "mode": select_mode_str(mode),
             "score": score
         }
     }))))
+}
+
+fn select_mode_str(mode: SelectMode) -> &'static str {
+    match mode {
+        SelectMode::FirstSuccess => "first_success",
+        SelectMode::LastSuccess => "last_success",
+        SelectMode::HighestScore => "highest_score",
+        SelectMode::FieldMax => "field_max",
+        SelectMode::FieldMin => "field_min",
+    }
 }
 
 fn value_to_json(spec: &StageSpec, value: Value) -> Result<JsonValue, LlmffError> {
@@ -76,18 +83,16 @@ fn value_to_json(spec: &StageSpec, value: Value) -> Result<JsonValue, LlmffError
     }
 }
 
-fn score_field(spec: &StageSpec) -> &str {
-    spec.score_field.as_deref().unwrap_or("score")
+fn score_field(typed: &SelectSpec) -> &str {
+    typed.score_field.as_deref().unwrap_or("score")
 }
 
-fn required_field(spec: &StageSpec) -> Result<&str, LlmffError> {
-    spec.field
+fn required_field(typed: &SelectSpec) -> &str {
+    typed
+        .field
         .as_deref()
-        .or(spec.score_field.as_deref())
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: "select field_max and field_min require field or score_field".to_string(),
-        })
+        .or(typed.score_field.as_deref())
+        .expect("SelectSpec::parse guarantees field or score_field for field_max/field_min")
 }
 
 fn select_numeric(

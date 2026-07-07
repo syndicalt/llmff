@@ -7,6 +7,7 @@ use crate::manifest::StageSpec;
 use crate::value::{StageStatus, Value};
 
 use super::json_path::get_json_path;
+use super::specs::ScoreSpec;
 use super::{parse_json_stage_input, render_messages_as_text};
 
 pub(super) fn score(
@@ -18,8 +19,12 @@ pub(super) fn score(
         stage_id: spec.id.clone(),
         message: "score requires input".to_string(),
     })?;
+    let typed = ScoreSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
     let source = value_to_json(spec, value)?;
-    let score_path = score_path(spec)?;
+    let score_path = typed.score_path.as_str();
     let raw_score =
         get_json_path(&source, score_path).ok_or_else(|| LlmffError::StageExecution {
             stage_id: spec.id.clone(),
@@ -37,7 +42,7 @@ pub(super) fn score(
             message: "score must be finite".to_string(),
         });
     }
-    if let Some(min_score) = spec.min_score {
+    if let Some(min_score) = typed.min_score {
         if score < min_score {
             return Err(LlmffError::StageExecution {
                 stage_id: spec.id.clone(),
@@ -45,7 +50,7 @@ pub(super) fn score(
             });
         }
     }
-    if let Some(max_score) = spec.max_score {
+    if let Some(max_score) = typed.max_score {
         if score > max_score {
             return Err(LlmffError::StageExecution {
                 stage_id: spec.id.clone(),
@@ -56,10 +61,10 @@ pub(super) fn score(
 
     let mut output = serde_json::Map::new();
     output.insert("score".to_string(), json!(score));
-    if let Some(reason) = optional_path_value(spec, &source, spec.reason_field.as_deref())? {
+    if let Some(reason) = optional_path_value(spec, &source, typed.reason_field.as_deref())? {
         output.insert("reason".to_string(), reason);
     }
-    if let Some(label) = optional_path_value(spec, &source, spec.label_field.as_deref())? {
+    if let Some(label) = optional_path_value(spec, &source, typed.label_field.as_deref())? {
         output.insert("label".to_string(), label);
     }
     output.insert("source".to_string(), source);
@@ -75,17 +80,6 @@ fn value_to_json(spec: &StageSpec, value: Value) -> Result<JsonValue, LlmffError
             parse_json_stage_input(spec, &render_messages_as_text(&messages))
         }
     }
-}
-
-fn score_path(spec: &StageSpec) -> Result<&str, LlmffError> {
-    spec.score_field
-        .as_deref()
-        .or(spec.json_path.as_deref())
-        .or(spec.field.as_deref())
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: "score requires score_field, field, or json_path".to_string(),
-        })
 }
 
 fn optional_path_value(

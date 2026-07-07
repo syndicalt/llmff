@@ -319,26 +319,15 @@ pub(super) fn manifest_hash_for_interrupt(
 }
 
 pub(super) fn failure_kind(error: &LlmffError) -> &'static str {
-    match error {
-        LlmffError::ManifestParse(_) => "manifest_parse",
-        LlmffError::GraphValidation(_) => "graph_validation",
-        LlmffError::UnknownStage(_) => "unknown_stage",
-        LlmffError::Config(_) => "config",
-        LlmffError::StageExecution { message, .. } if message == "stage timed out" => "timeout",
-        LlmffError::StageExecution { message, .. } if message.starts_with("http tool ") => "http",
-        LlmffError::StageExecution { .. } => "stage_execution",
-        LlmffError::LoopStageExecution { source, .. } => failure_kind(source),
-        LlmffError::Backend(_) => "backend",
-        LlmffError::Io(_) => "io",
-        LlmffError::Json(_) => "json",
-        LlmffError::NotImplemented(_) => "not_implemented",
-    }
+    error.failure_kind().as_str()
 }
 
 pub(super) fn retry_recommendation(error: &LlmffError) -> &'static str {
     match error {
         LlmffError::Backend(_) => "retry_with_backoff",
-        LlmffError::StageExecution { .. } => "check_stage_or_input",
+        LlmffError::StageExecution { .. }
+        | LlmffError::StageTimeout { .. }
+        | LlmffError::HttpTool { .. } => "check_stage_or_input",
         LlmffError::LoopStageExecution { source, .. } => retry_recommendation(source),
         LlmffError::Io(_) => "check_filesystem",
         _ => "do_not_retry_without_changes",

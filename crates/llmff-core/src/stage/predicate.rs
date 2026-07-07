@@ -7,6 +7,7 @@ use crate::manifest::StageSpec;
 use crate::value::{StageStatus, Value};
 
 use super::json_path::get_json_path;
+use super::specs::{PredicateMode, PredicateSpec};
 use super::{parse_json_stage_input, render_messages_as_text};
 
 pub(super) fn predicate(
@@ -18,6 +19,10 @@ pub(super) fn predicate(
         stage_id: spec.id.clone(),
         message: "predicate requires input".to_string(),
     })?;
+    let typed = PredicateSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
     let json_input = match value {
         Value::Json(json) => json,
         Value::Text(text) => parse_json_stage_input(spec, &text)?,
@@ -25,54 +30,43 @@ pub(super) fn predicate(
             parse_json_stage_input(spec, &render_messages_as_text(&messages))?
         }
     };
-    let path = spec.json_path.as_deref().or(spec.field.as_deref());
+    let path = typed.path.as_deref();
     let observed = match path {
         Some(path) => get_json_path(&json_input, path),
         None => Some(&json_input),
     };
-    let mode = spec.mode.as_deref().unwrap_or("truthy");
-    let requires_value = matches!(mode, "equals" | "gt" | "gte" | "lt" | "lte");
-    if requires_value && spec.value.is_none() {
-        return Err(LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: format!("predicate mode `{mode}` requires value"),
-        });
-    }
+    let mode = typed.mode;
 
     let passed = match mode {
-        "truthy" => observed.map(is_truthy).unwrap_or(false),
-        "exists" => observed.is_some(),
-        "equals" => observed == spec.value.as_ref(),
-        "gt" => compare_numbers(observed, spec.value.as_ref(), |actual, expected| {
+        PredicateMode::Truthy => observed.map(is_truthy).unwrap_or(false),
+        PredicateMode::Exists => observed.is_some(),
+        PredicateMode::Equals => observed == typed.value.as_ref(),
+        PredicateMode::Gt => compare_numbers(observed, typed.value.as_ref(), |actual, expected| {
             actual > expected
         }),
-        "gte" => compare_numbers(observed, spec.value.as_ref(), |actual, expected| {
-            actual >= expected
-        }),
-        "lt" => compare_numbers(observed, spec.value.as_ref(), |actual, expected| {
+        PredicateMode::Gte => {
+            compare_numbers(observed, typed.value.as_ref(), |actual, expected| {
+                actual >= expected
+            })
+        }
+        PredicateMode::Lt => compare_numbers(observed, typed.value.as_ref(), |actual, expected| {
             actual < expected
         }),
-        "lte" => compare_numbers(observed, spec.value.as_ref(), |actual, expected| {
-            actual <= expected
-        }),
-        "contains" => contains_value(observed, spec.value.as_ref()),
-        _ => {
-            return Err(LlmffError::StageExecution {
-                stage_id: spec.id.clone(),
-                message: format!(
-                    "predicate mode must be truthy, exists, equals, gt, gte, lt, lte, or contains; got `{mode}`"
-                ),
-            });
+        PredicateMode::Lte => {
+            compare_numbers(observed, typed.value.as_ref(), |actual, expected| {
+                actual <= expected
+            })
         }
+        PredicateMode::Contains => contains_value(observed, typed.value.as_ref()),
     };
 
     let mut payload = json!({
         "passed": passed,
-        "mode": mode,
+        "mode": mode.as_str(),
         "observed": observed.cloned().unwrap_or(JsonValue::Null)
     });
     payload["path"] = JsonValue::String(path.unwrap_or("").to_string());
-    if let Some(expected) = &spec.value {
+    if let Some(expected) = &typed.value {
         payload["expected"] = expected.clone();
     }
 

@@ -1,5 +1,7 @@
 .worktrees/
 target/
+!scripts/lib/
+!scripts/lib/**
 dist/
 .codex/
 .env.local
@@ -7,3 +9,5 @@ dist/
 CODEX.md
 EXAMPLES.md
 SKILL.md
+CLAUDE.md
+fable-findings.md

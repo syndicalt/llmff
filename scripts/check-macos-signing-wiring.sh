@@ -19,23 +19,8 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
 
-require_file() {
-  local file="$1"
-  if [ ! -f "$file" ]; then
-    printf 'error: missing required file: %s\n' "$file" >&2
-    exit 1
-  fi
-}
-
-require_text() {
-  local file="$1"
-  local needle="$2"
-  require_file "$file"
-  if ! grep -Fq -- "$needle" "$file"; then
-    printf 'error: %s must contain: %s\n' "$file" "$needle" >&2
-    exit 1
-  fi
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
 
 require_file 'scripts/sign-notarize-macos-pkg.sh'
 require_text 'scripts/sign-notarize-macos-pkg.sh' 'security import'

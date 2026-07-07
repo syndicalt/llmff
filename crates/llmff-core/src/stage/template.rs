@@ -5,6 +5,7 @@ use crate::error::LlmffError;
 use crate::manifest::StageSpec;
 use crate::value::{Message, StageStatus, Value};
 
+use super::specs::{SystemSpec, TemplateSpec};
 use super::{render_messages_as_text, resolve_path};
 
 pub(super) fn template(
@@ -12,13 +13,11 @@ pub(super) fn template(
     input: Option<Value>,
     cwd: &Path,
 ) -> Result<StageStatus, LlmffError> {
-    let template_path = spec
-        .path
-        .as_ref()
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: "template requires path".to_string(),
-        })?;
+    let typed = TemplateSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
+    let template_path = &typed.path;
     let source = std::fs::read_to_string(resolve_path(cwd, template_path)).map_err(|error| {
         LlmffError::StageExecution {
             stage_id: spec.id.clone(),
@@ -84,8 +83,12 @@ pub(super) fn system(
     input: Option<Value>,
     cwd: &Path,
 ) -> Result<StageStatus, LlmffError> {
+    let typed = SystemSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
     let input = input.unwrap_or_else(|| Value::Text(String::new()));
-    let Some(system_path) = spec.path.as_ref() else {
+    let Some(system_path) = typed.path.as_ref() else {
         return Ok(StageStatus::Success(input));
     };
     let system_text = std::fs::read_to_string(resolve_path(cwd, system_path)).map_err(|error| {

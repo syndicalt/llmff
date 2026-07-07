@@ -5,6 +5,7 @@ use crate::manifest::StageSpec;
 use crate::value::{StageStatus, Value};
 
 use super::json_path::clone_json_path;
+use super::specs::ExtractSpec;
 use super::{parse_json_stage_input, render_messages_as_text};
 
 pub(super) fn extract(
@@ -16,14 +17,11 @@ pub(super) fn extract(
         stage_id: spec.id.clone(),
         message: "extract requires input".to_string(),
     })?;
-    let path = spec
-        .json_path
-        .as_deref()
-        .or(spec.field.as_deref())
-        .ok_or_else(|| LlmffError::StageExecution {
-            stage_id: spec.id.clone(),
-            message: "extract requires field or json_path".to_string(),
-        })?;
+    let typed = ExtractSpec::parse(spec).map_err(|message| LlmffError::StageExecution {
+        stage_id: spec.id.clone(),
+        message,
+    })?;
+    let path = typed.path.as_str();
     let json = match value {
         Value::Json(json) => json,
         Value::Text(text) => parse_json_stage_input(spec, &text)?,
