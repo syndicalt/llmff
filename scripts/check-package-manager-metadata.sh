@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
+REQUIRE_FILE_LABEL="missing package-manager metadata"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$repo_root"
 
@@ -20,24 +24,8 @@ macos_intel_sha256="a97900222ac7a59c550ee4648998824c54a1a70d195173150ab4db6bb7c6
 windows_zip_sha256="1b34abddc30f715ee91440e7550c516ab15b915d111722c4993a945623859a94"
 windows_msi_sha256="e7aa934de84746d3d445b3fbbd442ec9a50a566b56b94696dcf8f1299e3d65fe"
 
-require_file() {
-  local path="$1"
-  if [ ! -f "$path" ]; then
-    printf 'error: missing package-manager metadata: %s\n' "$path" >&2
-    exit 1
-  fi
-}
-
-require_text() {
-  local path="$1"
-  local text="$2"
-  require_file "$path"
-  if ! grep -Fq -- "$text" "$path"; then
-    printf 'error: %s must contain: %s\n' "$path" "$text" >&2
-    exit 1
-  fi
-}
-
+# require_absent_path is only duplicated in 2 scripts (below the 3+ lib
+# threshold); kept local per script rather than promoted to lib/checks.sh.
 require_absent_path() {
   local path="$1"
   if [ -e "$path" ]; then

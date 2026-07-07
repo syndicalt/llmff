@@ -21,26 +21,16 @@ if [ "$#" -ne 0 ]; then
   exit 2
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
+
 doc="docs/platform-support.md"
 workspace_version="$(
   sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1
 )"
 release_tag="v${workspace_version}"
 
-if [ ! -f "$doc" ]; then
-  printf 'error: missing %s\n' "$doc" >&2
-  exit 1
-fi
-
-require_text() {
-  local file="$1"
-  local needle="$2"
-
-  if ! grep -Fq -- "$needle" "$file"; then
-    printf 'error: %s does not mention required text: %s\n' "$file" "$needle" >&2
-    exit 1
-  fi
-}
+require_file "$doc"
 
 require_text "$doc" 'x86_64-unknown-linux-gnu'
 require_text "$doc" 'x86_64-pc-windows-msvc'

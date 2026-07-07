@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$SCRIPT_DIR/lib/checks.sh"
+
 workflow=".github/workflows/release-artifacts.yml"
 readiness="docs/release-readiness.md"
 workspace_version="$(
   sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml | head -n 1
 )"
 release_tag="v${workspace_version}"
-
-require_text() {
-  local file="$1"
-  local text="$2"
-  if ! grep -Fq -- "$text" "$file"; then
-    printf 'error: %s must contain: %s\n' "$file" "$text" >&2
-    exit 1
-  fi
-}
 
 require_text "$workflow" 'gh release view "$GITHUB_REF_NAME"'
 require_text "$workflow" 'gh release create "$GITHUB_REF_NAME"'
